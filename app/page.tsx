@@ -175,6 +175,32 @@ export default function Home() {
   const currentData = data[activeSub];
   const tickers = currentData?.tickers || [];
   const maxCount = tickers.length > 0 ? tickers[0].countPast24h : 1;
+  const subLabel = SUBREDDITS.find((s) => s.id === activeSub)?.full || activeSub;
+
+  const buildShareText = () => {
+    if (tickers.length === 0) return `Reddit Alpha · ${subLabel}`;
+    const lines = tickers.map((t) => `${t.rank}. $${t.ticker} ${t.countPast24h.toLocaleString()}`);
+    const now = new Date();
+    const timeStr = now.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return [
+      `以下是${subLabel}中过去24小时被提及最多的股票/加密货币排名`,
+      ...lines,
+      "",
+      `数据时间: ${timeStr}`
+    ].join("\n");
+  };
+
+  const handleShare = () => {
+    const text = buildShareText();
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -193,7 +219,18 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
+              <button
+                onClick={handleShare}
+                disabled={tickers.length === 0}
+                className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-black/40 hover:bg-black hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                title="分享到 X"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden="true">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+                分享到 X
+              </button>
+              <div className="hidden sm:flex items-center gap-2">
                 <span
                   className={`inline-block h-2 w-2 rounded-full ${
                     loading ? "bg-yellow-400 animate-pulse" : "bg-green-400"
@@ -204,7 +241,7 @@ export default function Home() {
                 </span>
               </div>
               {lastRefresh && (
-                <span className="hidden sm:inline text-zinc-600 text-xs">
+                <span className="hidden md:inline text-zinc-600 text-xs">
                   上次更新: {lastRefresh.toLocaleTimeString()}
                 </span>
               )}
