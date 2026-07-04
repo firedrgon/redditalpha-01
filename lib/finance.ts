@@ -1422,7 +1422,77 @@ export async function fetchFinancialMetrics(
     }
   }
 
+  // 若主数据源没有分析师目标价，尝试用 Alpha Vantage OVERVIEW 补充（仅 1 次请求）
+  const avKey = await getAvApiKey();
+  if (avKey && result.targetMeanPrice == null) {
+    try {
+      const avOverview = await fetchAVOverviewOnly(ticker, avKey);
+      if (avOverview) {
+        let hasNewData = false;
+        if (avOverview.targetMeanPrice != null && result.targetMeanPrice == null) {
+          result.targetMeanPrice = avOverview.targetMeanPrice;
+          hasNewData = true;
+        }
+        if (avOverview.numberOfAnalysts != null && result.numberOfAnalysts == null) {
+          result.numberOfAnalysts = avOverview.numberOfAnalysts;
+          hasNewData = true;
+        }
+        if (avOverview.recommendationMean != null && result.recommendationMean == null) {
+          result.recommendationMean = avOverview.recommendationMean;
+          hasNewData = true;
+        }
+        if (hasNewData) {
+          result.warnings.push("分析师目标价与评级由 Alpha Vantage 补充。");
+          if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+            result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+          }
+        }
+      }
+    } catch {
+      // 补充失败不影响主结果
+    }
+  }
+
   return result;
+}
+
+/**
+ * 轻量级：仅调用 Alpha Vantage OVERVIEW，获取目标价与分析师评级
+ * 不消耗 INCOME_STATEMENT / BALANCE_SHEET 配额
+ */
+async function fetchAVOverviewOnly(
+  ticker: string,
+  apiKey: string
+): Promise<{
+  targetMeanPrice: number | null;
+  numberOfAnalysts: number | null;
+  recommendationMean: number | null;
+} | null> {
+  const upper = ticker.toUpperCase();
+  const res = await avGet<AVOverview>({ function: "OVERVIEW", symbol: upper }, apiKey);
+  if (!res.data) return null;
+  const ov = res.data;
+
+  const strongBuy = num(ov.AnalystRatingStrongBuy) ?? 0;
+  const buy = num(ov.AnalystRatingBuy) ?? 0;
+  const hold = num(ov.AnalystRatingHold) ?? 0;
+  const sell = num(ov.AnalystRatingSell) ?? 0;
+  const strongSell = num(ov.AnalystRatingStrongSell) ?? 0;
+  const total = strongBuy + buy + hold + sell + strongSell;
+
+  let recommendationMean: number | null = null;
+  let numberOfAnalysts: number | null = null;
+  if (total > 0) {
+    const weighted = strongBuy * 1 + buy * 2 + hold * 3 + sell * 4 + strongSell * 5;
+    recommendationMean = weighted / total;
+    numberOfAnalysts = total;
+  }
+
+  return {
+    targetMeanPrice: num(ov.AnalystTargetPrice) ?? null,
+    numberOfAnalysts,
+    recommendationMean,
+  };
 }
 
 async function fetchFinancialMetricsInternal(
