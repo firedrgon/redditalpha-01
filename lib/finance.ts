@@ -782,6 +782,32 @@ async function finnhubGet<T>(path: string, apiKey: string): Promise<{ data: T | 
  * 用 Finnhub 拉取财务数据
  * 端点：quote / profile / recommendation / stock/metrics
  */
+/** 从 Finnhub 获取最近 7 天公司新闻 */
+async function fetchFinnhubNews(
+  ticker: string,
+  apiKey: string
+): Promise<Array<{ title: string; source?: string; date?: string; summary?: string; url?: string }> | null> {
+  const upper = ticker.toUpperCase();
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const to = today.toISOString().split("T")[0];
+  const from = weekAgo.toISOString().split("T")[0];
+
+  const res = await finnhubGet<FinnhubNewsItem[]>(
+    `/company-news?symbol=${upper}&from=${from}&to=${to}`,
+    apiKey
+  );
+  if (res.error || !res.data || res.data.length === 0) return null;
+
+  return res.data.slice(0, 10).map((n) => ({
+    title: n.headline || n.title || "",
+    source: n.source,
+    date: n.datetime ? new Date(n.datetime * 1000).toISOString() : undefined,
+    summary: n.summary,
+    url: n.url,
+  }));
+}
+
 async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<FinancialMetrics> {
   const upper = ticker.toUpperCase();
   const warnings: string[] = [];
@@ -813,31 +839,24 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
     warnings,
   };
 
-  // 取最近 7 天新闻
-  const today = new Date();
-  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const to = today.toISOString().split("T")[0];
-  const from = weekAgo.toISOString().split("T")[0];
-
-  const [quoteRes, profileRes, recRes, metricsRes, newsRes] = await Promise.all([
+  const [quoteRes, profileRes, recRes, metricsRes, news] = await Promise.all([
     finnhubGet<FinnhubQuote>(`/quote?symbol=${upper}`, apiKey),
     finnhubGet<FinnhubCompanyProfile>(`/stock/profile2?symbol=${upper}`, apiKey),
     finnhubGet<FinnhubRecommendationTrendItem[]>(`/stock/recommendation?symbol=${upper}`, apiKey),
     finnhubGet<FinnhubCompanyBasicFinancials>(`/stock/metric?symbol=${upper}&metric=all`, apiKey),
-    finnhubGet<FinnhubNewsItem[]>(`/company-news?symbol=${upper}&from=${from}&to=${to}`, apiKey),
+    fetchFinnhubNews(upper, apiKey),
   ]);
 
   if (quoteRes.error) warnings.push(quoteRes.error);
   if (profileRes.error) warnings.push(profileRes.error);
   if (recRes.error) warnings.push(recRes.error);
   if (metricsRes.error) warnings.push(metricsRes.error);
-  if (newsRes.error) warnings.push(newsRes.error);
 
   const quote = quoteRes.data;
   const profile = profileRes.data;
   const recommendations = recRes.data;
   const metrics = metricsRes.data?.metric;
-  const news = newsRes.data;
+  result.news = news ?? undefined;
 
   if (quote) {
     result.currentPrice = quote.c ?? null;
@@ -926,16 +945,6 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
       result.industryPE = indPE;
       warnings.push(`行业 PE 用 ${result.industry} 行业经验值 ${indPE}（仅供参考）。`);
     }
-  }
-
-  if (news && news.length > 0) {
-    result.news = news.slice(0, 10).map((n) => ({
-      title: n.headline || n.title || "",
-      source: n.source,
-      date: n.datetime ? new Date(n.datetime * 1000).toISOString() : undefined,
-      summary: n.summary,
-      url: n.url,
-    }));
   }
 
   return result;
@@ -1366,6 +1375,27 @@ function mergeMetrics(
  * - Yahoo Finance 作为最后兜底
  */
 export async function fetchFinancialMetrics(
+  ticker: string
+): Promise<FinancialMetrics> {
+  const result = await fetchFinancialMetricsInternal(ticker);
+
+  // 无论主数据源是什么，只要有 Finnhub Key，就尝试补充新闻
+  const finnhubKey = await getFinnhubApiKey();
+  if (finnhubKey && (!result.news || result.news.length === 0)) {
+    try {
+      const news = await fetchFinnhubNews(ticker, finnhubKey);
+      if (news && news.length > 0) {
+        result.news = news;
+      }
+    } catch {
+      // 补充新闻失败不影响主结果
+    }
+  }
+
+  return result;
+}
+
+async function fetchFinancialMetricsInternal(
   ticker: string
 ): Promise<FinancialMetrics> {
   const upper = ticker.trim().toUpperCase();
