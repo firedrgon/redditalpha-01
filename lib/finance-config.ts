@@ -14,20 +14,26 @@ const CONFIG_FILE = path.join(process.cwd(), ".finance-config.json");
 
 export interface FinanceConfig {
   fmpApiKey: string;
+  avApiKey: string;
   updatedAt: number;
 }
 
 const DEFAULT_CONFIG: FinanceConfig = {
   fmpApiKey: "",
+  avApiKey: "",
   updatedAt: 0,
 };
 
 let memoryConfig: FinanceConfig | null = null;
 
 function applyEnvKey(config: FinanceConfig): FinanceConfig {
-  const envKey = process.env.FMP_API_KEY;
-  if (envKey && envKey.trim()) {
-    config.fmpApiKey = envKey.trim();
+  const fmpEnv = process.env.FMP_API_KEY;
+  if (fmpEnv && fmpEnv.trim()) {
+    config.fmpApiKey = fmpEnv.trim();
+  }
+  const avEnv = process.env.AV_API_KEY;
+  if (avEnv && avEnv.trim()) {
+    config.avApiKey = avEnv.trim();
   }
   return config;
 }
@@ -42,6 +48,7 @@ export async function readFinanceConfig(): Promise<FinanceConfig> {
       const parsed = JSON.parse(raw) as Partial<FinanceConfig>;
       config = {
         fmpApiKey: parsed.fmpApiKey ?? "",
+        avApiKey: parsed.avApiKey ?? "",
         updatedAt: parsed.updatedAt ?? 0,
       };
     } catch {
@@ -74,7 +81,19 @@ export async function setFmpApiKey(apiKey: string): Promise<FinanceConfig> {
   return config;
 }
 
+export async function setAvApiKey(apiKey: string): Promise<FinanceConfig> {
+  const config = await readFinanceConfig();
+  config.avApiKey = apiKey.trim();
+  await writeFinanceConfig(config);
+  return config;
+}
+
 export async function getFmpApiKey(): Promise<string> {
   const config = await readFinanceConfig();
   return config.fmpApiKey;
+}
+
+export async function getAvApiKey(): Promise<string> {
+  const config = await readFinanceConfig();
+  return config.avApiKey;
 }

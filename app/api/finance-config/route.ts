@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   readFinanceConfig,
   setFmpApiKey,
+  setAvApiKey,
 } from "@/lib/finance-config";
 
 export const runtime = "nodejs";
@@ -9,20 +10,23 @@ export const runtime = "nodejs";
 /** GET /api/finance-config：读取财务数据源配置（不返回明文 Key，只返回脱敏） */
 export async function GET() {
   const config = await readFinanceConfig();
-  const key = config.fmpApiKey;
-  const masked = key ? `${key.slice(0, 4)}****${key.slice(-4)}` : "";
+  const fmpMasked = config.fmpApiKey ? `${config.fmpApiKey.slice(0, 4)}****${config.fmpApiKey.slice(-4)}` : "";
+  const avMasked = config.avApiKey ? `${config.avApiKey.slice(0, 4)}****${config.avApiKey.slice(-4)}` : "";
   return NextResponse.json({
-    fmpApiKeyMasked: masked,
-    hasFmpKey: key !== "",
+    fmpApiKeyMasked: fmpMasked,
+    hasFmpKey: config.fmpApiKey !== "",
+    avApiKeyMasked: avMasked,
+    hasAvKey: config.avApiKey !== "",
     updatedAt: config.updatedAt,
   });
 }
 
 interface PatchBody {
   fmpApiKey?: string;
+  avApiKey?: string;
 }
 
-/** PATCH /api/finance-config：更新 FMP API Key */
+/** PATCH /api/finance-config：更新 API Key */
 export async function PATCH(request: NextRequest) {
   let body: PatchBody;
   try {
@@ -35,13 +39,18 @@ export async function PATCH(request: NextRequest) {
     if (body.fmpApiKey !== undefined) {
       await setFmpApiKey(body.fmpApiKey);
     }
+    if (body.avApiKey !== undefined) {
+      await setAvApiKey(body.avApiKey);
+    }
     const config = await readFinanceConfig();
-    const key = config.fmpApiKey;
-    const masked = key ? `${key.slice(0, 4)}****${key.slice(-4)}` : "";
+    const fmpMasked = config.fmpApiKey ? `${config.fmpApiKey.slice(0, 4)}****${config.fmpApiKey.slice(-4)}` : "";
+    const avMasked = config.avApiKey ? `${config.avApiKey.slice(0, 4)}****${config.avApiKey.slice(-4)}` : "";
     return NextResponse.json({
       ok: true,
-      fmpApiKeyMasked: masked,
-      hasFmpKey: key !== "",
+      fmpApiKeyMasked: fmpMasked,
+      hasFmpKey: config.fmpApiKey !== "",
+      avApiKeyMasked: avMasked,
+      hasAvKey: config.avApiKey !== "",
       updatedAt: config.updatedAt,
     });
   } catch (err) {

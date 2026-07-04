@@ -15,7 +15,7 @@
  *   5. 速动比率 > 1.5
  */
 
-import { getFmpApiKey as getConfigFmpKey } from "./finance-config";
+import { getFmpApiKey as getConfigFmpKey, getAvApiKey as getConfigAvKey } from "./finance-config";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -48,7 +48,7 @@ export interface FinancialMetrics {
   marketCap?: number | null;
   currency?: string | null;
   fetchedAt: string;
-  dataSource: "fmp" | "yahoo" | "yahoo-v7" | "fallback";
+  dataSource: "fmp" | "av" | "yahoo" | "yahoo-v7" | "fallback";
   warnings: string[];
 }
 
@@ -226,6 +226,7 @@ function str(v: unknown): string | null {
 }
 
 const FMP_BASE = "https://financialmodelingprep.com";
+const AV_BASE = "https://www.alphavantage.co/query";
 
 async function getFmpApiKey(): Promise<string | null> {
   try {
@@ -235,6 +236,18 @@ async function getFmpApiKey(): Promise<string | null> {
     // 配置读取失败时兜底读环境变量
   }
   const envKey = process.env.FMP_API_KEY;
+  if (envKey && envKey.trim()) return envKey.trim();
+  return null;
+}
+
+async function getAvApiKey(): Promise<string | null> {
+  try {
+    const key = await getConfigAvKey();
+    if (key && key.trim()) return key.trim();
+  } catch {
+    // 配置读取失败时兜底读环境变量
+  }
+  const envKey = process.env.AV_API_KEY;
   if (envKey && envKey.trim()) return envKey.trim();
   return null;
 }
@@ -299,6 +312,187 @@ async function fmpGet<T>(
     const msg = err instanceof Error ? err.message : String(err);
     return { data: null, error: `FMP ${path}: ${msg}` };
   }
+}
+
+interface AVOverview {
+  Symbol: string;
+  Name: string;
+  Industry: string;
+  Sector: string;
+  MarketCapitalization: string;
+  PERatio: string;
+  ForwardPE: string;
+  PEGRatio: string;
+  PriceToBookRatio: string;
+  ROE: string;
+  RevenueGrowth: string;
+  GrossProfitMargin: string;
+  ProfitMargin: string;
+  CurrentRatio: string;
+  QuickRatio: string;
+  TotalRevenue: string;
+  EarningsGrowth: string;
+  Currency: string;
+}
+
+interface AVIncomeStatement {
+  date: string;
+  revenue: string;
+  grossProfit: string;
+  operatingIncome: string;
+  netIncome: string;
+  eps: string;
+}
+
+interface AVBalanceSheet {
+  date: string;
+  totalStockholdersEquity: string;
+  totalAssets: string;
+  currentAssets: string;
+  currentLiabilities: string;
+}
+
+async function avGet<T>(
+  params: Record<string, string>,
+  apiKey: string
+): Promise<{ data: T | null; error?: string }> {
+  const url = new URL(AV_BASE);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  url.searchParams.set("apikey", apiKey);
+  try {
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { data: null, error: `AV: HTTP ${res.status} ${text.slice(0, 200)}` };
+    }
+    const data = (await res.json()) as T;
+    if (data == null) return { data: null, error: "AV: 返回空数据" };
+    if (data instanceof Object && "Note" in data) {
+      return { data: null, error: `AV: ${data["Note"]}` };
+    }
+    if (data instanceof Object && "Error Message" in data) {
+      return { data: null, error: `AV: ${data["Error Message"]}` };
+    }
+    return { data };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { data: null, error: `AV: ${msg}` };
+  }
+}
+
+async function fetchAVMetrics(
+  ticker: string,
+  apiKey: string
+): Promise<FinancialMetrics> {
+  const upper = ticker.toUpperCase();
+  const warnings: string[] = [];
+
+  const [overviewRes, incomeRes, balanceRes] = await Promise.all([
+    avGet<AVOverview>({ function: "OVERVIEW", symbol: upper }, apiKey),
+    avGet<{ annualReports: AVIncomeStatement[] }>(
+      { function: "INCOME_STATEMENT", symbol: upper },
+      apiKey
+    ),
+    avGet<{ annualReports: AVBalanceSheet[] }>(
+      { function: "BALANCE_SHEET", symbol: upper },
+      apiKey
+    ),
+  ]);
+
+  for (const res of [overviewRes, incomeRes, balanceRes]) {
+    if (res.error) warnings.push(res.error);
+  }
+
+  const overview = overviewRes.data;
+  const income = incomeRes.data?.annualReports ?? [];
+  const balance = balanceRes.data?.annualReports ?? [];
+
+  const result: FinancialMetrics = {
+    ticker: upper,
+    name: overview?.Name ?? null,
+    trailingPE: num(overview?.PERatio) ?? null,
+    forwardPE: num(overview?.ForwardPE) ?? null,
+    pegRatio: num(overview?.PEGRatio) ?? null,
+    industry: overview?.Industry ?? null,
+    industryPE: null,
+    revenueGrowthYoY: num(overview?.RevenueGrowth) ? num(overview?.RevenueGrowth)! / 100 : null,
+    quarterlyRevenueGrowth: null,
+    roe: num(overview?.ROE) ? num(overview?.ROE)! / 100 : null,
+    returnOnEquity5yAvg: null,
+    roeHistory: [],
+    quickRatio: num(overview?.QuickRatio) ?? null,
+    currentRatio: num(overview?.CurrentRatio) ?? null,
+    grossMargin: num(overview?.GrossProfitMargin) ? num(overview?.GrossProfitMargin)! / 100 : null,
+    profitMargin: num(overview?.ProfitMargin) ? num(overview?.ProfitMargin)! / 100 : null,
+    totalRevenue: num(overview?.TotalRevenue) ?? null,
+    revenueHistory: [],
+    marketCap: num(overview?.MarketCapitalization) ?? null,
+    currency: overview?.Currency ?? null,
+    fetchedAt: new Date().toISOString(),
+    dataSource: "av",
+    warnings,
+  };
+
+  const revenueHistory: Array<{ year: number; revenue: number | null }> = [];
+  for (const stmt of income) {
+    const date = new Date(stmt.date);
+    const year = date.getFullYear();
+    if (Number.isFinite(year)) {
+      revenueHistory.push({ year, revenue: num(stmt.revenue) });
+    }
+  }
+  revenueHistory.sort((a, b) => a.year - b.year);
+  result.revenueHistory = revenueHistory;
+
+  const roeHistory: Array<{ year: number; roe: number | null }> = [];
+  for (const bs of balance) {
+    const date = new Date(bs.date);
+    const year = date.getFullYear();
+    if (!Number.isFinite(year)) continue;
+    const inc = income.find((s) => {
+      const sYear = new Date(s.date).getFullYear();
+      return sYear === year;
+    });
+    const equity = num(bs.totalStockholdersEquity);
+    const netIncome = inc ? num(inc.netIncome) : null;
+    const roe = equity != null && netIncome != null && equity !== 0 ? netIncome / equity : null;
+    roeHistory.push({ year, roe });
+  }
+  roeHistory.sort((a, b) => a.year - b.year);
+  result.roeHistory = roeHistory;
+
+  if (result.roe == null && roeHistory.length > 0) {
+    result.roe = roeHistory[roeHistory.length - 1]?.roe ?? null;
+  }
+
+  const validRoes = roeHistory
+    .map((r) => r.roe)
+    .filter((r): r is number => r != null && Number.isFinite(r));
+  if (validRoes.length >= 5) {
+    const last5 = validRoes.slice(-5);
+    result.returnOnEquity5yAvg = last5.reduce((a, b) => a + b, 0) / last5.length;
+  } else if (validRoes.length > 0) {
+    result.returnOnEquity5yAvg = validRoes.reduce((a, b) => a + b, 0) / validRoes.length;
+    warnings.push(`仅获得 ${validRoes.length} 年 ROE 数据，平均值仅供参考。`);
+  } else {
+    result.returnOnEquity5yAvg = result.roe;
+    if (result.roe == null) {
+      warnings.push("无法获取 ROE 数据（当前与历史均无）。");
+    } else {
+      warnings.push("无法获取历史 ROE，使用当前 ROE 作为近似。");
+    }
+  }
+
+  if (result.revenueGrowthYoY == null && revenueHistory.length >= 2) {
+    const latest = revenueHistory[revenueHistory.length - 1];
+    const prev = revenueHistory[revenueHistory.length - 2];
+    if (latest.revenue && prev.revenue && prev.revenue > 0) {
+      result.revenueGrowthYoY = latest.revenue / prev.revenue - 1;
+      warnings.push("revenueGrowthYoY 由历史营收估算。");
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -482,19 +676,33 @@ export async function fetchFinancialMetrics(
   const fmpKey = await getFmpApiKey();
   if (fmpKey) {
     const fmp = await fetchFMPMetrics(upper, fmpKey);
-    // 如果 FMP 返回了至少一些有效数据，就使用它
-    const hasAnyData = fmp.name || fmp.trailingPE || fmp.industry || fmp.marketCap;
-    if (hasAnyData) {
+    // 如果 FMP 返回了财务数据（PE、营收、ROE 至少有一个），才使用它
+    const hasFinancialData = fmp.trailingPE || fmp.totalRevenue || fmp.roe;
+    if (hasFinancialData) {
       return fmp;
     }
     // 如果 FMP 返回了 warnings，把它们加到全局 warnings 里
     if (fmp.warnings.length > 0) {
       warnings.push(...fmp.warnings);
     }
-    warnings.push("FMP 未返回有效数据，降级到 Yahoo Finance。");
+    warnings.push("FMP 未返回财务数据（可能是 Premium 股票），降级到 Alpha Vantage。");
   }
 
-  // 2. Yahoo Finance quoteSummary（带 crumb 认证）
+  // 2. Alpha Vantage（如果配置了 API Key）
+  const avKey = await getAvApiKey();
+  if (avKey) {
+    const av = await fetchAVMetrics(upper, avKey);
+    const hasFinancialData = av.trailingPE || av.totalRevenue || av.roe;
+    if (hasFinancialData) {
+      return av;
+    }
+    if (av.warnings.length > 0) {
+      warnings.push(...av.warnings);
+    }
+    warnings.push("Alpha Vantage 未返回财务数据，降级到 Yahoo Finance。");
+  }
+
+  // 3. Yahoo Finance quoteSummary（带 crumb 认证）
   const summary = await fetchQuoteSummary(upper, [
     "summaryDetail",
     "summaryProfile",

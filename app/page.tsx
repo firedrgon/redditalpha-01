@@ -669,10 +669,14 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   // 财务数据源相关状态
   const [fmpKeyMasked, setFmpKeyMasked] = useState("");
   const [hasFmpKey, setHasFmpKey] = useState(false);
+  const [avKeyMasked, setAvKeyMasked] = useState("");
+  const [hasAvKey, setHasAvKey] = useState(false);
   const [financeLoading, setFinanceLoading] = useState(true);
   const [fmpKeyInput, setFmpKeyInput] = useState("");
+  const [avKeyInput, setAvKeyInput] = useState("");
   const [financeError, setFinanceError] = useState<string | null>(null);
   const [savingFmp, setSavingFmp] = useState(false);
+  const [savingAv, setSavingAv] = useState(false);
 
   const reloadLLM = useCallback(async () => {
     setLlmLoading(true);
@@ -696,6 +700,8 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
       const json = await res.json();
       setFmpKeyMasked(json.fmpApiKeyMasked || "");
       setHasFmpKey(!!json.hasFmpKey);
+      setAvKeyMasked(json.avApiKeyMasked || "");
+      setHasAvKey(!!json.hasAvKey);
       setFinanceError(null);
     } catch (err) {
       setFinanceError(err instanceof Error ? err.message : String(err));
@@ -801,6 +807,30 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
       setFinanceError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingFmp(false);
+    }
+  };
+
+  const handleSaveAvKey = async () => {
+    const key = avKeyInput.trim();
+    if (!key) return;
+    setSavingAv(true);
+    setFinanceError(null);
+    try {
+      const res = await fetch("/api/finance-config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avApiKey: key }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt);
+      }
+      setAvKeyInput("");
+      await reloadFinance();
+    } catch (err) {
+      setFinanceError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingAv(false);
     }
   };
 
@@ -1126,10 +1156,71 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
+            <div className="mt-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">
+                      Alpha Vantage
+                    </span>
+                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                      免费
+                    </span>
+                    <span className="text-[10px] text-zinc-600">需要 Key</span>
+                    {hasAvKey && (
+                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                        已配置
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    FMP 的补充数据源，部分 FMP Premium 股票在 Alpha Vantage 中可免费访问。免费 tier 每天 25 次请求。
+                  </p>
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    免费额度：每天 25 次请求
+                  </div>
+                  {hasAvKey && avKeyMasked && (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      已配置 Key：{avKeyMasked}
+                    </div>
+                  )}
+                  <div className="mt-1">
+                    <a
+                      href="https://www.alphavantage.co/support/#api-key"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
+                    >
+                      注册 / 获取 API Key →
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="password"
+                  value={avKeyInput}
+                  onChange={(e) => setAvKeyInput(e.target.value)}
+                  placeholder="输入 Alpha Vantage API Key"
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveAvKey}
+                  disabled={!avKeyInput.trim() || savingAv}
+                  className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
+                >
+                  {savingAv ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+
             <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3 text-[11px] text-zinc-500">
               <div className="font-medium text-zinc-400 mb-1">数据源优先级</div>
               <ol className="ml-4 list-decimal space-y-0.5">
                 <li>FMP（Financial Modeling Prep）— 数据最完整</li>
+                <li>Alpha Vantage — FMP Premium 股票的补充</li>
                 <li>Yahoo Finance quoteSummary（带 crumb 认证）</li>
                 <li>Yahoo Finance v7/quote（字段较少）</li>
               </ol>
