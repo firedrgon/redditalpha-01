@@ -83,6 +83,7 @@ export interface FinancialMetrics {
     | "fmp+finnhub"
     | "fmp+tiingo"
     | "finnhub+tiingo"
+    | "av+tiingo"
     | "yahoo"
     | "yahoo-v7"
     | "fallback";
@@ -697,41 +698,39 @@ interface FinnhubRecommendationTrendItem {
 }
 
 interface FinnhubMetrics {
-  valuation?: {
-    peBasicExclExtraTTM?: number;
-    peNormalizedAnnual?: number;
-    forwardPE?: number;
-    pegRatio?: number;
-    pbRatio?: number;
-  };
-  profitability?: {
-    roeTTM?: number;
-    roe5Y?: number;
-    grossMarginTTM?: number;
-    grossMargin5Y?: number;
-    netMarginTTM?: number;
-  };
-  liquidity?: {
-    quickRatio?: number;
-    currentRatio?: number;
-  };
-  growth?: {
-    revenueGrowthYoY?: number;
-    grossGrowthYoY?: number;
-    epsGrowthYoY?: number;
-  };
-  financials?: {
-    revenueTTM?: number;
-    grossProfitTTM?: number;
-    netIncomeTTM?: number;
-  };
-  priceTarget?: {
-    targetHigh?: number;
-    targetLow?: number;
-    targetMean?: number;
-    targetMedian?: number;
-    numberOfAnalysts?: number;
-  };
+  // 估值（比例/数值，无需除 100）
+  peBasicExclExtraTTM?: number;
+  peNormalizedAnnual?: number;
+  peTTM?: number;
+  peExclExtraTTM?: number;
+  peInclExtraTTM?: number;
+  forwardPE?: number;
+  pegTTM?: number;
+  pb?: number;
+  // 盈利能力（百分比，需要除 100）
+  roeTTM?: number;
+  roe5Y?: number;
+  roeRfy?: number;
+  grossMarginTTM?: number;
+  grossMarginAnnual?: number;
+  grossMargin5Y?: number;
+  netProfitMarginTTM?: number;
+  netProfitMarginAnnual?: number;
+  netProfitMargin5Y?: number;
+  operatingMarginTTM?: number;
+  // 流动性（比例，无需除 100）
+  quickRatioAnnual?: number;
+  quickRatioQuarterly?: number;
+  currentRatioAnnual?: number;
+  currentRatioQuarterly?: number;
+  // 成长（百分比，需要除 100）
+  revenueGrowthTTMYoy?: number;
+  revenueGrowth5Y?: number;
+  revenueGrowthQuarterlyYoy?: number;
+  epsGrowthTTMYoy?: number;
+  // 其他
+  marketCapitalization?: number;
+  [key: string]: number | string | undefined;
 }
 
 interface FinnhubCompanyBasicFinancials {
@@ -869,38 +868,44 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
     result.industry = profile.industry || profile.finnhubIndustry || null;
   }
 
-  if (metrics?.valuation) {
-    result.trailingPE = metrics.valuation.peBasicExclExtraTTM ?? metrics.valuation.peNormalizedAnnual ?? null;
-    result.forwardPE = metrics.valuation.forwardPE ?? null;
-    result.pegRatio = metrics.valuation.pegRatio ?? null;
-  }
+  if (metrics) {
+    // 估值（无需除 100）
+    result.trailingPE =
+      num(metrics.peBasicExclExtraTTM) ??
+      num(metrics.peTTM) ??
+      num(metrics.peExclExtraTTM) ??
+      num(metrics.peInclExtraTTM) ??
+      num(metrics.peNormalizedAnnual) ??
+      null;
+    result.forwardPE = num(metrics.forwardPE) ?? null;
+    result.pegRatio = num(metrics.pegTTM) ?? null;
 
-  if (metrics?.profitability) {
-    result.roe = metrics.profitability.roeTTM ?? null;
-    result.returnOnEquity5yAvg = metrics.profitability.roe5Y ?? null;
-    result.grossMargin = metrics.profitability.grossMarginTTM ?? null;
-    result.profitMargin = metrics.profitability.netMarginTTM ?? null;
-  }
+    // 盈利能力（百分比 → 小数）
+    const roeTTM = num(metrics.roeTTM);
+    const roe5Y = num(metrics.roe5Y);
+    const roeRfy = num(metrics.roeRfy);
+    result.roe = roeTTM != null ? roeTTM / 100 : null;
+    result.returnOnEquity5yAvg = roe5Y != null ? roe5Y / 100 : roeRfy != null ? roeRfy / 100 : null;
+    const grossMarginTTM = num(metrics.grossMarginTTM);
+    result.grossMargin = grossMarginTTM != null ? grossMarginTTM / 100 : null;
+    const netProfitMarginTTM = num(metrics.netProfitMarginTTM);
+    result.profitMargin = netProfitMarginTTM != null ? netProfitMarginTTM / 100 : null;
 
-  if (metrics?.liquidity) {
-    result.quickRatio = metrics.liquidity.quickRatio ?? null;
-    result.currentRatio = metrics.liquidity.currentRatio ?? null;
-  }
+    // 流动性（无需除 100）
+    result.quickRatio =
+      num(metrics.quickRatioAnnual) ?? num(metrics.quickRatioQuarterly) ?? null;
+    result.currentRatio =
+      num(metrics.currentRatioAnnual) ?? num(metrics.currentRatioQuarterly) ?? null;
 
-  if (metrics?.growth) {
-    result.revenueGrowthYoY = metrics.growth.revenueGrowthYoY ?? null;
-  }
-
-  if (metrics?.financials) {
-    result.totalRevenue = metrics.financials.revenueTTM ?? null;
-  }
-
-  if (metrics?.priceTarget) {
-    result.targetMeanPrice = metrics.priceTarget.targetMean ?? null;
-    result.targetHighPrice = metrics.priceTarget.targetHigh ?? null;
-    result.targetLowPrice = metrics.priceTarget.targetLow ?? null;
-    result.targetMedianPrice = metrics.priceTarget.targetMedian ?? null;
-    result.numberOfAnalysts = metrics.priceTarget.numberOfAnalysts ?? null;
+    // 成长（百分比 → 小数）
+    const revenueGrowthTTMYoy = num(metrics.revenueGrowthTTMYoy);
+    const revenueGrowth5Y = num(metrics.revenueGrowth5Y);
+    result.revenueGrowthYoY =
+      revenueGrowthTTMYoy != null
+        ? revenueGrowthTTMYoy / 100
+        : revenueGrowth5Y != null
+          ? revenueGrowth5Y / 100
+          : null;
   }
 
   if (recommendations && recommendations.length > 0) {
@@ -954,14 +959,15 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
 // Tiingo
 // ============================================================
 
-interface TiingoTopOfBook {
-  ticker: string;
-  price: number;
-  prevClose: number;
-  high: number;
-  low: number;
-  open: number;
-  volume: number;
+interface TiingoDailyPrice {
+  ticker?: string;
+  date?: string;
+  close?: number;
+  adjClose?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
 }
 
 interface TiingoFundamentals {
@@ -1024,13 +1030,21 @@ async function tiingoGet<T>(path: string, apiKey: string): Promise<{ data: T | n
       },
     });
     if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let detail = text.slice(0, 300);
+      try {
+        const parsed = JSON.parse(text) as { detail?: string };
+        if (parsed.detail) detail = parsed.detail;
+      } catch {
+        // 非 JSON，保留原文
+      }
       if (res.status === 429) {
         return { data: null, error: "Tiingo: 触发速率限制 (429)，请稍后再试。" };
       }
       if (res.status === 401 || res.status === 403) {
         return { data: null, error: "Tiingo: API Key 无效或无权限。" };
       }
-      return { data: null, error: `Tiingo ${path}: HTTP ${res.status}` };
+      return { data: null, error: `Tiingo ${path}: HTTP ${res.status} ${detail}` };
     }
     const data = await res.json();
     return { data: data as T };
@@ -1076,7 +1090,7 @@ async function fetchTiingoMetrics(ticker: string, apiKey: string): Promise<Finan
   };
 
   const [priceRes, fundRes, infoRes] = await Promise.all([
-    tiingoGet<TiingoTopOfBook>(`/tiingo/daily/${upper}/prices?format=json`, apiKey),
+    tiingoGet<TiingoDailyPrice[]>(`/tiingo/daily/${upper}/prices?format=json`, apiKey),
     tiingoGet<TiingoFundamentals[]>(`/tiingo/fundamentals/${upper}/daily`, apiKey),
     tiingoGet<TiingoCompanyInfo>(`/tiingo/daily/${upper}`, apiKey),
   ]);
@@ -1085,14 +1099,17 @@ async function fetchTiingoMetrics(ticker: string, apiKey: string): Promise<Finan
   if (fundRes.error) warnings.push(fundRes.error);
   if (infoRes.error) warnings.push(infoRes.error);
 
-  const price = priceRes.data;
+  const priceArray = Array.isArray(priceRes.data) ? priceRes.data : null;
+  const price = priceArray && priceArray.length > 0
+    ? priceArray[priceArray.length - 1]
+    : null;
   const fundamentals = Array.isArray(fundRes.data) && fundRes.data.length > 0
     ? fundRes.data[fundRes.data.length - 1]
     : null;
   const info = infoRes.data;
 
   if (price) {
-    result.currentPrice = price.price ?? null;
+    result.currentPrice = price.adjClose ?? price.close ?? null;
   }
 
   if (info) {
@@ -1120,11 +1137,14 @@ async function fetchTiingoMetrics(ticker: string, apiKey: string): Promise<Finan
     result.recommendationMean = fundamentals.recommendationRating ?? null;
   }
 
+  const fundamentalsFailed = !!fundRes.error;
   if (result.returnOnEquity5yAvg == null && result.roe != null) {
     result.returnOnEquity5yAvg = result.roe;
     warnings.push("无法获取 5 年平均 ROE，使用当前 ROE 作为近似。");
   }
-  if (result.roe == null) {
+  if (result.roe == null && !fundamentalsFailed) {
+    // 只有在 fundamentals 端点成功返回数据但缺少 ROE 字段时才提示，
+    // 若端点本身失败（如免费计划仅覆盖 DOW 30），由上层 orchestration 说明
     warnings.push("无法获取 ROE 数据（当前与历史均无）。");
   }
 
@@ -1322,6 +1342,14 @@ function mergeMetrics(
   sourceLabel: FinancialMetrics["dataSource"],
   extraWarnings: string[] = []
 ): FinancialMetrics {
+  const allWarnings = [...extraWarnings, ...primary.warnings, ...secondary.warnings];
+  const seen = new Set<string>();
+  const uniqueWarnings = allWarnings.filter((w) => {
+    if (seen.has(w)) return false;
+    seen.add(w);
+    return true;
+  });
+
   const merged: FinancialMetrics = {
     ticker: primary.ticker,
     name: primary.name ?? secondary.name ?? null,
@@ -1353,7 +1381,7 @@ function mergeMetrics(
     currency: primary.currency ?? secondary.currency ?? null,
     fetchedAt: new Date().toISOString(),
     dataSource: sourceLabel,
-    warnings: [...extraWarnings, ...primary.warnings, ...secondary.warnings],
+    warnings: uniqueWarnings,
   };
 
   // 重新计算目标价上涨空间
@@ -1421,13 +1449,30 @@ async function fetchFinancialMetricsInternal(
   // ============================================================
   // 1. 优先 Tiingo
   // ============================================================
+  // Tiingo 免费/ Power 计划的基本面数据仅覆盖 DOW 30，因此把它当作
+  // "价格 + 公司信息" 的首选来源；若 fundamentals 返回受限，则保留
+  // profile 数据，继续用 Finnhub / FMP 补充核心财务数据。
+  let tiingoPartial: FinancialMetrics | null = null;
   if (tiingoKey) {
     const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
-    if (hasAny(tiingo)) {
+    if (hasCore(tiingo)) {
+      // DOW 30 等包含基本面的股票，直接返回完整 Tiingo 数据
       return tiingo;
     }
-    warnings.push(...tiingo.warnings);
-    warnings.push("Tiingo 未返回有效数据，降级到 Finnhub。");
+    if (hasProfile(tiingo)) {
+      tiingoPartial = tiingo;
+      warnings.push(...tiingo.warnings);
+      if (tiingo.warnings.some((w) => w.includes("DOW 30"))) {
+        warnings.push(
+          "Tiingo 基本面数据受限（免费/ Power 计划仅覆盖 DOW 30），尝试用 Finnhub 补充财务指标。"
+        );
+      } else {
+        warnings.push("Tiingo 未返回完整财务数据，尝试用 Finnhub 补充。");
+      }
+    } else {
+      warnings.push(...tiingo.warnings);
+      warnings.push("Tiingo 未返回有效数据，降级到 Finnhub。");
+    }
   }
 
   // ============================================================
@@ -1436,6 +1481,12 @@ async function fetchFinancialMetricsInternal(
   if (finnhubKey) {
     const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
     if (hasAny(finnhub)) {
+      // Tiingo 已有价格/公司信息，Finnhub 补充财务数据，合并返回
+      if (tiingoPartial && hasCore(finnhub)) {
+        return mergeMetrics(tiingoPartial, finnhub, "finnhub+tiingo", [
+          ...warnings,
+        ]);
+      }
       return finnhub;
     }
     warnings.push(...finnhub.warnings);
@@ -1449,38 +1500,29 @@ async function fetchFinancialMetricsInternal(
     const fmp = await fetchFMPMetrics(upper, fmpKey);
 
     if (hasCore(fmp)) {
+      if (tiingoPartial) {
+        return mergeMetrics(tiingoPartial, fmp, "fmp+tiingo", [...warnings]);
+      }
       return fmp;
     }
 
     // FMP 财务数据是 Premium 的，但 profile 可能还有
     if (hasProfile(fmp)) {
-      // 依次尝试用 Tiingo / Finnhub / AV 补充财务数据
-      if (tiingoKey) {
-        const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
-        if (hasCore(tiingo) || tiingo.targetMeanPrice != null) {
-          return mergeMetrics(fmp, tiingo, "fmp+tiingo", [
-            ...warnings,
-            ...fmp.warnings,
-          ]);
-        }
-      }
+      // 依次尝试用 Finnhub / AV / Tiingo 补充财务数据
       if (finnhubKey) {
         const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
         if (hasCore(finnhub) || finnhub.targetMeanPrice != null) {
-          return mergeMetrics(fmp, finnhub, "fmp+finnhub", [
-            ...warnings,
-            ...fmp.warnings,
-          ]);
+          return mergeMetrics(fmp, finnhub, "fmp+finnhub", [...warnings]);
         }
       }
       if (avKey) {
         const av = await fetchAVMetrics(upper, avKey);
         if (hasCore(av) || av.targetMeanPrice != null) {
-          return mergeMetrics(fmp, av, "fmp+av", [
-            ...warnings,
-            ...fmp.warnings,
-          ]);
+          return mergeMetrics(fmp, av, "fmp+av", [...warnings]);
         }
+      }
+      if (tiingoPartial && (hasCore(tiingoPartial) || tiingoPartial.targetMeanPrice != null)) {
+        return mergeMetrics(fmp, tiingoPartial, "fmp+tiingo", [...warnings]);
       }
       // 所有补充数据源都没有核心数据，返回 FMP profile
       warnings.push(...fmp.warnings);
@@ -1499,6 +1541,9 @@ async function fetchFinancialMetricsInternal(
   if (avKey) {
     const av = await fetchAVMetrics(upper, avKey);
     if (hasAny(av)) {
+      if (tiingoPartial) {
+        return mergeMetrics(tiingoPartial, av, "av+tiingo", [...warnings]);
+      }
       return av;
     }
     warnings.push(...av.warnings);
