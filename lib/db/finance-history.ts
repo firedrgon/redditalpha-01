@@ -1,4 +1,4 @@
-import { prisma } from "./prisma";
+import { getPrisma } from "./prisma";
 import type { FinanceSnapshot as PrismaFinanceSnapshot } from "@prisma/client";
 import type { FinancialMetrics } from "../finance";
 
@@ -30,6 +30,8 @@ export interface FinanceSnapshotRecord {
   dataSource?: string | null;
 }
 
+const memorySnapshots: Map<string, FinanceSnapshotRecord[]> = new Map();
+
 function mapSnapshot(r: PrismaFinanceSnapshot): FinanceSnapshotRecord {
   return {
     id: r.id,
@@ -60,72 +62,150 @@ function mapSnapshot(r: PrismaFinanceSnapshot): FinanceSnapshotRecord {
   };
 }
 
+function metricsToRecord(
+  ticker: string,
+  metrics: FinancialMetrics,
+  date: Date
+): FinanceSnapshotRecord {
+  return {
+    id: `snap-${date.getTime()}-${Math.random().toString(36).slice(2, 6)}`,
+    ticker: ticker.toUpperCase(),
+    snapshotDate: date.toISOString(),
+    price: metrics.currentPrice,
+    marketCap: metrics.marketCap,
+    trailingPE: metrics.trailingPE,
+    forwardPE: metrics.forwardPE,
+    pegRatio: metrics.pegRatio,
+    roe: metrics.roe,
+    returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
+    revenueGrowthYoY: metrics.revenueGrowthYoY,
+    quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
+    grossMargin: metrics.grossMargin,
+    profitMargin: metrics.profitMargin,
+    quickRatio: metrics.quickRatio,
+    currentRatio: metrics.currentRatio,
+    industry: metrics.industry,
+    industryPE: metrics.industryPE,
+    targetMeanPrice: metrics.targetMeanPrice,
+    targetUpside: metrics.targetUpside,
+    recommendationMean: metrics.recommendationMean,
+    dataSource: metrics.dataSource,
+  };
+}
+
+function getMemoryHistory(ticker: string): FinanceSnapshotRecord[] {
+  return memorySnapshots.get(ticker.toUpperCase()) ?? [];
+}
+
 export async function recordFinanceSnapshot(
   ticker: string,
   metrics: FinancialMetrics
 ): Promise<void> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const upper = ticker.toUpperCase();
+  const prisma = getPrisma();
+  if (!prisma) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const history = getMemoryHistory(upper);
+    const existingIdx = history.findIndex(
+      (s) => new Date(s.snapshotDate).getTime() >= today.getTime()
+    );
+    const record = metricsToRecord(upper, metrics, today);
+    if (existingIdx >= 0) {
+      history[existingIdx] = { ...record, id: history[existingIdx].id };
+    } else {
+      history.push(record);
+      history.sort(
+        (a, b) =>
+          new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime()
+      );
+    }
+    memorySnapshots.set(upper, history);
+    return;
+  }
 
-  const existing = await prisma.financeSnapshot.findFirst({
-    where: {
-      ticker: ticker.toUpperCase(),
-      snapshotDate: { gte: today },
-    },
-  });
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  if (existing) {
-    await prisma.financeSnapshot.update({
-      where: { id: existing.id },
-      data: {
-        price: metrics.currentPrice,
-        marketCap: metrics.marketCap,
-        trailingPE: metrics.trailingPE,
-        forwardPE: metrics.forwardPE,
-        pegRatio: metrics.pegRatio,
-        roe: metrics.roe,
-        returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
-        revenueGrowthYoY: metrics.revenueGrowthYoY,
-        quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
-        grossMargin: metrics.grossMargin,
-        profitMargin: metrics.profitMargin,
-        quickRatio: metrics.quickRatio,
-        currentRatio: metrics.currentRatio,
-        industry: metrics.industry,
-        industryPE: metrics.industryPE,
-        targetMeanPrice: metrics.targetMeanPrice,
-        targetUpside: metrics.targetUpside,
-        recommendationMean: metrics.recommendationMean,
-        dataSource: metrics.dataSource,
-        rawJson: JSON.stringify(metrics),
+    const existing = await prisma.financeSnapshot.findFirst({
+      where: {
+        ticker: upper,
+        snapshotDate: { gte: today },
       },
     });
-  } else {
-    await prisma.financeSnapshot.create({
-      data: {
-        ticker: ticker.toUpperCase(),
-        price: metrics.currentPrice,
-        marketCap: metrics.marketCap,
-        trailingPE: metrics.trailingPE,
-        forwardPE: metrics.forwardPE,
-        pegRatio: metrics.pegRatio,
-        roe: metrics.roe,
-        returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
-        revenueGrowthYoY: metrics.revenueGrowthYoY,
-        quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
-        grossMargin: metrics.grossMargin,
-        profitMargin: metrics.profitMargin,
-        quickRatio: metrics.quickRatio,
-        currentRatio: metrics.currentRatio,
-        industry: metrics.industry,
-        industryPE: metrics.industryPE,
-        targetMeanPrice: metrics.targetMeanPrice,
-        targetUpside: metrics.targetUpside,
-        recommendationMean: metrics.recommendationMean,
-        dataSource: metrics.dataSource,
-        rawJson: JSON.stringify(metrics),
-      },
-    });
+
+    if (existing) {
+      await prisma.financeSnapshot.update({
+        where: { id: existing.id },
+        data: {
+          price: metrics.currentPrice,
+          marketCap: metrics.marketCap,
+          trailingPE: metrics.trailingPE,
+          forwardPE: metrics.forwardPE,
+          pegRatio: metrics.pegRatio,
+          roe: metrics.roe,
+          returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
+          revenueGrowthYoY: metrics.revenueGrowthYoY,
+          quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
+          grossMargin: metrics.grossMargin,
+          profitMargin: metrics.profitMargin,
+          quickRatio: metrics.quickRatio,
+          currentRatio: metrics.currentRatio,
+          industry: metrics.industry,
+          industryPE: metrics.industryPE,
+          targetMeanPrice: metrics.targetMeanPrice,
+          targetUpside: metrics.targetUpside,
+          recommendationMean: metrics.recommendationMean,
+          dataSource: metrics.dataSource,
+          rawJson: JSON.stringify(metrics),
+        },
+      });
+    } else {
+      await prisma.financeSnapshot.create({
+        data: {
+          ticker: upper,
+          price: metrics.currentPrice,
+          marketCap: metrics.marketCap,
+          trailingPE: metrics.trailingPE,
+          forwardPE: metrics.forwardPE,
+          pegRatio: metrics.pegRatio,
+          roe: metrics.roe,
+          returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
+          revenueGrowthYoY: metrics.revenueGrowthYoY,
+          quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
+          grossMargin: metrics.grossMargin,
+          profitMargin: metrics.profitMargin,
+          quickRatio: metrics.quickRatio,
+          currentRatio: metrics.currentRatio,
+          industry: metrics.industry,
+          industryPE: metrics.industryPE,
+          targetMeanPrice: metrics.targetMeanPrice,
+          targetUpside: metrics.targetUpside,
+          recommendationMean: metrics.recommendationMean,
+          dataSource: metrics.dataSource,
+          rawJson: JSON.stringify(metrics),
+        },
+      });
+    }
+  } catch {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const history = getMemoryHistory(upper);
+    const existingIdx = history.findIndex(
+      (s) => new Date(s.snapshotDate).getTime() >= today.getTime()
+    );
+    const record = metricsToRecord(upper, metrics, today);
+    if (existingIdx >= 0) {
+      history[existingIdx] = { ...record, id: history[existingIdx].id };
+    } else {
+      history.push(record);
+      history.sort(
+        (a, b) =>
+          new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime()
+      );
+    }
+    memorySnapshots.set(upper, history);
   }
 }
 
@@ -133,28 +213,60 @@ export async function getFinanceHistory(
   ticker: string,
   days: number = 30
 ): Promise<FinanceSnapshotRecord[]> {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
-  since.setHours(0, 0, 0, 0);
+  const upper = ticker.toUpperCase();
+  const prisma = getPrisma();
+  if (!prisma) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+    return getMemoryHistory(upper).filter(
+      (s) => new Date(s.snapshotDate).getTime() >= since.getTime()
+    );
+  }
 
-  const rows = await prisma.financeSnapshot.findMany({
-    where: {
-      ticker: ticker.toUpperCase(),
-      snapshotDate: { gte: since },
-    },
-    orderBy: { snapshotDate: "asc" },
-  });
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
 
-  return rows.map(mapSnapshot);
+    const rows = await prisma.financeSnapshot.findMany({
+      where: {
+        ticker: upper,
+        snapshotDate: { gte: since },
+      },
+      orderBy: { snapshotDate: "asc" },
+    });
+
+    return rows.map(mapSnapshot);
+  } catch {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+    return getMemoryHistory(upper).filter(
+      (s) => new Date(s.snapshotDate).getTime() >= since.getTime()
+    );
+  }
 }
 
 export async function getLatestFinanceSnapshot(
   ticker: string
 ): Promise<FinanceSnapshotRecord | null> {
-  const row = await prisma.financeSnapshot.findFirst({
-    where: { ticker: ticker.toUpperCase() },
-    orderBy: { snapshotDate: "desc" },
-  });
-  if (!row) return null;
-  return mapSnapshot(row);
+  const upper = ticker.toUpperCase();
+  const prisma = getPrisma();
+  if (!prisma) {
+    const history = getMemoryHistory(upper);
+    return history.length > 0 ? history[history.length - 1] : null;
+  }
+
+  try {
+    const row = await prisma.financeSnapshot.findFirst({
+      where: { ticker: upper },
+      orderBy: { snapshotDate: "desc" },
+    });
+    if (!row) return null;
+    return mapSnapshot(row);
+  } catch {
+    const history = getMemoryHistory(upper);
+    return history.length > 0 ? history[history.length - 1] : null;
+  }
 }

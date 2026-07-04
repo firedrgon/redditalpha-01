@@ -1,6 +1,13 @@
-import { prisma } from "./prisma";
+import { getPrisma } from "./prisma";
 import type { AnalysisCache as PrismaAnalysisCache } from "@prisma/client";
 import type { StockAnalysis } from "../analysis";
+import {
+  getCachedAnalysis as getCachedAnalysisFile,
+  saveAnalysis as saveAnalysisFile,
+  clearCachedAnalysis as clearCachedAnalysisFile,
+  clearAllCache as clearAllCacheFile,
+  listCachedTickers as listCachedTickersFile,
+} from "../analysis-cache";
 
 function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
   return {
@@ -31,74 +38,118 @@ function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
 export async function getCachedAnalysisDB(
   ticker: string
 ): Promise<StockAnalysis | null> {
-  const row = await prisma.analysisCache.findUnique({
-    where: { ticker: ticker.toUpperCase() },
-  });
-  if (!row) return null;
-  return mapAnalysis(row);
+  const prisma = getPrisma();
+  if (!prisma) return getCachedAnalysisFile(ticker);
+
+  try {
+    const row = await prisma.analysisCache.findUnique({
+      where: { ticker: ticker.toUpperCase() },
+    });
+    if (!row) return null;
+    return mapAnalysis(row);
+  } catch {
+    return getCachedAnalysisFile(ticker);
+  }
 }
 
 export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
-  const ticker = analysis.ticker.toUpperCase();
-  await prisma.analysisCache.upsert({
-    where: { ticker },
-    update: {
-      name: analysis.name,
-      metrics: JSON.stringify(analysis.metrics),
-      overallVerdict: analysis.overallVerdict,
-      overallSummary: analysis.overallSummary,
-      currentPrice: analysis.currentPrice,
-      targetMeanPrice: analysis.targetMeanPrice,
-      targetHighPrice: analysis.targetHighPrice,
-      targetLowPrice: analysis.targetLowPrice,
-      targetMedianPrice: analysis.targetMedianPrice,
-      targetUpside: analysis.targetUpside,
-      numberOfAnalysts: analysis.numberOfAnalysts,
-      recommendationMean: analysis.recommendationMean,
-      llmNarrative: analysis.llmNarrative,
-      llmProvider: analysis.llmProvider,
-      llmError: analysis.llmError,
-      strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
-      dataSource: analysis.dataSource,
-      warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
-    },
-    create: {
-      ticker,
-      name: analysis.name,
-      metrics: JSON.stringify(analysis.metrics),
-      overallVerdict: analysis.overallVerdict,
-      overallSummary: analysis.overallSummary,
-      currentPrice: analysis.currentPrice,
-      targetMeanPrice: analysis.targetMeanPrice,
-      targetHighPrice: analysis.targetHighPrice,
-      targetLowPrice: analysis.targetLowPrice,
-      targetMedianPrice: analysis.targetMedianPrice,
-      targetUpside: analysis.targetUpside,
-      numberOfAnalysts: analysis.numberOfAnalysts,
-      recommendationMean: analysis.recommendationMean,
-      llmNarrative: analysis.llmNarrative,
-      llmProvider: analysis.llmProvider,
-      llmError: analysis.llmError,
-      strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
-      dataSource: analysis.dataSource,
-      warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
-    },
-  });
+  const prisma = getPrisma();
+  if (!prisma) {
+    await saveAnalysisFile(analysis);
+    return;
+  }
+
+  try {
+    const ticker = analysis.ticker.toUpperCase();
+    await prisma.analysisCache.upsert({
+      where: { ticker },
+      update: {
+        name: analysis.name,
+        metrics: JSON.stringify(analysis.metrics),
+        overallVerdict: analysis.overallVerdict,
+        overallSummary: analysis.overallSummary,
+        currentPrice: analysis.currentPrice,
+        targetMeanPrice: analysis.targetMeanPrice,
+        targetHighPrice: analysis.targetHighPrice,
+        targetLowPrice: analysis.targetLowPrice,
+        targetMedianPrice: analysis.targetMedianPrice,
+        targetUpside: analysis.targetUpside,
+        numberOfAnalysts: analysis.numberOfAnalysts,
+        recommendationMean: analysis.recommendationMean,
+        llmNarrative: analysis.llmNarrative,
+        llmProvider: analysis.llmProvider,
+        llmError: analysis.llmError,
+        strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
+        dataSource: analysis.dataSource,
+        warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+      },
+      create: {
+        ticker,
+        name: analysis.name,
+        metrics: JSON.stringify(analysis.metrics),
+        overallVerdict: analysis.overallVerdict,
+        overallSummary: analysis.overallSummary,
+        currentPrice: analysis.currentPrice,
+        targetMeanPrice: analysis.targetMeanPrice,
+        targetHighPrice: analysis.targetHighPrice,
+        targetLowPrice: analysis.targetLowPrice,
+        targetMedianPrice: analysis.targetMedianPrice,
+        targetUpside: analysis.targetUpside,
+        numberOfAnalysts: analysis.numberOfAnalysts,
+        recommendationMean: analysis.recommendationMean,
+        llmNarrative: analysis.llmNarrative,
+        llmProvider: analysis.llmProvider,
+        llmError: analysis.llmError,
+        strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
+        dataSource: analysis.dataSource,
+        warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+      },
+    });
+  } catch {
+    await saveAnalysisFile(analysis);
+  }
 }
 
 export async function clearCachedAnalysisDB(ticker: string): Promise<void> {
-  await prisma.analysisCache.delete({
-    where: { ticker: ticker.toUpperCase() },
-  });
+  const prisma = getPrisma();
+  if (!prisma) {
+    await clearCachedAnalysisFile(ticker);
+    return;
+  }
+
+  try {
+    await prisma.analysisCache.delete({
+      where: { ticker: ticker.toUpperCase() },
+    });
+  } catch {
+    await clearCachedAnalysisFile(ticker);
+  }
 }
 
 export async function clearAllCacheDB(): Promise<void> {
-  await prisma.analysisCache.deleteMany();
+  const prisma = getPrisma();
+  if (!prisma) {
+    await clearAllCacheFile();
+    return;
+  }
+
+  try {
+    await prisma.analysisCache.deleteMany();
+  } catch {
+    await clearAllCacheFile();
+  }
 }
 
 export async function listCachedTickersDB(): Promise<string[]> {
-  const rows = await prisma.analysisCache.findMany({
-    orderBy: { ticker: "asc" },
-  });
-  return rows.map(mapAnalysis).map((a) => a.ticker);
+  const prisma = getPrisma();
+  if (!prisma) return listCachedTickersFile();
+
+  try {
+    const rows = await prisma.analysisCache.findMany({
+      orderBy: { ticker: "asc" },
+    });
+    return rows.map(mapAnalysis).map((a) => a.ticker);
+  } catch {
+    return listCachedTickersFile();
+  }
 }
