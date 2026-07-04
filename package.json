@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node -e \"process.env.DATABASE_URL = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://placeholder:5432/db'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit' })\" && next build",
+    "build": "node scripts/db-setup.js && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node -e \"process.env.DATABASE_URL = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://placeholder:5432/db'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit' })\""
+    "postinstall": "node scripts/db-setup.js"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
