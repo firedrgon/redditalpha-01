@@ -1366,11 +1366,13 @@ function mergeMetrics(
 
 /**
  * 拉取并计算 5 项指标所需的数据
- * 数据源优先级：FMP → Alpha Vantage → Yahoo Finance → fallback
+ * 数据源优先级：FMP → Tiingo → Finnhub → Alpha Vantage → Yahoo Finance → fallback
  *
  * 策略说明：
  * - FMP profile 端点是免费的，优先获取（价格、公司名、行业等）
  * - FMP 的 ratios/income/balance-sheet 对部分股票是 Premium 的，返回 402
+ * - Tiingo 免费版 500 req/day，作为第二优先完整数据源
+ * - Finnhub 免费版 60 req/min，主要用于补充分析师目标价和新闻
  * - Alpha Vantage 免费版有 25 次/天限制，用于补充财务数据
  * - Yahoo Finance 作为最后兜底
  */

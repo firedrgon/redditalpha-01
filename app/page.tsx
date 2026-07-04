@@ -1368,7 +1368,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-zinc-400">
-                    提供美股完整财务数据（PE、PEG、ROE、营收增长、速动比率等），免费 tier 每天 250 次请求。配置后将作为首选数据源，Yahoo Finance 自动降级。
+                    提供美股完整财务数据（PE、PEG、ROE、营收增长、速动比率等），免费 tier 每天 250 次请求。配置后作为首选数据源，失败时自动降级到 Tiingo → Finnhub → Alpha Vantage → Yahoo Finance。
                   </p>
                   <div className="mt-1 text-[11px] text-zinc-500">
                     免费额度：每天 250 次请求
