@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AnalysisCache {
+  id            String   @id @default(cuid())
+  ticker        String   @unique
+  name          String?
+  metrics       String   // JSON 字符串：MetricResult[]
+  overallVerdict String   // pass / fail / unknown
+  overallSummary String
+  currentPrice      Float?
+  targetMeanPrice   Float?
+  targetHighPrice   Float?
+  targetLowPrice    Float?
+  targetMedianPrice Float?
+  targetUpside      Float?
+  numberOfAnalysts  Int?
+  recommendationMean Float?
+  llmNarrative String?
+  llmProvider  String?
+  llmError     String?
+  strategyIdsUsed String // JSON 字符串：string[]
+  dataSource   String?
+  warnings     String?  // JSON 字符串：string[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model StrategyCategory {
+  id          String     @id
+  name        String
+  description String?
+  order       Int
+  isDefault   Boolean    @default(false)
+  color       String?
+  strategies  Strategy[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Strategy {
+  id          String           @id
+  name        String
+  description String
+  categoryId  String
+  category    StrategyCategory @relation(fields: [categoryId], references: [id])
+  metricField String
+  operator    String
+  threshold   Float
+  format      String  // percent / number / ratio
+  enabled     Boolean @default(true)
+  isDefault   Boolean @default(false)
+  order       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  ticker    String   @unique
+  name      String?
+  note      String?
+  tags      String?  // JSON 字符串：string[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FinanceSnapshot {
+  id              String   @id @default(cuid())
+  ticker          String
+  snapshotDate    DateTime @default(now())
+  price           Float?
+  marketCap       Float?
+  trailingPE      Float?
+  forwardPE       Float?
+  pegRatio        Float?
+  priceToBook     Float?
+  roe             Float?
+  returnOnEquity5yAvg Float?
+  revenueGrowthYoY    Float?
+  quarterlyRevenueGrowth Float?
+  grossMargin     Float?
+  profitMargin    Float?
+  quickRatio      Float?
+  currentRatio    Float?
+  debtToEquity    Float?
+  industry        String?
+  sector          String?
+  industryPE      Float?
+  targetMeanPrice Float?
+  targetUpside    Float?
+  recommendationMean Float?
+  dataSource      String?
+  rawJson         String?  // 完整 FinancialMetrics 的 JSON 备份
+  @@index([ticker, snapshotDate])
+}

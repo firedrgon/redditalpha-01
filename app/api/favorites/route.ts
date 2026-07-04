@@ -1,0 +1,96 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  listFavorites,
+  addFavorite,
+  removeFavorite,
+  isFavorite,
+  updateFavorite,
+} from "@/lib/db";
+
+export const runtime = "nodejs";
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const ticker = searchParams.get("ticker");
+
+  if (ticker) {
+    const fav = await isFavorite(ticker);
+    return NextResponse.json({ ticker: ticker.toUpperCase(), isFavorite: fav });
+  }
+
+  const favorites = await listFavorites();
+  return NextResponse.json({ favorites });
+}
+
+interface AddBody {
+  ticker: string;
+  name?: string;
+  note?: string;
+  tags?: string[];
+}
+
+export async function POST(request: NextRequest) {
+  const body = (await request.json().catch(() => ({}))) as AddBody;
+  const ticker = body.ticker?.trim().toUpperCase();
+
+  if (!ticker) {
+    return NextResponse.json({ error: "缺少 ticker" }, { status: 400 });
+  }
+
+  const fav = await addFavorite(ticker, {
+    name: body.name,
+    note: body.note,
+    tags: body.tags,
+  });
+
+  return NextResponse.json({ favorite: fav });
+}
+
+interface PatchBody {
+  ticker: string;
+  name?: string;
+  note?: string;
+  tags?: string[];
+}
+
+export async function PATCH(request: NextRequest) {
+  const body = (await request.json().catch(() => ({}))) as PatchBody;
+  const ticker = body.ticker?.trim().toUpperCase();
+
+  if (!ticker) {
+    return NextResponse.json({ error: "缺少 ticker" }, { status: 400 });
+  }
+
+  try {
+    const fav = await updateFavorite(ticker, {
+      name: body.name,
+      note: body.note,
+      tags: body.tags,
+    });
+    return NextResponse.json({ favorite: fav });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 404 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const ticker = searchParams.get("ticker");
+
+  if (!ticker) {
+    return NextResponse.json({ error: "缺少 ticker 参数" }, { status: 400 });
+  }
+
+  try {
+    await removeFavorite(ticker);
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 404 }
+    );
+  }
+}

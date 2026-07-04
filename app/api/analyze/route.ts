@@ -9,11 +9,12 @@ import {
 } from "@/lib/analysis";
 import { chatCompletion } from "@/lib/llm";
 import { resolveTickerName } from "@/lib/ticker-names";
-import { getEnabledStrategies } from "@/lib/strategies";
+import { getEnabledStrategiesDB as getEnabledStrategies } from "@/lib/db";
 import {
-  getCachedAnalysis,
-  saveAnalysis,
-} from "@/lib/analysis-cache";
+  getCachedAnalysisDB as getCachedAnalysis,
+  saveAnalysisDB as saveAnalysis,
+} from "@/lib/db";
+import { recordFinanceSnapshot } from "@/lib/db";
 
 export const runtime = "nodejs";
 // 分析可能调用外部 LLM，避免被 Vercel 默认 10s 限制卡死
@@ -129,8 +130,11 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 6. 写入缓存（覆盖旧数据）
-  await saveAnalysis(analysis);
+  // 6. 写入缓存（覆盖旧数据）+ 记录财务快照
+  await Promise.all([
+    saveAnalysis(analysis),
+    recordFinanceSnapshot(upper, metrics),
+  ]);
 
   return NextResponse.json({ ...analysis, cached: false, llmReused });
 }

@@ -42,6 +42,12 @@ yarn-error.log*
 .strategies.json
 .analysis-cache.json
 
+# 数据库
+prisma/dev.db
+prisma/dev.db-journal
+*.db
+*.db-journal
+
 # vercel
 .vercel
 

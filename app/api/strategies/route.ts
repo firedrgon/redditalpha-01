@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  readStrategies,
-  addStrategy,
-  updateStrategy,
-  deleteStrategy,
-  resetStrategies,
-  setStrategyEnabled,
-  addCategory,
-  updateCategory,
-  deleteCategory,
-  setCategoryStrategiesEnabled,
+  readStrategiesDB as readStrategies,
+  addStrategyDB as addStrategy,
+  updateStrategyDB as updateStrategy,
+  deleteStrategyDB as deleteStrategy,
+  resetStrategiesDB as resetStrategies,
+  setStrategyEnabledDB as setStrategyEnabled,
+  addCategoryDB as addCategory,
+  updateCategoryDB as updateCategory,
+  deleteCategoryDB as deleteCategory,
+  setCategoryStrategiesEnabledDB as setCategoryStrategiesEnabled,
+} from "@/lib/db";
+import {
   type Strategy,
   type StrategyCategory,
   type MetricField,
