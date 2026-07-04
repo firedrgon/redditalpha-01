@@ -3,27 +3,49 @@ import {
   readFinanceConfig,
   setFmpApiKey,
   setAvApiKey,
+  setTiingoApiKey,
+  setFinnhubApiKey,
 } from "@/lib/finance-config";
 
 export const runtime = "nodejs";
 
+function maskKey(key: string): string {
+  if (!key) return "";
+  if (key.length <= 8) return `${key.slice(0, 2)}****${key.slice(-2)}`;
+  return `${key.slice(0, 4)}****${key.slice(-4)}`;
+}
+
+function buildResponse(config: {
+  fmpApiKey: string;
+  avApiKey: string;
+  tiingoApiKey: string;
+  finnhubApiKey: string;
+  updatedAt: number;
+}) {
+  return {
+    fmpApiKeyMasked: maskKey(config.fmpApiKey),
+    hasFmpKey: config.fmpApiKey !== "",
+    avApiKeyMasked: maskKey(config.avApiKey),
+    hasAvKey: config.avApiKey !== "",
+    tiingoApiKeyMasked: maskKey(config.tiingoApiKey),
+    hasTiingoKey: config.tiingoApiKey !== "",
+    finnhubApiKeyMasked: maskKey(config.finnhubApiKey),
+    hasFinnhubKey: config.finnhubApiKey !== "",
+    updatedAt: config.updatedAt,
+  };
+}
+
 /** GET /api/finance-config：读取财务数据源配置（不返回明文 Key，只返回脱敏） */
 export async function GET() {
   const config = await readFinanceConfig();
-  const fmpMasked = config.fmpApiKey ? `${config.fmpApiKey.slice(0, 4)}****${config.fmpApiKey.slice(-4)}` : "";
-  const avMasked = config.avApiKey ? `${config.avApiKey.slice(0, 4)}****${config.avApiKey.slice(-4)}` : "";
-  return NextResponse.json({
-    fmpApiKeyMasked: fmpMasked,
-    hasFmpKey: config.fmpApiKey !== "",
-    avApiKeyMasked: avMasked,
-    hasAvKey: config.avApiKey !== "",
-    updatedAt: config.updatedAt,
-  });
+  return NextResponse.json(buildResponse(config));
 }
 
 interface PatchBody {
   fmpApiKey?: string;
   avApiKey?: string;
+  tiingoApiKey?: string;
+  finnhubApiKey?: string;
 }
 
 /** PATCH /api/finance-config：更新 API Key */
@@ -42,16 +64,16 @@ export async function PATCH(request: NextRequest) {
     if (body.avApiKey !== undefined) {
       await setAvApiKey(body.avApiKey);
     }
+    if (body.tiingoApiKey !== undefined) {
+      await setTiingoApiKey(body.tiingoApiKey);
+    }
+    if (body.finnhubApiKey !== undefined) {
+      await setFinnhubApiKey(body.finnhubApiKey);
+    }
     const config = await readFinanceConfig();
-    const fmpMasked = config.fmpApiKey ? `${config.fmpApiKey.slice(0, 4)}****${config.fmpApiKey.slice(-4)}` : "";
-    const avMasked = config.avApiKey ? `${config.avApiKey.slice(0, 4)}****${config.avApiKey.slice(-4)}` : "";
     return NextResponse.json({
       ok: true,
-      fmpApiKeyMasked: fmpMasked,
-      hasFmpKey: config.fmpApiKey !== "",
-      avApiKeyMasked: avMasked,
-      hasAvKey: config.avApiKey !== "",
-      updatedAt: config.updatedAt,
+      ...buildResponse(config),
     });
   } catch (err) {
     return NextResponse.json(
