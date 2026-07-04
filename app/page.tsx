@@ -670,8 +670,8 @@ function AnalysisModal({
                       </span>
                       <VerdictBadge verdict={m.verdict} />
                     </div>
-                    <div className="flex-shrink-0">
-                      <span className="text-sm font-mono font-semibold text-orange-400">
+                    <div className="flex-shrink-0 text-right">
+                      <span className="whitespace-pre-line text-sm font-mono font-semibold text-orange-400">
                         {m.value}
                       </span>
                     </div>

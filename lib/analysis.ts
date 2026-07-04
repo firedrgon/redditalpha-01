@@ -185,7 +185,7 @@ function computeOne(
     const analysts = metrics.numberOfAnalysts;
     if (value != null && currentPrice != null && targetMean != null) {
       const analystStr = analysts != null ? `（${analysts}位分析师）` : "";
-      displayValue = `当前价 $${currentPrice.toFixed(2)} → 目标均价 $${targetMean.toFixed(2)}，上涨空间 ${(value * 100).toFixed(2)}%${analystStr}`;
+      displayValue = `当前价 $${currentPrice.toFixed(2)} → 目标均价 $${targetMean.toFixed(2)}\n上涨空间 ${(value * 100).toFixed(2)}%${analystStr}`;
     }
   } else if (strategy.metricField === "recommendationMean") {
     if (value != null) {
