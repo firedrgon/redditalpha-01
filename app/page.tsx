@@ -2603,9 +2603,10 @@ export default function Home() {
   }, []);
 
   const toggleFavorite = useCallback(
-    (ticker: string, name?: string | null) => {
+    async (ticker: string, name?: string | null) => {
       const upper = ticker.trim().toUpperCase();
       if (!upper) return;
+      const willAdd = !favorites.some((f) => f.ticker.toUpperCase() === upper);
       setFavorites((prev) => {
         const exists = prev.some((f) => f.ticker.toUpperCase() === upper);
         if (exists) {
@@ -2616,8 +2617,23 @@ export default function Home() {
           { ticker: upper, name: name ?? null, addedAt: Date.now() },
         ];
       });
+      try {
+        if (willAdd) {
+          await fetch("/api/favorites", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ticker: upper, name: name ?? undefined }),
+          });
+        } else {
+          await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
+            method: "DELETE",
+          });
+        }
+      } catch (err) {
+        console.error("Failed to toggle favorite:", err);
+      }
     },
-    []
+    [favorites]
   );
 
   const handleToggleFromCard = useCallback(
