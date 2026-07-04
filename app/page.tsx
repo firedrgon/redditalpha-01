@@ -33,41 +33,12 @@ interface SubredditData {
 }
 
 // ============================================================
-// 收藏类型 & 本地存储工具
+// 收藏类型
 // ============================================================
 interface FavoriteItem {
   ticker: string;
   name?: string | null;
   addedAt: number;
-}
-
-const FAVORITES_STORAGE_KEY = "reddit-alpha:favorites";
-
-function loadFavorites(): FavoriteItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item) =>
-        item &&
-        typeof item.ticker === "string" &&
-        typeof item.addedAt === "number"
-    );
-  } catch {
-    return [];
-  }
-}
-
-function saveFavorites(items: FavoriteItem[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(items));
-  } catch (err) {
-    console.error("Failed to save favorites:", err);
-  }
 }
 
 // ============================================================
@@ -2556,16 +2527,32 @@ export default function Home() {
   // 策略管理弹窗
   const [showStrategies, setShowStrategies] = useState(false);
 
-  // 初始化：从 localStorage 读取收藏
+  // 初始化：从后端 API 读取收藏
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFavorites(loadFavorites());
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/favorites");
+        const json = await res.json();
+        if (cancelled) return;
+        if (json.favorites && Array.isArray(json.favorites)) {
+          setFavorites(
+            json.favorites.map((f: { ticker: string; name?: string | null; createdAt: number }) => ({
+              ticker: f.ticker,
+              name: f.name ?? null,
+              addedAt: f.createdAt,
+            }))
+          );
+        }
+      } catch (err) {
+        console.error("Failed to load favorites:", err);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // 收藏变化时写回 localStorage
-  useEffect(() => {
-    saveFavorites(favorites);
-  }, [favorites]);
 
   const favoriteTickers = useMemo(
     () => new Set(favorites.map((f) => f.ticker.toUpperCase())),
@@ -2578,7 +2565,7 @@ export default function Home() {
   );
 
   const addFavorite = useCallback(
-    (ticker: string, name?: string | null) => {
+    async (ticker: string, name?: string | null) => {
       const upper = ticker.trim().toUpperCase();
       if (!upper) return;
       setFavorites((prev) => {
@@ -2588,15 +2575,31 @@ export default function Home() {
           { ticker: upper, name: name ?? null, addedAt: Date.now() },
         ];
       });
+      try {
+        await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: upper, name: name ?? undefined }),
+        });
+      } catch (err) {
+        console.error("Failed to add favorite:", err);
+      }
     },
     []
   );
 
-  const removeFavorite = useCallback((ticker: string) => {
+  const removeFavorite = useCallback(async (ticker: string) => {
     const upper = ticker.trim().toUpperCase();
     setFavorites((prev) =>
       prev.filter((f) => f.ticker.toUpperCase() !== upper)
     );
+    try {
+      await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
+        method: "DELETE",
+      });
+    } catch (err) {
+      console.error("Failed to remove favorite:", err);
+    }
   }, []);
 
   const toggleFavorite = useCallback(
@@ -2951,7 +2954,7 @@ export default function Home() {
                   我的收藏
                 </h2>
                 <p className="mt-1 text-sm text-zinc-500">
-                  已收藏 {favorites.length} 个标的 · 数据保存在本地
+                  已收藏 {favorites.length} 个标的 · 数据保存在服务端
                 </p>
               </div>
             </div>
@@ -3037,7 +3040,7 @@ export default function Home() {
             )}
 
             <div className="mt-8 border-t border-zinc-800 pt-6 text-center text-xs text-zinc-600">
-              收藏数据：浏览器 localStorage · 策略 / 分析缓存 / LLM Key：服务端本地文件
+              收藏数据：服务端数据库 · 策略 / 分析缓存：服务端数据库
             </div>
           </>
         )}
