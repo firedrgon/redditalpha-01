@@ -283,6 +283,199 @@ const SECTOR_DEFAULT_PE: Record<string, number> = {
   "Real Estate": 25,
 };
 
+/**
+ * 细分行业 → 广义 Sector 映射
+ * 用于当数据源只返回细分行业（如 Finnhub 的 finnhubIndustry）时，
+ * 能够匹配到 SECTOR_DEFAULT_PE 中对应的行业 PE 经验值。
+ */
+const INDUSTRY_TO_SECTOR: Record<string, string> = {
+  // Technology
+  "Software": "Technology",
+  "Software - Application": "Technology",
+  "Software - Infrastructure": "Technology",
+  "Software - SaaS": "Technology",
+  "Semiconductors": "Technology",
+  "Semiconductor": "Technology",
+  "Semiconductor Equipment & Materials": "Technology",
+  "Computer Hardware": "Technology",
+  "Hardware": "Technology",
+  "Electronics": "Technology",
+  "Electronic Components": "Technology",
+  "Consumer Electronics": "Technology",
+  "IT Services": "Technology",
+  "Information Technology Services": "Technology",
+  "Internet Software & Services": "Technology",
+  "Internet Content & Information": "Technology",
+  "Internet Services": "Technology",
+  "Cloud Computing": "Technology",
+  "AI": "Technology",
+  "Artificial Intelligence": "Technology",
+
+  // Communication Services
+  "Media": "Communication Services",
+  "Entertainment": "Communication Services",
+  "Broadcasting": "Communication Services",
+  "Telecommunication Services": "Communication Services",
+  "Telecommunications": "Communication Services",
+  "Wireless Telecommunications": "Communication Services",
+  "Movies & Entertainment": "Communication Services",
+  "Gaming": "Communication Services",
+  "Video Games": "Communication Services",
+  "Interactive Media": "Communication Services",
+  "Interactive Home Entertainment": "Communication Services",
+  "Publishing": "Communication Services",
+
+  // Consumer Cyclical
+  "Retail": "Consumer Cyclical",
+  "Specialty Retail": "Consumer Cyclical",
+  "Department Stores": "Consumer Cyclical",
+  "Internet Retail": "Consumer Cyclical",
+  "E-Commerce": "Consumer Cyclical",
+  "Automobiles": "Consumer Cyclical",
+  "Auto & Truck Dealerships": "Consumer Cyclical",
+  "Auto Manufacturers": "Consumer Cyclical",
+  "Auto Parts": "Consumer Cyclical",
+  "Restaurants": "Consumer Cyclical",
+  "Restaurants & Cafes": "Consumer Cyclical",
+  "Travel Services": "Consumer Cyclical",
+  "Leisure": "Consumer Cyclical",
+  "Lodging": "Consumer Cyclical",
+  "Hotels & Resorts": "Consumer Cyclical",
+  "Casinos & Gambling": "Consumer Cyclical",
+  "Textile Manufacturing": "Consumer Cyclical",
+  "Apparel Retail": "Consumer Cyclical",
+  "Apparel Manufacturing": "Consumer Cyclical",
+  "Footwear & Accessories": "Consumer Cyclical",
+  "Furnishings, Fixtures & Appliances": "Consumer Cyclical",
+  "Home Improvement Retail": "Consumer Cyclical",
+
+  // Consumer Defensive
+  "Packaged Foods": "Consumer Defensive",
+  "Food Products": "Consumer Defensive",
+  "Beverages": "Consumer Defensive",
+  "Beverages - Non-Alcoholic": "Consumer Defensive",
+  "Beverages - Alcoholic": "Consumer Defensive",
+  "Household & Personal Products": "Consumer Defensive",
+  "Tobacco": "Consumer Defensive",
+  "Grocery Stores": "Consumer Defensive",
+  "Discount Stores": "Consumer Defensive",
+  "Farm Products": "Consumer Defensive",
+  "Drug Manufacturers": "Healthcare",
+
+  // Healthcare
+  "Drug Manufacturers - General": "Healthcare",
+  "Drug Manufacturers - Specialty & Generic": "Healthcare",
+  "Pharmaceuticals": "Healthcare",
+  "Biotechnology": "Healthcare",
+  "Biotech": "Healthcare",
+  "Medical Devices": "Healthcare",
+  "Medical Instruments & Supplies": "Healthcare",
+  "Medical Diagnostics & Research": "Healthcare",
+  "Healthcare Plans": "Healthcare",
+  "Health Information Services": "Healthcare",
+  "Medical Distribution": "Healthcare",
+
+  // Financials
+  "Banks": "Financials",
+  "Banks - National": "Financials",
+  "Banks - Regional": "Financials",
+  "Credit Services": "Financials",
+  "Insurance": "Financials",
+  "Insurance - Property & Casualty": "Financials",
+  "Insurance - Life": "Financials",
+  "Asset Management": "Financials",
+  "Capital Markets": "Financials",
+  "Investment Banking & Brokerage": "Financials",
+  "Mortgage Finance": "Financials",
+  "Fintech": "Financials",
+  "Financial Data & Stock Exchanges": "Financials",
+
+  // Industrials
+  "Aerospace & Defense": "Industrials",
+  "Airports & Air Services": "Industrials",
+  "Airlines": "Industrials",
+  "Railroads": "Industrials",
+  "Trucking": "Industrials",
+  "Marine Shipping": "Industrials",
+  "Integrated Freight & Logistics": "Industrials",
+  "Specialty Industrial Machinery": "Industrials",
+  "Industrial Products": "Industrials",
+  "Industrial Distribution": "Industrials",
+  "Conglomerates": "Industrials",
+  "Consulting Services": "Industrials",
+  "Rental & Leasing Services": "Industrials",
+  "Security & Protection Services": "Industrials",
+
+  // Energy
+  "Oil & Gas": "Energy",
+  "Oil & Gas Midstream": "Energy",
+  "Oil & Gas Upstream": "Energy",
+  "Oil & Gas Downstream": "Energy",
+  "Oil & Gas Integrated": "Energy",
+  "Oil & Gas Equipment & Services": "Energy",
+  "Oil & Gas E&P": "Energy",
+  "Thermal Coal": "Energy",
+  "Uranium": "Energy",
+
+  // Utilities
+  "Utilities - Independent Power Producers": "Utilities",
+  "Utilities - Regulated Electric": "Utilities",
+  "Utilities - Regulated Water": "Utilities",
+  "Utilities - Regulated Gas": "Utilities",
+  "Utilities - Diversified": "Utilities",
+  "Renewable Energy": "Utilities",
+
+  // Materials
+  "Chemicals": "Materials",
+  "Specialty Chemicals": "Materials",
+  "Basic Materials": "Materials",
+  "Metals & Mining": "Materials",
+  "Gold": "Materials",
+  "Silver": "Materials",
+  "Copper": "Materials",
+  "Steel": "Materials",
+  "Aluminum": "Materials",
+  "Building Materials": "Materials",
+  "Paper & Paper Products": "Materials",
+  "Agricultural Inputs": "Materials",
+
+  // Real Estate
+  "REIT": "Real Estate",
+  "REITs": "Real Estate",
+  "Real Estate - Rental": "Real Estate",
+  "Real Estate Services": "Real Estate",
+  "Real Estate Development": "Real Estate",
+  "Real Estate - Diversified": "Real Estate",
+  "Industrial REITs": "Real Estate",
+  "Residential REITs": "Real Estate",
+  "Retail REITs": "Real Estate",
+  "Office REITs": "Real Estate",
+  "Hotel REITs": "Real Estate",
+};
+
+/**
+ * 根据行业名（可能是细分行业，也可能是 broad sector）获取对应的行业 PE 经验值。
+ * 先精确匹配 SECTOR_DEFAULT_PE，再通过 INDUSTRY_TO_SECTOR 映射找 broad sector。
+ */
+function getSectorPE(industry: string | null | undefined): number | null {
+  if (!industry) return null;
+  // 直接匹配 broad sector
+  if (SECTOR_DEFAULT_PE[industry] != null) return SECTOR_DEFAULT_PE[industry];
+  // 映射到 broad sector 后再匹配
+  const sector = INDUSTRY_TO_SECTOR[industry];
+  if (sector && SECTOR_DEFAULT_PE[sector] != null) return SECTOR_DEFAULT_PE[sector];
+  return null;
+}
+
+/**
+ * 根据行业名获取对应的 broad sector 名（用于显示）。
+ */
+function getBroadSector(industry: string | null | undefined): string | null {
+  if (!industry) return null;
+  if (SECTOR_DEFAULT_PE[industry] != null) return industry;
+  return INDUSTRY_TO_SECTOR[industry] ?? null;
+}
+
 const FMP_BASE = "https://financialmodelingprep.com";
 const AV_BASE = "https://www.alphavantage.co/query";
 const TIINGO_BASE = "https://api.tiingo.com";
@@ -653,8 +846,9 @@ async function fetchAVMetrics(
 
   // 行业 PE 近似（用 sector 经验值）
   const sector = overview?.Sector;
-  if (sector && SECTOR_DEFAULT_PE[sector]) {
-    result.industryPE = SECTOR_DEFAULT_PE[sector];
+  const sectorPE = getSectorPE(sector);
+  if (sector && sectorPE != null) {
+    result.industryPE = sectorPE;
     warnings.push(
       `行业 PE 用 ${sector} 行业经验值 ${result.industryPE}（仅供参考）。`
     );
@@ -945,10 +1139,11 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
   }
 
   if (result.industry) {
-    const indPE = SECTOR_DEFAULT_PE[result.industry] ?? null;
-    if (indPE != null) {
+    const indPE = getSectorPE(result.industry);
+    const broadSector = getBroadSector(result.industry);
+    if (indPE != null && broadSector) {
       result.industryPE = indPE;
-      warnings.push(`行业 PE 用 ${result.industry} 行业经验值 ${indPE}（仅供参考）。`);
+      warnings.push(`行业 PE 用 ${broadSector} 行业经验值 ${indPE}（仅供参考）。`);
     }
   }
 
@@ -1153,10 +1348,11 @@ async function fetchTiingoMetrics(ticker: string, apiKey: string): Promise<Finan
   }
 
   if (result.industry) {
-    const indPE = SECTOR_DEFAULT_PE[result.industry] ?? null;
-    if (indPE != null) {
+    const indPE = getSectorPE(result.industry);
+    const broadSector = getBroadSector(result.industry);
+    if (indPE != null && broadSector) {
       result.industryPE = indPE;
-      warnings.push(`行业 PE 用 ${result.industry} 行业经验值 ${indPE}（仅供参考）。`);
+      warnings.push(`行业 PE 用 ${broadSector} 行业经验值 ${indPE}（仅供参考）。`);
     }
   }
 
@@ -1319,8 +1515,9 @@ async function fetchFMPMetrics(
 
   // 行业 PE 近似（用 sector 经验值）
   const sector = profile?.sector;
-  if (sector && SECTOR_DEFAULT_PE[sector]) {
-    result.industryPE = SECTOR_DEFAULT_PE[sector];
+  const sectorPE = getSectorPE(sector);
+  if (sector && sectorPE != null) {
+    result.industryPE = sectorPE;
     warnings.push(
       `行业 PE 用 ${sector} 行业经验值 ${result.industryPE}（仅供参考）。`
     );
@@ -1407,6 +1604,7 @@ function mergeMetrics(
 export async function fetchFinancialMetrics(
   ticker: string
 ): Promise<FinancialMetrics> {
+  const upper = ticker.trim().toUpperCase();
   const result = await fetchFinancialMetricsInternal(ticker);
 
   // 无论主数据源是什么，只要有 Finnhub Key，就尝试补充新闻
@@ -1447,6 +1645,33 @@ export async function fetchFinancialMetrics(
             result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
           }
         }
+      }
+    } catch {
+      // 补充失败不影响主结果
+    }
+  }
+
+  // 若主数据源有 PE 但没有行业 PE，尝试用 Finnhub profile 补充行业信息（轻量级）
+  if (
+    finnhubKey &&
+    result.trailingPE != null &&
+    result.industryPE == null
+  ) {
+    try {
+      const profile = await finnhubGet<FinnhubCompanyProfile>(
+        `/stock/profile2?symbol=${upper}`,
+        finnhubKey
+      );
+      const industry =
+        profile.data?.industry || profile.data?.finnhubIndustry || null;
+      const indPE = getSectorPE(industry);
+      const broadSector = getBroadSector(industry);
+      if (indPE != null && broadSector) {
+        result.industry = industry;
+        result.industryPE = indPE;
+        result.warnings.push(
+          `行业 PE 用 ${broadSector} 行业经验值 ${indPE}（仅供参考）。`
+        );
       }
     } catch {
       // 补充失败不影响主结果
@@ -1699,8 +1924,9 @@ async function fetchFinancialMetricsInternal(
       warnings.push("部分数据来自 v7/quote 端点，可能不完整。");
 
       const sector = str(v7.sector);
-      if (sector && SECTOR_DEFAULT_PE[sector]) {
-        fallback.industryPE = SECTOR_DEFAULT_PE[sector];
+      const sectorPE = getSectorPE(sector);
+      if (sector && sectorPE != null) {
+        fallback.industryPE = sectorPE;
         warnings.push(`行业 PE 用 ${sector} 行业近似值 ${fallback.industryPE}。`);
       }
     } else {
@@ -1833,8 +2059,9 @@ async function fetchFinancialMetricsInternal(
 
   // 行业 PE：Yahoo 不直接提供行业平均 PE
   // 退而求其次：用 sector 经验值
-  if (sector && SECTOR_DEFAULT_PE[sector]) {
-    fallback.industryPE = SECTOR_DEFAULT_PE[sector];
+  const sectorPE = getSectorPE(sector);
+  if (sector && sectorPE != null) {
+    fallback.industryPE = sectorPE;
     warnings.push(
       `行业 PE 用 ${sector} 行业经验值 ${fallback.industryPE}（仅供参考）。`
     );

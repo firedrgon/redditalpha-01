@@ -126,9 +126,11 @@ function getFieldValue(
       return metrics.profitMargin;
     case "peVsIndustry": {
       // 特殊：取 PE / industryPE 比值
-      if (metrics.trailingPE == null || metrics.industryPE == null) return null;
+      // 优先用 trailingPE，没有的话用 forwardPE
+      const pe = metrics.trailingPE ?? metrics.forwardPE;
+      if (pe == null || metrics.industryPE == null) return null;
       if (metrics.industryPE === 0) return null;
-      return metrics.trailingPE / metrics.industryPE;
+      return pe / metrics.industryPE;
     }
     case "targetUpside":
       return metrics.targetUpside;
@@ -171,13 +173,14 @@ function computeOne(
   // 对 peVsIndustry 给出更友好的展示
   let displayValue = fmtValue(value, strategy.format);
   if (strategy.metricField === "peVsIndustry") {
-    const pe = metrics.trailingPE;
+    const pe = metrics.trailingPE ?? metrics.forwardPE;
+    const peLabel = metrics.trailingPE != null ? "PE" : "Forward PE";
     const indPE = metrics.industryPE;
     displayValue =
       pe != null && indPE != null
-        ? `PE ${pe.toFixed(2)} / 行业 ${indPE.toFixed(2)} = ${(pe / indPE).toFixed(2)}`
+        ? `${peLabel} ${pe.toFixed(2)} / 行业 ${indPE.toFixed(2)} = ${(pe / indPE).toFixed(2)}`
         : pe != null
-          ? `PE ${pe.toFixed(2)} / 行业 —`
+          ? `${peLabel} ${pe.toFixed(2)} / 行业 —`
           : "—";
   } else if (strategy.metricField === "targetUpside") {
     const currentPrice = metrics.currentPrice;
