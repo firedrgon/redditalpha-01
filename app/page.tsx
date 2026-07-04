@@ -576,17 +576,14 @@ function AnalysisModal({
                         {analysis.targetUpside >= 0 ? "+" : ""}{(analysis.targetUpside * 100).toFixed(1)}%
                       </div>
                     </div>
-                    <div className="ml-auto flex items-center gap-2 text-xs">
-                      <div className="text-right">
-                        <div className="text-[10px] text-zinc-500">当前</div>
-                        <div className="font-mono text-zinc-300">{analysis.currentPrice != null ? `$${analysis.currentPrice.toFixed(2)}` : "—"}</div>
+                    <div className="ml-auto text-right text-xs">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span className="text-[10px] text-zinc-500">当前</span>
+                        <span className="font-mono text-zinc-300">{analysis.currentPrice != null ? `$${analysis.currentPrice.toFixed(2)}` : "—"}</span>
                       </div>
-                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-zinc-600" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                      </svg>
-                      <div className="text-right">
-                        <div className="text-[10px] text-zinc-500">目标</div>
-                        <div className="font-mono font-medium text-cyan-400">{analysis.targetMeanPrice != null ? `$${analysis.targetMeanPrice.toFixed(2)}` : "—"}</div>
+                      <div className="mt-0.5 flex items-center justify-end gap-1.5">
+                        <span className="text-[10px] text-zinc-500">目标</span>
+                        <span className="font-mono font-medium text-cyan-400">{analysis.targetMeanPrice != null ? `$${analysis.targetMeanPrice.toFixed(2)}` : "—"}</span>
                       </div>
                     </div>
                   </div>
