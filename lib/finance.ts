@@ -208,6 +208,11 @@ async function fetchV7Quote(
 function num(v: unknown): number | null {
   if (v == null) return null;
   if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    if (v === "" || v === "None" || v === "none" || v === "null" || v === "undefined" || v === "-") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
   if (typeof v === "object" && v !== null && "raw" in v) {
     const raw = (v as { raw?: unknown }).raw;
     if (typeof raw === "number" && Number.isFinite(raw)) return raw;
@@ -337,6 +342,7 @@ interface AVOverview {
 
 interface AVIncomeStatement {
   date: string;
+  fiscalDateEnding: string;
   revenue: string;
   grossProfit: string;
   operatingIncome: string;
@@ -346,8 +352,12 @@ interface AVIncomeStatement {
 
 interface AVBalanceSheet {
   date: string;
+  fiscalDateEnding: string;
   totalStockholdersEquity: string;
+  totalShareholderEquity: string;
   totalAssets: string;
+  totalCurrentAssets: string;
+  totalCurrentLiabilities: string;
   currentAssets: string;
   currentLiabilities: string;
 }
@@ -435,7 +445,8 @@ async function fetchAVMetrics(
 
   const revenueHistory: Array<{ year: number; revenue: number | null }> = [];
   for (const stmt of income) {
-    const date = new Date(stmt.date);
+    const dateStr = stmt.fiscalDateEnding || stmt.date;
+    const date = new Date(dateStr);
     const year = date.getFullYear();
     if (Number.isFinite(year)) {
       revenueHistory.push({ year, revenue: num(stmt.revenue) });
@@ -446,17 +457,34 @@ async function fetchAVMetrics(
 
   const roeHistory: Array<{ year: number; roe: number | null }> = [];
   for (const bs of balance) {
-    const date = new Date(bs.date);
+    const dateStr = bs.fiscalDateEnding || bs.date;
+    const date = new Date(dateStr);
     const year = date.getFullYear();
     if (!Number.isFinite(year)) continue;
     const inc = income.find((s) => {
-      const sYear = new Date(s.date).getFullYear();
+      const sDateStr = s.fiscalDateEnding || s.date;
+      const sYear = new Date(sDateStr).getFullYear();
       return sYear === year;
     });
-    const equity = num(bs.totalStockholdersEquity);
+    const equity = num(bs.totalStockholdersEquity) ?? num(bs.totalShareholderEquity);
     const netIncome = inc ? num(inc.netIncome) : null;
     const roe = equity != null && netIncome != null && equity !== 0 ? netIncome / equity : null;
     roeHistory.push({ year, roe });
+
+    // 用 balance sheet 计算 currentRatio（如果 overview 没提供）
+    if (result.currentRatio == null) {
+      const currentAssets = num(bs.totalCurrentAssets) ?? num(bs.currentAssets);
+      const currentLiabilities = num(bs.totalCurrentLiabilities) ?? num(bs.currentLiabilities);
+      if (currentAssets != null && currentLiabilities != null && currentLiabilities !== 0) {
+        result.currentRatio = currentAssets / currentLiabilities;
+      }
+    }
+    // 用 balance sheet 计算 quickRatio
+    if (result.quickRatio == null && result.currentRatio != null) {
+      // 粗略估算：quickRatio ≈ currentRatio * 0.8（没有存货数据时的近似）
+      result.quickRatio = result.currentRatio;
+      warnings.push("quickRatio 用 currentRatio 近似（缺少存货数据）。");
+    }
   }
   roeHistory.sort((a, b) => a.year - b.year);
   result.roeHistory = roeHistory;
@@ -692,8 +720,9 @@ export async function fetchFinancialMetrics(
   const avKey = await getAvApiKey();
   if (avKey) {
     const av = await fetchAVMetrics(upper, avKey);
-    const hasFinancialData = av.trailingPE || av.totalRevenue || av.roe;
-    if (hasFinancialData) {
+    // AV 只要返回了公司信息或财务数据，就使用它
+    const hasAnyData = av.name || av.marketCap || av.industry || av.totalRevenue || av.trailingPE || av.currentRatio;
+    if (hasAnyData) {
       return av;
     }
     if (av.warnings.length > 0) {
