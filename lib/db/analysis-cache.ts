@@ -1,14 +1,8 @@
 import { prisma } from "./prisma";
+import type { AnalysisCache as PrismaAnalysisCache } from "@prisma/client";
 import type { StockAnalysis } from "../analysis";
 
-export async function getCachedAnalysisDB(
-  ticker: string
-): Promise<StockAnalysis | null> {
-  const row = await prisma.analysisCache.findUnique({
-    where: { ticker: ticker.toUpperCase() },
-  });
-  if (!row) return null;
-
+function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
   return {
     ticker: row.ticker,
     name: row.name ?? undefined,
@@ -32,6 +26,16 @@ export async function getCachedAnalysisDB(
     fetchedAt: row.updatedAt.toISOString(),
     cached: true,
   };
+}
+
+export async function getCachedAnalysisDB(
+  ticker: string
+): Promise<StockAnalysis | null> {
+  const row = await prisma.analysisCache.findUnique({
+    where: { ticker: ticker.toUpperCase() },
+  });
+  if (!row) return null;
+  return mapAnalysis(row);
 }
 
 export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
@@ -94,8 +98,7 @@ export async function clearAllCacheDB(): Promise<void> {
 
 export async function listCachedTickersDB(): Promise<string[]> {
   const rows = await prisma.analysisCache.findMany({
-    select: { ticker: true },
     orderBy: { ticker: "asc" },
   });
-  return rows.map((r) => r.ticker);
+  return rows.map(mapAnalysis).map((a) => a.ticker);
 }

@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import type { FinanceSnapshot as PrismaFinanceSnapshot } from "@prisma/client";
 import type { FinancialMetrics } from "../finance";
 
 export interface FinanceSnapshotRecord {
@@ -27,6 +28,36 @@ export interface FinanceSnapshotRecord {
   targetUpside?: number | null;
   recommendationMean?: number | null;
   dataSource?: string | null;
+}
+
+function mapSnapshot(r: PrismaFinanceSnapshot): FinanceSnapshotRecord {
+  return {
+    id: r.id,
+    ticker: r.ticker,
+    snapshotDate: r.snapshotDate.toISOString(),
+    price: r.price,
+    marketCap: r.marketCap,
+    trailingPE: r.trailingPE,
+    forwardPE: r.forwardPE,
+    pegRatio: r.pegRatio,
+    priceToBook: r.priceToBook,
+    roe: r.roe,
+    returnOnEquity5yAvg: r.returnOnEquity5yAvg,
+    revenueGrowthYoY: r.revenueGrowthYoY,
+    quarterlyRevenueGrowth: r.quarterlyRevenueGrowth,
+    grossMargin: r.grossMargin,
+    profitMargin: r.profitMargin,
+    quickRatio: r.quickRatio,
+    currentRatio: r.currentRatio,
+    debtToEquity: r.debtToEquity,
+    industry: r.industry,
+    sector: r.sector,
+    industryPE: r.industryPE,
+    targetMeanPrice: r.targetMeanPrice,
+    targetUpside: r.targetUpside,
+    recommendationMean: r.recommendationMean,
+    dataSource: r.dataSource,
+  };
 }
 
 export async function recordFinanceSnapshot(
@@ -114,33 +145,7 @@ export async function getFinanceHistory(
     orderBy: { snapshotDate: "asc" },
   });
 
-  return rows.map((r) => ({
-    id: r.id,
-    ticker: r.ticker,
-    snapshotDate: r.snapshotDate.toISOString(),
-    price: r.price,
-    marketCap: r.marketCap,
-    trailingPE: r.trailingPE,
-    forwardPE: r.forwardPE,
-    pegRatio: r.pegRatio,
-    priceToBook: r.priceToBook,
-    roe: r.roe,
-    returnOnEquity5yAvg: r.returnOnEquity5yAvg,
-    revenueGrowthYoY: r.revenueGrowthYoY,
-    quarterlyRevenueGrowth: r.quarterlyRevenueGrowth,
-    grossMargin: r.grossMargin,
-    profitMargin: r.profitMargin,
-    quickRatio: r.quickRatio,
-    currentRatio: r.currentRatio,
-    debtToEquity: r.debtToEquity,
-    industry: r.industry,
-    sector: r.sector,
-    industryPE: r.industryPE,
-    targetMeanPrice: r.targetMeanPrice,
-    targetUpside: r.targetUpside,
-    recommendationMean: r.recommendationMean,
-    dataSource: r.dataSource,
-  }));
+  return rows.map(mapSnapshot);
 }
 
 export async function getLatestFinanceSnapshot(
@@ -151,31 +156,5 @@ export async function getLatestFinanceSnapshot(
     orderBy: { snapshotDate: "desc" },
   });
   if (!row) return null;
-  return {
-    id: row.id,
-    ticker: row.ticker,
-    snapshotDate: row.snapshotDate.toISOString(),
-    price: row.price,
-    marketCap: row.marketCap,
-    trailingPE: row.trailingPE,
-    forwardPE: row.forwardPE,
-    pegRatio: row.pegRatio,
-    priceToBook: row.priceToBook,
-    roe: row.roe,
-    returnOnEquity5yAvg: row.returnOnEquity5yAvg,
-    revenueGrowthYoY: row.revenueGrowthYoY,
-    quarterlyRevenueGrowth: row.quarterlyRevenueGrowth,
-    grossMargin: row.grossMargin,
-    profitMargin: row.profitMargin,
-    quickRatio: row.quickRatio,
-    currentRatio: row.currentRatio,
-    debtToEquity: row.debtToEquity,
-    industry: row.industry,
-    sector: row.sector,
-    industryPE: row.industryPE,
-    targetMeanPrice: row.targetMeanPrice,
-    targetUpside: row.targetUpside,
-    recommendationMean: row.recommendationMean,
-    dataSource: row.dataSource,
-  };
+  return mapSnapshot(row);
 }

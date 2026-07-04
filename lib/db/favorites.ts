@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import type { Favorite as PrismaFavorite } from "@prisma/client";
 
 export interface Favorite {
   id: string;
@@ -10,11 +11,8 @@ export interface Favorite {
   updatedAt: number;
 }
 
-export async function listFavorites(): Promise<Favorite[]> {
-  const rows = await prisma.favorite.findMany({
-    orderBy: { createdAt: "desc" },
-  });
-  return rows.map((r) => ({
+function mapFavorite(r: PrismaFavorite): Favorite {
+  return {
     id: r.id,
     ticker: r.ticker,
     name: r.name,
@@ -22,7 +20,14 @@ export async function listFavorites(): Promise<Favorite[]> {
     tags: r.tags ? JSON.parse(r.tags) : [],
     createdAt: r.createdAt.getTime(),
     updatedAt: r.updatedAt.getTime(),
-  }));
+  };
+}
+
+export async function listFavorites(): Promise<Favorite[]> {
+  const rows = await prisma.favorite.findMany({
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(mapFavorite);
 }
 
 export async function isFavorite(ticker: string): Promise<boolean> {
@@ -50,15 +55,7 @@ export async function addFavorite(
       tags: data?.tags ? JSON.stringify(data.tags) : null,
     },
   });
-  return {
-    id: row.id,
-    ticker: row.ticker,
-    name: row.name,
-    note: row.note,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    createdAt: row.createdAt.getTime(),
-    updatedAt: row.updatedAt.getTime(),
-  };
+  return mapFavorite(row);
 }
 
 export async function removeFavorite(ticker: string): Promise<void> {
@@ -79,13 +76,5 @@ export async function updateFavorite(
       tags: data.tags ? JSON.stringify(data.tags) : undefined,
     },
   });
-  return {
-    id: row.id,
-    ticker: row.ticker,
-    name: row.name,
-    note: row.note,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    createdAt: row.createdAt.getTime(),
-    updatedAt: row.updatedAt.getTime(),
-  };
+  return mapFavorite(row);
 }
