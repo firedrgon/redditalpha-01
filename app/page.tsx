@@ -97,6 +97,7 @@ interface StockAnalysis {
   llmError?: string;
   fetchedAt: string;
   cached?: boolean;
+  llmReused?: boolean;
   dataSource?: string;
   warnings?: string[];
   strategyIdsUsed?: string[];
@@ -518,19 +519,19 @@ function AnalysisModal({
                 <span className="ml-2 text-sm text-zinc-400">{item.name}</span>
               )}
             </h3>
-            {analysis && !loading && (
+            {analysis && !loading && analysis.llmNarrative && (
               <button
                 type="button"
                 onClick={handleReanalyze}
                 disabled={loading}
                 className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-40"
-                title="重新拉取财务数据并调用大模型分析"
+                title="重新调用大模型生成 AI 分析（财务数据已自动刷新）"
               >
                 <span className="flex items-center gap-1">
                   <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
                   </svg>
-                  重新分析
+                  重新生成 AI 分析
                 </span>
               </button>
             )}
@@ -542,9 +543,9 @@ function AnalysisModal({
                 （共 {analysis.metrics.length} 项指标）
               </span>
             )}
-            {analysis?.cached && (
-              <span className="ml-2 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-300">
-                来自缓存
+            {analysis?.llmReused && (
+              <span className="ml-2 inline-flex items-center rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-300">
+                AI 分析已复用
               </span>
             )}
           </p>
@@ -833,8 +834,8 @@ function AnalysisModal({
             )}
 
             <div className="text-right text-[10px] text-zinc-600">
-              {analysis.cached ? "缓存时间" : "数据时间"}：{new Date(analysis.fetchedAt).toLocaleString("zh-CN")}
-              {analysis.cached && " · 点击右上「重新分析」可刷新数据"}
+              数据时间：{new Date(analysis.fetchedAt).toLocaleString("zh-CN")}
+              {analysis.llmReused && " · AI 分析已复用，点击右上可重新生成"}
             </div>
           </div>
         )}
