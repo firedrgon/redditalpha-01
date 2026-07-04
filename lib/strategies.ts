@@ -25,7 +25,9 @@ export type MetricField =
   | "currentRatio"
   | "grossMargin" // 毛利率（小数）
   | "profitMargin" // 净利率（小数）
-  | "peVsIndustry"; // PE / 行业 PE（特殊：比值型，无 industryPE 时不可判定）
+  | "peVsIndustry" // PE / 行业 PE（特殊：比值型，无 industryPE 时不可判定）
+  | "targetUpside" // 分析师目标价上涨空间（小数，0.10 = 10%）
+  | "recommendationMean"; // 分析师推荐均值（1=强力买入，2=买入，3=持有，4=卖出，5=强力卖出）
 
 export type Operator = ">=" | ">" | "<=" | "<" | "==" | "!=";
 export type ValueFormat = "percent" | "number" | "ratio";
@@ -127,6 +129,16 @@ export const METRIC_FIELD_INFO: Record<
     format: "ratio",
     description: "PE 相对行业平均 PE 的倍数，1.5 表示 PE 比行业高 50%",
   },
+  targetUpside: {
+    label: "分析师目标价上涨空间",
+    format: "percent",
+    description: "(分析师目标均价 ÷ 当前价 - 1)，正值表示有上涨潜力",
+  },
+  recommendationMean: {
+    label: "分析师推荐评级",
+    format: "number",
+    description: "1=强力买入, 2=买入, 3=持有, 4=卖出, 5=强力卖出，数值越低越看好",
+  },
 };
 
 export const OPERATORS: { value: Operator; label: string }[] = [
@@ -171,6 +183,14 @@ export const DEFAULT_CATEGORIES: StrategyCategory[] = [
     order: 4,
     isDefault: true,
     color: "blue",
+  },
+  {
+    id: "cat-analyst",
+    name: "分析师预期",
+    description: "基于华尔街分析师目标价与评级",
+    order: 5,
+    isDefault: true,
+    color: "cyan",
   },
 ];
 
@@ -248,6 +268,36 @@ export const DEFAULT_STRATEGIES: Strategy[] = [
     enabled: true,
     isDefault: true,
     order: 1,
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: "default-target-upside",
+    name: "分析师目标价上涨空间 ≥ 10%",
+    description: "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+    categoryId: "cat-analyst",
+    metricField: "targetUpside",
+    operator: ">=",
+    threshold: 0.1,
+    format: "percent",
+    enabled: true,
+    isDefault: true,
+    order: 1,
+    createdAt: 0,
+    updatedAt: 0,
+  },
+  {
+    id: "default-recommendation",
+    name: "分析师评级为买入或以上",
+    description: "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+    categoryId: "cat-analyst",
+    metricField: "recommendationMean",
+    operator: "<=",
+    threshold: 2.0,
+    format: "number",
+    enabled: true,
+    isDefault: true,
+    order: 2,
     createdAt: 0,
     updatedAt: 0,
   },

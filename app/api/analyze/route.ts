@@ -78,6 +78,14 @@ export async function GET(request: NextRequest) {
     fetchedAt: new Date().toISOString(),
     dataSource: metrics.dataSource,
     warnings: metrics.warnings,
+    currentPrice: metrics.currentPrice,
+    targetMeanPrice: metrics.targetMeanPrice,
+    targetHighPrice: metrics.targetHighPrice,
+    targetLowPrice: metrics.targetLowPrice,
+    targetMedianPrice: metrics.targetMedianPrice,
+    targetUpside: metrics.targetUpside,
+    numberOfAnalysts: metrics.numberOfAnalysts,
+    recommendationMean: metrics.recommendationMean,
   };
 
   // 5. 调用 LLM 补充叙述（可选）

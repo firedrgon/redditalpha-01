@@ -29,6 +29,16 @@ export interface FinancialMetrics {
   pegRatio: number | null;
   industry?: string | null;
   industryPE?: number | null; // 行业 PE（近似值）
+  // 当前价格
+  currentPrice?: number | null;
+  // 分析师目标价与评级
+  targetMeanPrice: number | null; // 分析师目标价均值
+  targetHighPrice: number | null; // 分析师目标价高位
+  targetLowPrice: number | null; // 分析师目标价低位
+  targetMedianPrice: number | null; // 分析师目标价中位数
+  numberOfAnalysts: number | null; // 覆盖分析师数量
+  recommendationMean: number | null; // 推荐均值 (1=强力买入, 2=买入, 3=持有, 4=卖出, 5=强力卖出)
+  targetUpside: number | null; // 目标价上涨空间 = (targetMeanPrice / currentPrice - 1)
   // 成长
   revenueGrowthYoY: number | null; // 营收同比增速（小数，0.15 = 15%）
   quarterlyRevenueGrowth: number | null;
@@ -295,6 +305,17 @@ interface FMPBalanceSheet {
   totalStockholdersEquity: number;
 }
 
+interface FMPPriceTarget {
+  symbol: string;
+  targetHigh?: number;
+  targetLow?: number;
+  targetConsensus?: number;
+  targetMedian?: number;
+  numberOfAnalysts?: number;
+  recommendationMean?: number;
+  recommendationKey?: string;
+}
+
 async function fmpGet<T>(
   path: string,
   apiKey: string
@@ -425,6 +446,14 @@ async function fetchAVMetrics(
     pegRatio: num(overview?.PEGRatio) ?? null,
     industry: overview?.Industry ?? null,
     industryPE: null,
+    currentPrice: null,
+    targetMeanPrice: null,
+    targetHighPrice: null,
+    targetLowPrice: null,
+    targetMedianPrice: null,
+    numberOfAnalysts: null,
+    recommendationMean: null,
+    targetUpside: null,
     revenueGrowthYoY: num(overview?.RevenueGrowth) ? num(overview?.RevenueGrowth)! / 100 : null,
     quarterlyRevenueGrowth: null,
     roe: num(overview?.ROE) ? num(overview?.ROE)! / 100 : null,
@@ -534,7 +563,7 @@ async function fetchFMPMetrics(
   const upper = ticker.toUpperCase();
   const warnings: string[] = [];
 
-  const [profileRes, ratiosRes, incomeRes, balanceRes] = await Promise.all([
+  const [profileRes, ratiosRes, incomeRes, balanceRes, priceTargetRes] = await Promise.all([
     fmpGet<FMPProfile[]>(`/stable/profile?symbol=${upper}`, apiKey),
     fmpGet<FMPRatio[]>(`/stable/ratios?symbol=${upper}&period=annual&limit=5`, apiKey),
     fmpGet<FMPIncomeStatement[]>(
@@ -545,10 +574,11 @@ async function fetchFMPMetrics(
       `/stable/balance-sheet-statement?symbol=${upper}&period=annual&limit=5`,
       apiKey
     ),
+    fmpGet<FMPPriceTarget[]>(`/stable/price-target-consensus?symbol=${upper}`, apiKey),
   ]);
 
   // 收集所有错误
-  for (const res of [profileRes, ratiosRes, incomeRes, balanceRes]) {
+  for (const res of [profileRes, ratiosRes, incomeRes, balanceRes, priceTargetRes]) {
     if (res.error) warnings.push(res.error);
   }
 
@@ -556,9 +586,11 @@ async function fetchFMPMetrics(
   const ratios = ratiosRes.data ?? [];
   const income = incomeRes.data ?? [];
   const balance = balanceRes.data ?? [];
+  const priceTarget = priceTargetRes.data?.[0];
 
   const latestRatio = ratios[0];
   const latestIncome = income[0];
+  const currentPrice = num(profile?.price);
 
   // 如果所有端点都失败，返回空数据（但 dataSource 仍是 fmp，warnings 包含错误）
   const result: FinancialMetrics = {
@@ -569,6 +601,14 @@ async function fetchFMPMetrics(
     pegRatio: num(latestRatio?.priceToEarningsGrowthRatio) ?? null,
     industry: profile?.industry ?? null,
     industryPE: null,
+    currentPrice,
+    targetMeanPrice: num(priceTarget?.targetConsensus) ?? null,
+    targetHighPrice: num(priceTarget?.targetHigh) ?? null,
+    targetLowPrice: num(priceTarget?.targetLow) ?? null,
+    targetMedianPrice: num(priceTarget?.targetMedian) ?? null,
+    numberOfAnalysts: num(priceTarget?.numberOfAnalysts) ?? null,
+    recommendationMean: num(priceTarget?.recommendationMean) ?? null,
+    targetUpside: null,
     revenueGrowthYoY: null,
     quarterlyRevenueGrowth: null,
     roe: num(latestRatio?.returnOnEquity) ?? null,
@@ -586,6 +626,11 @@ async function fetchFMPMetrics(
     dataSource: "fmp",
     warnings,
   };
+
+  // 计算上涨空间
+  if (result.targetMeanPrice != null && currentPrice != null && currentPrice > 0) {
+    result.targetUpside = result.targetMeanPrice / currentPrice - 1;
+  }
 
   // 历史营收
   const revenueHistory: Array<{ year: number; revenue: number | null }> = [];
@@ -750,6 +795,14 @@ export async function fetchFinancialMetrics(
     pegRatio: null,
     industry: null,
     industryPE: null,
+    currentPrice: null,
+    targetMeanPrice: null,
+    targetHighPrice: null,
+    targetLowPrice: null,
+    targetMedianPrice: null,
+    numberOfAnalysts: null,
+    recommendationMean: null,
+    targetUpside: null,
     revenueGrowthYoY: null,
     quarterlyRevenueGrowth: null,
     roe: null,
@@ -788,6 +841,16 @@ export async function fetchFinancialMetrics(
       fallback.name = str(v7.longName) ?? str(v7.shortName);
       fallback.currency = str(v7.currency);
       fallback.marketCap = num(v7.marketCap);
+      fallback.currentPrice = num(v7.regularMarketPrice) ?? num(v7.currentPrice);
+      fallback.targetMeanPrice = num(v7.targetMeanPrice);
+      fallback.targetHighPrice = num(v7.targetHighPrice);
+      fallback.targetLowPrice = num(v7.targetLowPrice);
+      fallback.targetMedianPrice = num(v7.targetMedianPrice);
+      fallback.numberOfAnalysts = num(v7.numberOfAnalystOpinions);
+      fallback.recommendationMean = num(v7.recommendationMean);
+      if (fallback.targetMeanPrice != null && fallback.currentPrice != null && fallback.currentPrice > 0) {
+        fallback.targetUpside = fallback.targetMeanPrice / fallback.currentPrice - 1;
+      }
       warnings.push("部分数据来自 v7/quote 端点，可能不完整。");
 
       // 行业 PE 近似
@@ -824,6 +887,18 @@ export async function fetchFinancialMetrics(
   fallback.trailingPE = num(summaryDetail.trailingPE);
   fallback.forwardPE = num(summaryDetail.forwardPE);
   fallback.pegRatio = num(defaultKeyStats.pegRatio) ?? num(summaryDetail.pegRatio);
+
+  // 当前价格与分析师目标价
+  fallback.currentPrice = num(financialData.currentPrice) ?? num(summaryDetail.regularMarketPrice);
+  fallback.targetMeanPrice = num(financialData.targetMeanPrice);
+  fallback.targetHighPrice = num(financialData.targetHighPrice);
+  fallback.targetLowPrice = num(financialData.targetLowPrice);
+  fallback.targetMedianPrice = num(financialData.targetMedianPrice);
+  fallback.numberOfAnalysts = num(financialData.numberOfAnalystOpinions);
+  fallback.recommendationMean = num(financialData.recommendationMean);
+  if (fallback.targetMeanPrice != null && fallback.currentPrice != null && fallback.currentPrice > 0) {
+    fallback.targetUpside = fallback.targetMeanPrice / fallback.currentPrice - 1;
+  }
 
   // 成长
   fallback.revenueGrowthYoY = num(financialData.revenueGrowth);

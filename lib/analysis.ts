@@ -33,6 +33,15 @@ export interface StockAnalysis {
   metrics: MetricResult[];
   overallVerdict: Verdict;
   overallSummary: string;
+  // 分析师目标价与评级统计
+  currentPrice?: number | null;
+  targetMeanPrice?: number | null;
+  targetHighPrice?: number | null;
+  targetLowPrice?: number | null;
+  targetMedianPrice?: number | null;
+  targetUpside?: number | null;
+  numberOfAnalysts?: number | null;
+  recommendationMean?: number | null;
   // LLM 叙述（若可用）
   llmNarrative?: string;
   llmProvider?: string;
@@ -121,6 +130,10 @@ function getFieldValue(
       if (metrics.industryPE === 0) return null;
       return metrics.trailingPE / metrics.industryPE;
     }
+    case "targetUpside":
+      return metrics.targetUpside;
+    case "recommendationMean":
+      return metrics.recommendationMean;
     default:
       return null;
   }
@@ -166,6 +179,27 @@ function computeOne(
         : pe != null
           ? `PE ${pe.toFixed(2)} / 行业 —`
           : "—";
+  } else if (strategy.metricField === "targetUpside") {
+    const currentPrice = metrics.currentPrice;
+    const targetMean = metrics.targetMeanPrice;
+    const analysts = metrics.numberOfAnalysts;
+    if (value != null && currentPrice != null && targetMean != null) {
+      const analystStr = analysts != null ? `（${analysts}位分析师）` : "";
+      displayValue = `当前价 $${currentPrice.toFixed(2)} → 目标均价 $${targetMean.toFixed(2)}，上涨空间 ${(value * 100).toFixed(2)}%${analystStr}`;
+    }
+  } else if (strategy.metricField === "recommendationMean") {
+    if (value != null) {
+      let label = "";
+      if (value <= 1.5) label = "强力买入";
+      else if (value <= 2.5) label = "买入";
+      else if (value <= 3.5) label = "持有";
+      else if (value <= 4.5) label = "卖出";
+      else label = "强力卖出";
+      const high = metrics.targetHighPrice;
+      const low = metrics.targetLowPrice;
+      const rangeStr = high != null && low != null ? `，目标价区间 $${low.toFixed(2)}~$${high.toFixed(2)}` : "";
+      displayValue = `${value.toFixed(2)}（${label}）${rangeStr}`;
+    }
   }
 
   return {
@@ -259,6 +293,24 @@ export function buildLLMMessages(
     dataLines.push(
       `总营收：${(metrics.totalRevenue / 1e9).toFixed(2)} 亿（${metrics.currency || "USD"}）`
     );
+  if (metrics.currentPrice != null)
+    dataLines.push(`当前股价：$${metrics.currentPrice.toFixed(2)}`);
+  if (metrics.targetMeanPrice != null) {
+    const upside = metrics.targetUpside != null ? `${(metrics.targetUpside * 100).toFixed(2)}%` : "—";
+    const analystStr = metrics.numberOfAnalysts != null ? `（${metrics.numberOfAnalysts}位分析师）` : "";
+    dataLines.push(`分析师目标均价：$${metrics.targetMeanPrice.toFixed(2)}，上涨空间：${upside}${analystStr}`);
+  }
+  if (metrics.targetHighPrice != null && metrics.targetLowPrice != null)
+    dataLines.push(`分析师目标价区间：$${metrics.targetLowPrice.toFixed(2)} ~ $${metrics.targetHighPrice.toFixed(2)}`);
+  if (metrics.recommendationMean != null) {
+    let label = "";
+    if (metrics.recommendationMean <= 1.5) label = "强力买入";
+    else if (metrics.recommendationMean <= 2.5) label = "买入";
+    else if (metrics.recommendationMean <= 3.5) label = "持有";
+    else if (metrics.recommendationMean <= 4.5) label = "卖出";
+    else label = "强力卖出";
+    dataLines.push(`分析师推荐评级：${metrics.recommendationMean.toFixed(2)}（${label}）`);
+  }
   dataLines.push("");
   dataLines.push(`【启用的指标数据（共 ${results.length} 项）】`);
   for (const r of results) {

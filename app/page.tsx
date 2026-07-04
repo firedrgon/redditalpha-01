@@ -100,6 +100,14 @@ interface StockAnalysis {
   dataSource?: string;
   warnings?: string[];
   strategyIdsUsed?: string[];
+  currentPrice?: number | null;
+  targetMeanPrice?: number | null;
+  targetHighPrice?: number | null;
+  targetLowPrice?: number | null;
+  targetMedianPrice?: number | null;
+  targetUpside?: number | null;
+  numberOfAnalysts?: number | null;
+  recommendationMean?: number | null;
 }
 
 // ============================================================
@@ -279,7 +287,7 @@ function TickerCard({
         href={redditUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex-1 min-w-0 focus:outline-none"
+        className="flex-1 min-w-0 pr-8 focus:outline-none"
       >
         <div className="flex items-center justify-between">
           <div className="flex items-baseline gap-2">
@@ -314,10 +322,10 @@ function TickerCard({
           e.stopPropagation();
           onToggleFavorite(ticker);
         }}
-        className={`absolute top-2 right-2 rounded-md p-1 transition-all ${
+        className={`absolute top-2 right-2 rounded-md p-1.5 transition-all ${
           isFavorite
             ? "text-yellow-400 hover:text-yellow-300"
-            : "text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-zinc-300"
+            : "text-zinc-500 opacity-60 hover:text-yellow-400 hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
         }`}
         title={isFavorite ? "移除收藏" : "加入收藏"}
         aria-label={isFavorite ? "移除收藏" : "加入收藏"}
@@ -544,6 +552,87 @@ function AnalysisModal({
                 {analysis.overallSummary}
               </div>
             </div>
+
+            {/* 分析师目标价统计 */}
+            {(analysis.targetMeanPrice != null || analysis.currentPrice != null || analysis.recommendationMean != null) && (
+              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                  </svg>
+                  <span className="text-xs font-medium text-cyan-400">
+                    分析师目标价统计
+                  </span>
+                  {analysis.numberOfAnalysts != null && (
+                    <span className="text-[10px] text-zinc-500">
+                      · {analysis.numberOfAnalysts}位分析师覆盖
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-lg bg-zinc-800/50 p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 mb-1">当前价</div>
+                    <div className="text-sm font-mono font-semibold text-zinc-200">
+                      {analysis.currentPrice != null ? `$${analysis.currentPrice.toFixed(2)}` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-zinc-800/50 p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 mb-1">目标均价</div>
+                    <div className="text-sm font-mono font-semibold text-cyan-400">
+                      {analysis.targetMeanPrice != null ? `$${analysis.targetMeanPrice.toFixed(2)}` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-zinc-800/50 p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 mb-1">目标低位</div>
+                    <div className="text-sm font-mono font-semibold text-red-400">
+                      {analysis.targetLowPrice != null ? `$${analysis.targetLowPrice.toFixed(2)}` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-zinc-800/50 p-2.5 text-center">
+                    <div className="text-[10px] text-zinc-500 mb-1">目标高位</div>
+                    <div className="text-sm font-mono font-semibold text-green-400">
+                      {analysis.targetHighPrice != null ? `$${analysis.targetHighPrice.toFixed(2)}` : "—"}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-4">
+                    {analysis.targetUpside != null && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-zinc-400">上涨空间:</span>
+                        <span className={`text-sm font-mono font-semibold ${analysis.targetUpside >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {analysis.targetUpside >= 0 ? "+" : ""}{(analysis.targetUpside * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
+                    {analysis.targetMedianPrice != null && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-zinc-400">目标中位数:</span>
+                        <span className="text-sm font-mono text-zinc-300">${analysis.targetMedianPrice.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                  {analysis.recommendationMean != null && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-zinc-400">共识评级:</span>
+                      <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                        analysis.recommendationMean <= 1.5 ? "bg-green-500/20 text-green-400" :
+                        analysis.recommendationMean <= 2.5 ? "bg-lime-500/20 text-lime-400" :
+                        analysis.recommendationMean <= 3.5 ? "bg-yellow-500/20 text-yellow-400" :
+                        analysis.recommendationMean <= 4.5 ? "bg-orange-500/20 text-orange-400" :
+                        "bg-red-500/20 text-red-400"
+                      }`}>
+                        {analysis.recommendationMean <= 1.5 ? "强力买入" :
+                         analysis.recommendationMean <= 2.5 ? "买入" :
+                         analysis.recommendationMean <= 3.5 ? "持有" :
+                         analysis.recommendationMean <= 4.5 ? "卖出" : "强力卖出"}
+                        <span className="ml-1 opacity-70">({analysis.recommendationMean.toFixed(2)})</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 5 项指标 */}
             <div className="space-y-2">
