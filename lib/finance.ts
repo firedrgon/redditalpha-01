@@ -3,8 +3,8 @@
  *
  * 数据获取优先级（从高到低）：
  *   1. Financial Modeling Prep (FMP) — 数据最完整，需 API Key
- *   2. Finnhub — 分析师目标价和财务数据，免费 tier 60 req/min
- *   3. Tiingo — EOD 价格 + 基本面，免费 tier 500 req/day
+ *   2. Tiingo — EOD 价格 + 基本面，免费 tier 500 req/day
+ *   3. Finnhub — 分析师目标价和财务数据，免费 tier 60 req/min
  *   4. Alpha Vantage — FMP Premium 股票补充，免费 tier 25 req/day
  *   5. Yahoo Finance quoteSummary（带 crumb 认证）
  *   6. Yahoo Finance v7/quote（字段较少，但通常不要 crumb）
@@ -1358,20 +1358,20 @@ export async function fetchFinancialMetrics(
 
     // FMP 财务数据是 Premium 的，但 profile 可能还有
     if (hasProfile(fmp)) {
-      // 依次尝试用 Finnhub / Tiingo / AV 补充财务数据
-      if (finnhubKey) {
-        const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
-        if (hasCore(finnhub) || finnhub.targetMeanPrice != null) {
-          return mergeMetrics(fmp, finnhub, "fmp+finnhub", [
+      // 依次尝试用 Tiingo / Finnhub / AV 补充财务数据
+      if (tiingoKey) {
+        const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
+        if (hasCore(tiingo) || tiingo.targetMeanPrice != null) {
+          return mergeMetrics(fmp, tiingo, "fmp+tiingo", [
             ...warnings,
             ...fmp.warnings,
           ]);
         }
       }
-      if (tiingoKey) {
-        const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
-        if (hasCore(tiingo) || tiingo.targetMeanPrice != null) {
-          return mergeMetrics(fmp, tiingo, "fmp+tiingo", [
+      if (finnhubKey) {
+        const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
+        if (hasCore(finnhub) || finnhub.targetMeanPrice != null) {
+          return mergeMetrics(fmp, finnhub, "fmp+finnhub", [
             ...warnings,
             ...fmp.warnings,
           ]);
@@ -1398,19 +1398,7 @@ export async function fetchFinancialMetrics(
   }
 
   // ============================================================
-  // 2. Finnhub
-  // ============================================================
-  if (finnhubKey) {
-    const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
-    if (hasAny(finnhub)) {
-      return finnhub;
-    }
-    warnings.push(...finnhub.warnings);
-    warnings.push("Finnhub 未返回有效数据，降级到 Tiingo。");
-  }
-
-  // ============================================================
-  // 3. Tiingo
+  // 2. Tiingo
   // ============================================================
   if (tiingoKey) {
     const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
@@ -1418,7 +1406,19 @@ export async function fetchFinancialMetrics(
       return tiingo;
     }
     warnings.push(...tiingo.warnings);
-    warnings.push("Tiingo 未返回有效数据，降级到 Alpha Vantage。");
+    warnings.push("Tiingo 未返回有效数据，降级到 Finnhub。");
+  }
+
+  // ============================================================
+  // 3. Finnhub
+  // ============================================================
+  if (finnhubKey) {
+    const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
+    if (hasAny(finnhub)) {
+      return finnhub;
+    }
+    warnings.push(...finnhub.warnings);
+    warnings.push("Finnhub 未返回有效数据，降级到 Alpha Vantage。");
   }
 
   // ============================================================
