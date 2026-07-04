@@ -33,6 +33,13 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# LLM 本地配置（含 API Key，勿提交）
+.llm-config.json
+
+# 分析策略与缓存（本地文件，勿提交）
+.strategies.json
+.analysis-cache.json
+
 # vercel
 .vercel
 
