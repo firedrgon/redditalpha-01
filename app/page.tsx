@@ -514,6 +514,11 @@ function AnalysisModal({
                 （共 {analysis.metrics.length} 项指标）
               </span>
             )}
+            {analysis?.llmProvider && (
+              <span className="ml-2 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-300">
+                🤖 {analysis.llmProvider}
+              </span>
+            )}
             {analysis?.llmReused && (
               <span className="ml-2 inline-flex items-center rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-300">
                 AI 分析已复用

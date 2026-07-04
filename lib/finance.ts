@@ -1651,6 +1651,71 @@ export async function fetchFinancialMetrics(
     }
   }
 
+  // 若目标价相关字段有任何缺失，尝试用 Yahoo Finance financialData 补充
+  // （包括均值、高低位、中位数、分析师数量、推荐均值）
+  const needsYfTargetSupplement =
+    result.targetMeanPrice == null ||
+    result.targetHighPrice == null ||
+    result.targetLowPrice == null ||
+    result.targetMedianPrice == null ||
+    result.numberOfAnalysts == null ||
+    result.recommendationMean == null;
+
+  if (needsYfTargetSupplement) {
+    try {
+      const yfSummary = await fetchQuoteSummary(upper, ["financialData"]);
+      if (yfSummary) {
+        const fd = (yfSummary as Record<string, unknown>).financialData as
+          | Record<string, unknown>
+          | undefined;
+        if (fd) {
+          let hasNewData = false;
+          const mean = num(fd.targetMeanPrice);
+          const high = num(fd.targetHighPrice);
+          const low = num(fd.targetLowPrice);
+          const median = num(fd.targetMedianPrice);
+          const analysts = num(fd.numberOfAnalystOpinions);
+          const recMean = num(fd.recommendationMean);
+
+          if (mean != null && result.targetMeanPrice == null) {
+            result.targetMeanPrice = mean;
+            hasNewData = true;
+          }
+          if (high != null && result.targetHighPrice == null) {
+            result.targetHighPrice = high;
+            hasNewData = true;
+          }
+          if (low != null && result.targetLowPrice == null) {
+            result.targetLowPrice = low;
+            hasNewData = true;
+          }
+          if (median != null && result.targetMedianPrice == null) {
+            result.targetMedianPrice = median;
+            hasNewData = true;
+          }
+          if (analysts != null && result.numberOfAnalysts == null) {
+            result.numberOfAnalysts = analysts;
+            hasNewData = true;
+          }
+          if (recMean != null && result.recommendationMean == null) {
+            result.recommendationMean = recMean;
+            hasNewData = true;
+          }
+          if (hasNewData) {
+            result.warnings.push(
+              "分析师目标价与评级由 Yahoo Finance 补充。"
+            );
+            if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+              result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+            }
+          }
+        }
+      }
+    } catch {
+      // 补充失败不影响主结果
+    }
+  }
+
   // 若主数据源有 PE 但没有行业 PE，尝试用 Finnhub profile 补充行业信息（轻量级）
   if (
     finnhubKey &&
