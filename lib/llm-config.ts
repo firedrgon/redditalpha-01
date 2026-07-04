@@ -1,14 +1,14 @@
 /**
- * 本地 LLM 配置管理
+ * LLM 配置管理
  *
- * 配置文件路径：项目根目录 .llm-config.json
- * 该文件保存：
- *   - 各提供商的 API Key（用户输入）
- *   - 各提供商的健康检查状态（定时测试后更新）
- *   - 当前活跃提供商
+ * 优先级（高 → 低）：
+ *   1. 环境变量 LLM_API_KEY_<PROVIDER_ID> （serverless / 只读文件系统场景）
+ *   2. 本地配置文件 .llm-config.json（开发环境）
+ *   3. 内存副本（写入失败时降级使用）
  *
- * "定时收集保存在本地"：通过 refreshProviderStatuses() 周期性测试哪些
- * 提供商可用，把结果写回本地文件，避免每次调用都重新探测。
+ * "定时收集保存在本地"：
+ *   - 本地可写时：写入 .llm-config.json
+ *   - 只读文件系统时：仅更新内存副本（重启后丢失，但当前请求内仍可用）
  */
 
 import fs from "node:fs/promises";
@@ -50,27 +50,95 @@ const DEFAULT_CONFIG: LLMConfig = {
   updatedAt: 0,
 };
 
-/** 读取本地配置文件，不存在则返回默认配置 */
-export async function readConfig(): Promise<LLMConfig> {
-  try {
-    const raw = await fs.readFile(CONFIG_FILE, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<LLMConfig>;
-    // 合并默认值，确保新增的 provider 也能出现
-    const merged: LLMConfig = {
-      providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers || {}) },
-      activeProvider: parsed.activeProvider ?? null,
-      updatedAt: parsed.updatedAt ?? 0,
-    };
-    return merged;
-  } catch {
-    return { ...DEFAULT_CONFIG, providers: { ...DEFAULT_CONFIG.providers } };
+// 内存降级副本：当文件不可写时使用
+let memoryConfig: LLMConfig | null = null;
+
+/** 从环境变量读取 API Key（serverless 场景） */
+function readEnvKeys(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of LLM_PROVIDERS) {
+    const envKey = `LLM_API_KEY_${p.id.toUpperCase().replace(/-/g, "_")}`;
+    const v = process.env[envKey];
+    if (v && v.trim()) out[p.id] = v.trim();
   }
+  // 兼容常用变量名
+  const aliases: Array<[string, string]> = [
+    ["GROQ_API_KEY", "groq"],
+    ["GEMINI_API_KEY", "gemini"],
+    ["GOOGLE_API_KEY", "gemini"],
+    ["OPENROUTER_API_KEY", "openrouter-free"],
+    ["HUGGINGFACE_API_KEY", "huggingface"],
+    ["HF_API_KEY", "huggingface"],
+    ["TOGETHER_API_KEY", "together"],
+    ["TOGETHERAI_API_KEY", "together"],
+  ];
+  for (const [alias, providerId] of aliases) {
+    const v = process.env[alias];
+    if (v && v.trim() && !out[providerId]) out[providerId] = v.trim();
+  }
+  return out;
 }
 
-/** 写入本地配置文件 */
+/** 把环境变量中的 Key 注入到 config */
+function applyEnvKeys(config: LLMConfig): LLMConfig {
+  const envKeys = readEnvKeys();
+  for (const [id, key] of Object.entries(envKeys)) {
+    const s = config.providers[id];
+    if (s) {
+      s.apiKey = key;
+      if (!s.enabled) s.enabled = true;
+      if (s.working === null) s.working = null; // 保持未测试状态
+    }
+  }
+  if (!config.activeProvider && envKeys) {
+    const firstId = Object.keys(envKeys)[0];
+    if (firstId) config.activeProvider = firstId;
+  }
+  return config;
+}
+
+/** 读取配置：文件 → 内存 → 默认值，最后叠加环境变量 */
+export async function readConfig(): Promise<LLMConfig> {
+  let config: LLMConfig;
+  if (memoryConfig) {
+    config = JSON.parse(JSON.stringify(memoryConfig)) as LLMConfig;
+  } else {
+    try {
+      const raw = await fs.readFile(CONFIG_FILE, "utf-8");
+      const parsed = JSON.parse(raw) as Partial<LLMConfig>;
+      config = {
+        providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers || {}) },
+        activeProvider: parsed.activeProvider ?? null,
+        updatedAt: parsed.updatedAt ?? 0,
+      };
+    } catch {
+      config = {
+        ...DEFAULT_CONFIG,
+        providers: { ...DEFAULT_CONFIG.providers },
+      };
+    }
+  }
+  // 叠加环境变量（每次读取都应用，因为环境变量随时可能变化）
+  applyEnvKeys(config);
+  return config;
+}
+
+/** 写入配置：文件可写则写文件，否则只更新内存副本 */
 export async function writeConfig(config: LLMConfig): Promise<void> {
   const data: LLMConfig = { ...config, updatedAt: Date.now() };
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
+  // 始终更新内存副本
+  memoryConfig = JSON.parse(JSON.stringify(data)) as LLMConfig;
+  // 尝试写文件（失败则降级到内存模式）
+  try {
+    await fs.writeFile(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    // 只读文件系统等：忽略错误，使用内存副本
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("EROFS") && !msg.includes("read-only")) {
+      // 其他错误才抛出
+      throw err;
+    }
+  }
 }
 
 /** 更新某个 provider 的 API Key */
@@ -83,7 +151,7 @@ export async function setProviderKey(
   if (status) {
     status.apiKey = apiKey.trim();
     status.enabled = status.apiKey !== "" || !getProviderById(providerId)?.needsKey;
-    status.working = null; // 重置 working 状态，待下次测试
+    status.working = null;
     status.lastTested = null;
   }
   await writeConfig(config);
@@ -131,19 +199,16 @@ export function pickProvider(
     const p = providers.find((x) => x.id === id);
     const s = p ? config.providers[id] : null;
     if (p && s && s.enabled && (s.working === true || s.working === null)) {
-      // working=true 或未测试但有 key（needsKey=false 也可）都允许
       if (!p.needsKey || s.apiKey) return p;
     }
     return null;
   };
 
-  // 1. activeProvider
   const picked = tryPick(config.activeProvider);
   if (picked) {
     return { provider: picked, status: config.providers[picked.id] };
   }
 
-  // 2. 已通过测试 working=true 的
   for (const p of sorted) {
     const s = config.providers[p.id];
     if (!s || !s.enabled) continue;
@@ -152,7 +217,6 @@ export function pickProvider(
     }
   }
 
-  // 3. 未测试但有 Key 或无需 Key 的
   for (const p of sorted) {
     const s = config.providers[p.id];
     if (!s || !s.enabled) continue;

@@ -253,8 +253,15 @@ export const DEFAULT_STRATEGIES: Strategy[] = [
   },
 ];
 
+// 内存降级副本：当文件不可写时使用
+let memoryStore: StrategyStore | null = null;
+
 /** 读取策略库（不存在时返回默认） */
 export async function readStrategies(): Promise<StrategyStore> {
+  // 优先用内存副本（写入失败后的降级路径）
+  if (memoryStore) {
+    return JSON.parse(JSON.stringify(memoryStore)) as StrategyStore;
+  }
   try {
     const raw = await fs.readFile(FILE, "utf-8");
     const parsed = JSON.parse(raw) as Partial<StrategyStore>;
@@ -343,7 +350,7 @@ function mergeStrategiesWithDefaults(
   return out;
 }
 
-/** 写入策略库 */
+/** 写入策略库：文件可写则写文件，否则只更新内存副本（serverless 降级） */
 async function writeStore(store: StrategyStore): Promise<StrategyStore> {
   const mergedCats = mergeCategoriesWithDefaults(store.categories);
   const mergedStrats = mergeStrategiesWithDefaults(store.strategies, mergedCats);
@@ -352,7 +359,17 @@ async function writeStore(store: StrategyStore): Promise<StrategyStore> {
     strategies: mergedStrats,
     updatedAt: Date.now(),
   };
-  await fs.writeFile(FILE, JSON.stringify(out, null, 2), "utf-8");
+  // 始终更新内存副本
+  memoryStore = JSON.parse(JSON.stringify(out)) as StrategyStore;
+  // 尝试写文件（失败则降级到内存模式）
+  try {
+    await fs.writeFile(FILE, JSON.stringify(out, null, 2), "utf-8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("EROFS") && !msg.includes("read-only")) {
+      throw err;
+    }
+  }
   return out;
 }
 
