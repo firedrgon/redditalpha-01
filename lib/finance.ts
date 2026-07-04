@@ -1,11 +1,11 @@
 /**
- * 财务数据获取（Yahoo Finance 非官方端点）
+ * 财务数据获取（多数据源自动降级）
  *
- * 数据获取流程：
- *   1. 获取 crumb（用 cookie 请求 /v1/test/getcrumb）
- *   2. 用 crumb + cookie 调 quoteSummary
- *   3. 若失败，回退到 v7/quote（不需要 crumb，但字段少）
- *   4. 若仍失败，所有字段返回 null + 添加 warning
+ * 数据获取优先级（从高到低）：
+ *   1. Financial Modeling Prep (FMP) — 数据最完整，需 API Key
+ *   2. Yahoo Finance quoteSummary（带 crumb 认证）
+ *   3. Yahoo Finance v7/quote（字段较少，但通常不要 crumb）
+ *   4. 全 null fallback
  *
  * 用于支持 5 项指标分析：
  *   1. 营收年增长 ≥ 10%
@@ -14,6 +14,8 @@
  *   4. 近 5 年平均 ROE > 15%
  *   5. 速动比率 > 1.5
  */
+
+import { getFmpApiKey as getConfigFmpKey } from "./finance-config";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -46,7 +48,7 @@ export interface FinancialMetrics {
   marketCap?: number | null;
   currency?: string | null;
   fetchedAt: string;
-  dataSource: "yahoo" | "yahoo-v7" | "fallback";
+  dataSource: "fmp" | "yahoo" | "yahoo-v7" | "fallback";
   warnings: string[];
 }
 
@@ -223,6 +225,227 @@ function str(v: unknown): string | null {
   return null;
 }
 
+const FMP_BASE = "https://financialmodelingprep.com/api";
+
+async function getFmpApiKey(): Promise<string | null> {
+  try {
+    const key = await getConfigFmpKey();
+    if (key && key.trim()) return key.trim();
+  } catch {
+    // 配置读取失败时兜底读环境变量
+  }
+  const envKey = process.env.FMP_API_KEY;
+  if (envKey && envKey.trim()) return envKey.trim();
+  return null;
+}
+
+interface FMPProfile {
+  symbol: string;
+  companyName?: string;
+  industry?: string;
+  sector?: string;
+  mktCap?: number;
+  currency?: string;
+  pe?: number;
+  price?: number;
+}
+
+interface FMPRatio {
+  symbol: string;
+  calendarYear: string;
+  date: string;
+  priceEarningsRatio?: number;
+  priceToBookRatio?: number;
+  pegRatio?: number;
+  returnOnEquity?: number;
+  quickRatio?: number;
+  currentRatio?: number;
+  grossProfitMargin?: number;
+  netProfitMargin?: number;
+  revenueGrowth?: number;
+  earningsGrowth?: number;
+}
+
+interface FMPIncomeStatement {
+  date: string;
+  calendarYear: string;
+  revenue: number;
+  netIncome: number;
+  grossProfit?: number;
+}
+
+interface FMPBalanceSheet {
+  date: string;
+  calendarYear: string;
+  totalStockholdersEquity: number;
+}
+
+async function fmpGet<T>(
+  path: string,
+  apiKey: string
+): Promise<T | null> {
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${FMP_BASE}${path}${sep}apikey=${encodeURIComponent(apiKey)}`;
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as T;
+    if (data == null) return null;
+    if (Array.isArray(data) && data.length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 用 FMP 拉取财务数据
+ * 需要 4 个端点：profile / ratios / income / balance-sheet
+ */
+async function fetchFMPMetrics(
+  ticker: string,
+  apiKey: string
+): Promise<FinancialMetrics | null> {
+  const upper = ticker.toUpperCase();
+  const warnings: string[] = [];
+
+  const [profileArr, ratiosArr, incomeArr, balanceArr] = await Promise.all([
+    fmpGet<FMPProfile[]>(`/v3/profile/${upper}`, apiKey),
+    fmpGet<FMPRatio[]>(`/v3/ratios/${upper}?period=annual&limit=5`, apiKey),
+    fmpGet<FMPIncomeStatement[]>(
+      `/v3/income-statement/${upper}?period=annual&limit=5`,
+      apiKey
+    ),
+    fmpGet<FMPBalanceSheet[]>(
+      `/v3/balance-sheet-statement/${upper}?period=annual&limit=5`,
+      apiKey
+    ),
+  ]);
+
+  const profile = profileArr?.[0];
+  const ratios = ratiosArr ?? [];
+  const income = incomeArr ?? [];
+  const balance = balanceArr ?? [];
+
+  if (!profile && ratios.length === 0 && income.length === 0) {
+    return null;
+  }
+
+  const latestRatio = ratios[0];
+  const latestIncome = income[0];
+
+  const result: FinancialMetrics = {
+    ticker: upper,
+    name: profile?.companyName ?? null,
+    trailingPE:
+      num(latestRatio?.priceEarningsRatio) ?? num(profile?.pe) ?? null,
+    forwardPE: null,
+    pegRatio: num(latestRatio?.pegRatio) ?? null,
+    industry: profile?.industry ?? null,
+    industryPE: null,
+    revenueGrowthYoY: num(latestRatio?.revenueGrowth) ?? null,
+    quarterlyRevenueGrowth: null,
+    roe: num(latestRatio?.returnOnEquity) ?? null,
+    returnOnEquity5yAvg: null,
+    roeHistory: [],
+    quickRatio: num(latestRatio?.quickRatio) ?? null,
+    currentRatio: num(latestRatio?.currentRatio) ?? null,
+    grossMargin: num(latestRatio?.grossProfitMargin) ?? null,
+    profitMargin: num(latestRatio?.netProfitMargin) ?? null,
+    totalRevenue: num(latestIncome?.revenue) ?? null,
+    revenueHistory: [],
+    marketCap: num(profile?.mktCap) ?? null,
+    currency: profile?.currency ?? null,
+    fetchedAt: new Date().toISOString(),
+    dataSource: "fmp",
+    warnings,
+  };
+
+  // 历史营收
+  const revenueHistory: Array<{ year: number; revenue: number | null }> = [];
+  for (const stmt of income) {
+    const year = parseInt(stmt.calendarYear, 10);
+    if (Number.isFinite(year)) {
+      revenueHistory.push({ year, revenue: num(stmt.revenue) });
+    }
+  }
+  revenueHistory.sort((a, b) => a.year - b.year);
+  result.revenueHistory = revenueHistory;
+
+  // 历史 ROE：用 ratios 里的 returnOnEquity
+  const roeHistory: Array<{ year: number; roe: number | null }> = [];
+  for (const r of ratios) {
+    const year = parseInt(r.calendarYear, 10);
+    if (Number.isFinite(year)) {
+      roeHistory.push({ year, roe: num(r.returnOnEquity) });
+    }
+  }
+  // 如果 ratios 里没有，用 balance + income 算
+  if (roeHistory.length === 0) {
+    for (const bs of balance) {
+      const year = parseInt(bs.calendarYear, 10);
+      if (!Number.isFinite(year)) continue;
+      const inc = income.find(
+        (s) => parseInt(s.calendarYear, 10) === year
+      );
+      const equity = num(bs.totalStockholdersEquity);
+      const netIncome = inc ? num(inc.netIncome) : null;
+      const roe =
+        equity != null && netIncome != null && equity !== 0
+          ? netIncome / equity
+          : null;
+      roeHistory.push({ year, roe });
+    }
+  }
+  roeHistory.sort((a, b) => a.year - b.year);
+  result.roeHistory = roeHistory;
+
+  const validRoes = roeHistory
+    .map((r) => r.roe)
+    .filter((r): r is number => r != null && Number.isFinite(r));
+  if (validRoes.length >= 5) {
+    const last5 = validRoes.slice(-5);
+    result.returnOnEquity5yAvg =
+      last5.reduce((a, b) => a + b, 0) / last5.length;
+  } else if (validRoes.length > 0) {
+    result.returnOnEquity5yAvg =
+      validRoes.reduce((a, b) => a + b, 0) / validRoes.length;
+    warnings.push(
+      `仅获得 ${validRoes.length} 年 ROE 数据，平均值仅供参考。`
+    );
+  } else {
+    result.returnOnEquity5yAvg = result.roe;
+    if (result.roe == null) {
+      warnings.push("无法获取 ROE 数据（当前与历史均无）。");
+    } else {
+      warnings.push("无法获取历史 ROE，使用当前 ROE 作为近似。");
+    }
+  }
+
+  // 若 revenueGrowthYoY 缺失，用历史营收算
+  if (result.revenueGrowthYoY == null && revenueHistory.length >= 2) {
+    const latest = revenueHistory[revenueHistory.length - 1];
+    const prev = revenueHistory[revenueHistory.length - 2];
+    if (latest.revenue && prev.revenue && prev.revenue > 0) {
+      result.revenueGrowthYoY = latest.revenue / prev.revenue - 1;
+      warnings.push("revenueGrowthYoY 由历史营收估算。");
+    }
+  }
+
+  // 行业 PE 近似（用 sector 经验值）
+  const sector = profile?.sector;
+  if (sector && SECTOR_DEFAULT_PE[sector]) {
+    result.industryPE = SECTOR_DEFAULT_PE[sector];
+    warnings.push(
+      `行业 PE 用 ${sector} 行业经验值 ${result.industryPE}（仅供参考）。`
+    );
+  } else {
+    warnings.push("未获取到行业 PE 数据，peVsIndustry 指标将无法判定。");
+  }
+
+  return result;
+}
+
 /** 行业 PE 近似值（按 sector 给出经验值，仅作参考） */
 const SECTOR_DEFAULT_PE: Record<string, number> = {
   Technology: 28,
@@ -240,6 +463,7 @@ const SECTOR_DEFAULT_PE: Record<string, number> = {
 
 /**
  * 拉取并计算 5 项指标所需的数据
+ * 数据源优先级：FMP → Yahoo quoteSummary → Yahoo v7 → fallback
  */
 export async function fetchFinancialMetrics(
   ticker: string
@@ -247,6 +471,17 @@ export async function fetchFinancialMetrics(
   const upper = ticker.trim().toUpperCase();
   const warnings: string[] = [];
 
+  // 1. 优先尝试 FMP（如果配置了 API Key）
+  const fmpKey = await getFmpApiKey();
+  if (fmpKey) {
+    const fmp = await fetchFMPMetrics(upper, fmpKey);
+    if (fmp) {
+      return fmp;
+    }
+    warnings.push("FMP 接口未返回数据，降级到 Yahoo Finance。");
+  }
+
+  // 2. Yahoo Finance quoteSummary（带 crumb 认证）
   const summary = await fetchQuoteSummary(upper, [
     "summaryDetail",
     "summaryProfile",
@@ -285,7 +520,7 @@ export async function fetchFinancialMetrics(
     warnings.push(
       "Yahoo Finance quoteSummary 接口不可用（可能需要 crumb 认证或被限流）。"
     );
-    // 兜底：尝试 v7/quote
+    // 3. 兜底：尝试 v7/quote
     const v7 = await fetchV7Quote(upper);
     if (v7) {
       fallback.dataSource = "yahoo-v7";

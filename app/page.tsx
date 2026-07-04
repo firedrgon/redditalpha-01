@@ -118,6 +118,8 @@ interface ProviderInfo {
   freeQuota: string;
   apiKeyMasked: string;
   hasKey: boolean;
+  keySource: "env" | "local" | "none";
+  envVarName: string;
   enabled: boolean;
   working: boolean | null;
   lastTested: number | null;
@@ -648,36 +650,65 @@ function AnalysisModal({
 }
 
 // ============================================================
-// LLM 设置弹窗
+// 设置弹窗（LLM 提供商 + 财务数据源）
 // ============================================================
-function LLMSettingsModal({ onClose }: { onClose: () => void }) {
+type SettingsTab = "llm" | "finance";
+
+function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("llm");
+
+  // LLM 相关状态
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [llmLoading, setLlmLoading] = useState(true);
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState<string | null>(null);
   const [testingAll, setTestingAll] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [llmError, setLlmError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  // 财务数据源相关状态
+  const [fmpKeyMasked, setFmpKeyMasked] = useState("");
+  const [hasFmpKey, setHasFmpKey] = useState(false);
+  const [financeLoading, setFinanceLoading] = useState(true);
+  const [fmpKeyInput, setFmpKeyInput] = useState("");
+  const [financeError, setFinanceError] = useState<string | null>(null);
+  const [savingFmp, setSavingFmp] = useState(false);
+
+  const reloadLLM = useCallback(async () => {
+    setLlmLoading(true);
     try {
       const res = await fetch("/api/llm-providers");
       const json: ProvidersResponse = await res.json();
       setProviders(json.providers);
       setActiveProvider(json.activeProvider);
-      setError(null);
+      setLlmError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setLlmError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      setLlmLoading(false);
+    }
+  }, []);
+
+  const reloadFinance = useCallback(async () => {
+    setFinanceLoading(true);
+    try {
+      const res = await fetch("/api/finance-config");
+      const json = await res.json();
+      setFmpKeyMasked(json.fmpApiKeyMasked || "");
+      setHasFmpKey(!!json.hasFmpKey);
+      setFinanceError(null);
+    } catch (err) {
+      setFinanceError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFinanceLoading(false);
     }
   }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    reload();
-  }, [reload]);
+    reloadLLM();
+    reloadFinance();
+  }, [reloadLLM, reloadFinance]);
 
   const updateProvider = async (
     providerId: string,
@@ -694,9 +725,9 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
         const txt = await res.text();
         throw new Error(txt);
       }
-      await reload();
+      await reloadLLM();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setLlmError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -709,7 +740,7 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
 
   const handleTestOne = async (providerId: string) => {
     setTesting(providerId);
-    setError(null);
+    setLlmError(null);
     try {
       const res = await fetch("/api/llm-providers", {
         method: "POST",
@@ -720,9 +751,9 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
         const txt = await res.text();
         throw new Error(txt);
       }
-      await reload();
+      await reloadLLM();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setLlmError(err instanceof Error ? err.message : String(err));
     } finally {
       setTesting(null);
     }
@@ -730,7 +761,7 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
 
   const handleTestAll = async () => {
     setTestingAll(true);
-    setError(null);
+    setLlmError(null);
     try {
       const res = await fetch("/api/llm-providers", {
         method: "POST",
@@ -741,11 +772,35 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
         const txt = await res.text();
         throw new Error(txt);
       }
-      await reload();
+      await reloadLLM();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setLlmError(err instanceof Error ? err.message : String(err));
     } finally {
       setTestingAll(false);
+    }
+  };
+
+  const handleSaveFmpKey = async () => {
+    const key = fmpKeyInput.trim();
+    if (!key) return;
+    setSavingFmp(true);
+    setFinanceError(null);
+    try {
+      const res = await fetch("/api/finance-config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fmpApiKey: key }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt);
+      }
+      setFmpKeyInput("");
+      await reloadFinance();
+    } catch (err) {
+      setFinanceError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingFmp(false);
     }
   };
 
@@ -772,40 +827,62 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
         <div className="mb-4">
           <h3 className="text-xl font-bold flex items-center gap-2">
             <GearIcon className="h-5 w-5 text-orange-400" />
-            LLM 提供商设置
+            设置
           </h3>
           <p className="mt-1 text-xs text-zinc-500">
-            管理免费 LLM 提供商的 API Key。Key 保存在本地 .llm-config.json，不会上传。
+            管理 LLM 提供商和财务数据源的 API Key。Key 保存在本地，不会上传。
           </p>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleTestAll}
-            disabled={testingAll || loading}
-            className="rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-40"
-          >
-            {testingAll ? "测试中..." : "测试所有已启用提供商"}
-          </button>
-          <span className="text-xs text-zinc-500">
-            服务端每 6 小时自动检查一次（结果写回本地）
-          </span>
+        <div className="mb-4 flex gap-1 border-b border-zinc-800">
+          {[
+            { id: "llm" as const, label: "LLM 提供商" },
+            { id: "finance" as const, label: "财务数据源" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === tab.id
+                  ? "text-orange-400 border-orange-400"
+                  : "text-zinc-400 border-transparent hover:text-zinc-200"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-            {error}
-          </div>
-        )}
+        {activeTab === "llm" && (
+          <div>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestAll}
+                disabled={testingAll || llmLoading}
+                className="rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-40"
+              >
+                {testingAll ? "测试中..." : "测试所有已启用提供商"}
+              </button>
+              <span className="text-xs text-zinc-500">
+                服务端每 6 小时自动检查一次（结果写回本地）
+              </span>
+            </div>
 
-        {loading ? (
-          <div className="py-8 text-center text-sm text-zinc-500">加载中...</div>
-        ) : (
-          <div className="space-y-3">
-            {providers.map((p) => {
-              const isActive = activeProvider === p.id;
-              const working = p.working;
+            {llmError && (
+              <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+                {llmError}
+              </div>
+            )}
+
+            {llmLoading ? (
+              <div className="py-8 text-center text-sm text-zinc-500">加载中...</div>
+            ) : (
+              <div className="space-y-3">
+                {providers.map((p) => {
+                  const isActive = activeProvider === p.id;
+                  const working = p.working;
               return (
                 <div
                   key={p.id}
@@ -853,8 +930,25 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
                       </div>
                       {p.hasKey && (
                         <div className="mt-1 text-[11px] text-zinc-600">
-                          已配置 Key：{p.apiKeyMasked}
+                          {p.keySource === "env" ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 text-blue-400">
+                                环境变量
+                              </span>
+                              <span className="font-mono">{p.envVarName}</span>
+                              <span>·</span>
+                              <span>{p.apiKeyMasked}</span>
+                            </span>
+                          ) : (
+                            <>已配置 Key：{p.apiKeyMasked}</>
+                          )}
                         </div>
+                      )}
+                      {!p.hasKey && p.needsKey && (
+                        <div className="mt-1 text-[11px] text-zinc-600">
+                        环境变量名：
+                        <span className="font-mono text-zinc-500">{p.envVarName}</span>
+                      </div>
                       )}
                       {p.lastError && (
                         <div className="mt-1 text-[11px] text-red-400/80">
@@ -897,7 +991,13 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
                   </div>
 
-                  {p.needsKey && (
+                  {p.needsKey && p.keySource === "env" && (
+                    <div className="mt-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300/80">
+                      Key 由环境变量 <span className="font-mono">{p.envVarName}</span> 提供，无法在此处修改。
+                    </div>
+                  )}
+
+                  {p.needsKey && p.keySource !== "env" && (
                     <div className="mt-3 flex gap-2">
                       <input
                         type="password"
@@ -948,9 +1048,96 @@ function LLMSettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        <div className="mt-6 border-t border-zinc-800 pt-4 text-[11px] text-zinc-600">
-          推荐配置：Groq（速度最快，免费层慷慨）→ 备选 Google Gemini（稳定）→ OpenRouter（多模型可选）
+          <div className="mt-6 border-t border-zinc-800 pt-4 text-[11px] text-zinc-600">
+            推荐配置：Groq（速度最快，免费层慷慨）→ 备选 Google Gemini（稳定）→ OpenRouter（多模型可选）
+          </div>
         </div>
+        )}
+
+        {activeTab === "finance" && (
+          <div className="space-y-4">
+            {financeLoading ? (
+              <div className="py-8 text-center text-sm text-zinc-500">加载中...</div>
+            ) : (
+              <>
+            {financeError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+                {financeError}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">
+                      Financial Modeling Prep (FMP)
+                    </span>
+                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                      免费
+                    </span>
+                    <span className="text-[10px] text-zinc-600">需要 Key</span>
+                    {hasFmpKey && (
+                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                        已配置
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    提供美股完整财务数据（PE、PEG、ROE、营收增长、速动比率等），免费 tier 每天 250 次请求。配置后将作为首选数据源，Yahoo Finance 自动降级。
+                  </p>
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    免费额度：每天 250 次请求
+                  </div>
+                  {hasFmpKey && fmpKeyMasked && (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      已配置 Key：{fmpKeyMasked}
+                    </div>
+                  )}
+                  <div className="mt-1">
+                    <a
+                      href="https://site.financialmodelingprep.com/developer/docs/pricing"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
+                    >
+                      注册 / 获取 API Key →
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="password"
+                  value={fmpKeyInput}
+                  onChange={(e) => setFmpKeyInput(e.target.value)}
+                  placeholder="输入 FMP API Key"
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveFmpKey}
+                  disabled={!fmpKeyInput.trim() || savingFmp}
+                  className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
+                >
+                  {savingFmp ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3 text-[11px] text-zinc-500">
+              <div className="font-medium text-zinc-400 mb-1">数据源优先级</div>
+              <ol className="ml-4 list-decimal space-y-0.5">
+                <li>FMP（Financial Modeling Prep）— 数据最完整</li>
+                <li>Yahoo Finance quoteSummary（带 crumb 认证）</li>
+                <li>Yahoo Finance v7/quote（字段较少）</li>
+              </ol>
+            </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1887,7 +2074,7 @@ export default function Home() {
   // 分析弹窗
   const [analyzingItem, setAnalyzingItem] = useState<FavoriteItem | null>(null);
 
-  // LLM 设置弹窗
+  // 设置弹窗（LLM 提供商 + 财务数据源）
   const [showSettings, setShowSettings] = useState(false);
   // 策略管理弹窗
   const [showStrategies, setShowStrategies] = useState(false);
@@ -2143,10 +2330,10 @@ export default function Home() {
               <button
                 onClick={() => setShowSettings(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-orange-500/40 hover:text-orange-400"
-                title="LLM 提供商设置"
+                title="设置（LLM / 财务数据源）"
               >
                 <GearIcon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">LLM 设置</span>
+                <span className="hidden sm:inline">设置</span>
               </button>
               <div className="hidden sm:flex items-center gap-2">
                 <span
@@ -2386,7 +2573,7 @@ export default function Home() {
         />
       )}
       {showSettings && (
-        <LLMSettingsModal onClose={() => setShowSettings(false)} />
+        <SettingsModal onClose={() => setShowSettings(false)} />
       )}
       {showStrategies && (
         <StrategiesModal onClose={() => setShowStrategies(false)} />

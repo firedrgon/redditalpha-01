@@ -20,6 +20,7 @@ const CONFIG_FILE = path.join(process.cwd(), ".llm-config.json");
 export interface ProviderStatus {
   id: string;
   apiKey: string; // 用户配置的 Key（空字符串表示未配置）
+  keySource: "env" | "local" | "none"; // Key 来源：环境变量 / 本地配置 / 无
   enabled: boolean; // 是否启用
   lastTested: number | null; // 上次测试时间戳
   working: boolean | null; // 是否可用（null=未测试）
@@ -39,6 +40,7 @@ const DEFAULT_CONFIG: LLMConfig = {
       {
         id: p.id,
         apiKey: "",
+        keySource: "none" as const,
         enabled: p.needsKey ? false : true, // 不需要 Key 的默认启用
         lastTested: null,
         working: null,
@@ -79,15 +81,25 @@ function readEnvKeys(): Record<string, string> {
   return out;
 }
 
-/** 把环境变量中的 Key 注入到 config */
+/** 把环境变量中的 Key 注入到 config（环境变量优先级高于本地配置） */
 function applyEnvKeys(config: LLMConfig): LLMConfig {
   const envKeys = readEnvKeys();
   for (const [id, key] of Object.entries(envKeys)) {
     const s = config.providers[id];
     if (s) {
       s.apiKey = key;
+      s.keySource = "env";
       if (!s.enabled) s.enabled = true;
       if (s.working === null) s.working = null; // 保持未测试状态
+    }
+  }
+  // 对没有环境变量覆盖的 provider，如果有本地 Key，标记为 local
+  for (const id of Object.keys(config.providers)) {
+    const s = config.providers[id];
+    if (s && s.keySource !== "env" && s.apiKey && s.apiKey.trim()) {
+      s.keySource = "local";
+    } else if (s && !s.apiKey) {
+      s.keySource = "none";
     }
   }
   if (!config.activeProvider && envKeys) {
@@ -141,7 +153,7 @@ export async function writeConfig(config: LLMConfig): Promise<void> {
   }
 }
 
-/** 更新某个 provider 的 API Key */
+/** 更新某个 provider 的 API Key（仅本地配置，环境变量优先级更高） */
 export async function setProviderKey(
   providerId: string,
   apiKey: string
@@ -149,13 +161,17 @@ export async function setProviderKey(
   const config = await readConfig();
   const status = config.providers[providerId];
   if (status) {
+    // 如果 Key 来自环境变量，本地写入不生效（下次 readConfig 会被环境变量覆盖）
+    // 但仍写入本地配置，方便环境变量移除后使用
     status.apiKey = apiKey.trim();
+    status.keySource = status.apiKey ? "local" : "none";
     status.enabled = status.apiKey !== "" || !getProviderById(providerId)?.needsKey;
     status.working = null;
     status.lastTested = null;
   }
   await writeConfig(config);
-  return config;
+  // 重新读取（确保环境变量重新应用，keySource 正确）
+  return await readConfig();
 }
 
 /** 启用/禁用 provider */

@@ -18,6 +18,7 @@ export async function GET() {
     const status = config.providers[p.id] ?? {
       id: p.id,
       apiKey: "",
+      keySource: "none" as const,
       enabled: false,
       lastTested: null,
       working: null,
@@ -38,6 +39,8 @@ export async function GET() {
         ? `${status.apiKey.slice(0, 4)}****${status.apiKey.slice(-4)}`
         : "",
       hasKey: status.apiKey !== "",
+      keySource: status.keySource, // "env" | "local" | "none"
+      envVarName: `LLM_API_KEY_${p.id.toUpperCase().replace(/-/g, "_")}`,
       enabled: status.enabled,
       working: status.working,
       lastTested: status.lastTested,
