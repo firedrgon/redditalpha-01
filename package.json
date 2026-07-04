@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node -e \"process.env.DATABASE_URL = process.env.DATABASE_URL || 'file:./dev.db'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit' })\" && next build",
+    "build": "node -e \"process.env.DATABASE_URL = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://placeholder:5432/db'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit' })\" && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node -e \"process.env.DATABASE_URL = process.env.DATABASE_URL || 'file:./dev.db'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit' })\""
+    "postinstall": "node -e \"process.env.DATABASE_URL = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://placeholder:5432/db'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit' })\""
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

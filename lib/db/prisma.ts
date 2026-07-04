@@ -8,14 +8,24 @@ let prismaClient: PrismaClient | null = null;
 let initAttempted = false;
 let initError: Error | null = null;
 
+function resolveDatabaseUrl(): string | null {
+  return (
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL ||
+    null
+  );
+}
+
 export function getPrisma(): PrismaClient | null {
   if (initAttempted) {
     return prismaClient;
   }
   initAttempted = true;
 
-  if (!process.env.DATABASE_URL) {
-    initError = new Error("DATABASE_URL not set");
+  const dbUrl = resolveDatabaseUrl();
+  if (!dbUrl) {
+    initError = new Error("No database URL configured");
     return null;
   }
 
@@ -25,6 +35,7 @@ export function getPrisma(): PrismaClient | null {
       return prismaClient;
     }
     prismaClient = new PrismaClient({
+      datasourceUrl: dbUrl,
       log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
     });
     if (process.env.NODE_ENV !== "production") {
