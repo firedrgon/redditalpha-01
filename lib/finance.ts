@@ -225,7 +225,7 @@ function str(v: unknown): string | null {
   return null;
 }
 
-const FMP_BASE = "https://financialmodelingprep.com/api";
+const FMP_BASE = "https://financialmodelingprep.com";
 
 async function getFmpApiKey(): Promise<string | null> {
   try {
@@ -244,31 +244,28 @@ interface FMPProfile {
   companyName?: string;
   industry?: string;
   sector?: string;
-  mktCap?: number;
+  marketCap?: number;
   currency?: string;
-  pe?: number;
   price?: number;
 }
 
 interface FMPRatio {
   symbol: string;
-  calendarYear: string;
+  fiscalYear: string;
   date: string;
-  priceEarningsRatio?: number;
+  priceToEarningsRatio?: number;
   priceToBookRatio?: number;
-  pegRatio?: number;
+  priceToEarningsGrowthRatio?: number;
   returnOnEquity?: number;
   quickRatio?: number;
   currentRatio?: number;
   grossProfitMargin?: number;
   netProfitMargin?: number;
-  revenueGrowth?: number;
-  earningsGrowth?: number;
 }
 
 interface FMPIncomeStatement {
   date: string;
-  calendarYear: string;
+  fiscalYear: string;
   revenue: number;
   netIncome: number;
   grossProfit?: number;
@@ -276,25 +273,31 @@ interface FMPIncomeStatement {
 
 interface FMPBalanceSheet {
   date: string;
-  calendarYear: string;
+  fiscalYear: string;
   totalStockholdersEquity: number;
 }
 
 async function fmpGet<T>(
   path: string,
   apiKey: string
-): Promise<T | null> {
+): Promise<{ data: T | null; error?: string }> {
   const sep = path.includes("?") ? "&" : "?";
   const url = `${FMP_BASE}${path}${sep}apikey=${encodeURIComponent(apiKey)}`;
   try {
     const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { data: null, error: `FMP ${path}: HTTP ${res.status} ${text.slice(0, 200)}` };
+    }
     const data = (await res.json()) as T;
-    if (data == null) return null;
-    if (Array.isArray(data) && data.length === 0) return null;
-    return data;
-  } catch {
-    return null;
+    if (data == null) return { data: null, error: `FMP ${path}: 返回空数据` };
+    if (Array.isArray(data) && data.length === 0) {
+      return { data: null, error: `FMP ${path}: 返回空数组` };
+    }
+    return { data };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { data: null, error: `FMP ${path}: ${msg}` };
   }
 }
 
@@ -305,45 +308,46 @@ async function fmpGet<T>(
 async function fetchFMPMetrics(
   ticker: string,
   apiKey: string
-): Promise<FinancialMetrics | null> {
+): Promise<FinancialMetrics> {
   const upper = ticker.toUpperCase();
   const warnings: string[] = [];
 
-  const [profileArr, ratiosArr, incomeArr, balanceArr] = await Promise.all([
-    fmpGet<FMPProfile[]>(`/v3/profile/${upper}`, apiKey),
-    fmpGet<FMPRatio[]>(`/v3/ratios/${upper}?period=annual&limit=5`, apiKey),
+  const [profileRes, ratiosRes, incomeRes, balanceRes] = await Promise.all([
+    fmpGet<FMPProfile[]>(`/stable/profile?symbol=${upper}`, apiKey),
+    fmpGet<FMPRatio[]>(`/stable/ratios?symbol=${upper}&period=annual&limit=5`, apiKey),
     fmpGet<FMPIncomeStatement[]>(
-      `/v3/income-statement/${upper}?period=annual&limit=5`,
+      `/stable/income-statement?symbol=${upper}&period=annual&limit=5`,
       apiKey
     ),
     fmpGet<FMPBalanceSheet[]>(
-      `/v3/balance-sheet-statement/${upper}?period=annual&limit=5`,
+      `/stable/balance-sheet-statement?symbol=${upper}&period=annual&limit=5`,
       apiKey
     ),
   ]);
 
-  const profile = profileArr?.[0];
-  const ratios = ratiosArr ?? [];
-  const income = incomeArr ?? [];
-  const balance = balanceArr ?? [];
-
-  if (!profile && ratios.length === 0 && income.length === 0) {
-    return null;
+  // 收集所有错误
+  for (const res of [profileRes, ratiosRes, incomeRes, balanceRes]) {
+    if (res.error) warnings.push(res.error);
   }
+
+  const profile = profileRes.data?.[0];
+  const ratios = ratiosRes.data ?? [];
+  const income = incomeRes.data ?? [];
+  const balance = balanceRes.data ?? [];
 
   const latestRatio = ratios[0];
   const latestIncome = income[0];
 
+  // 如果所有端点都失败，返回空数据（但 dataSource 仍是 fmp，warnings 包含错误）
   const result: FinancialMetrics = {
     ticker: upper,
     name: profile?.companyName ?? null,
-    trailingPE:
-      num(latestRatio?.priceEarningsRatio) ?? num(profile?.pe) ?? null,
+    trailingPE: num(latestRatio?.priceToEarningsRatio) ?? null,
     forwardPE: null,
-    pegRatio: num(latestRatio?.pegRatio) ?? null,
+    pegRatio: num(latestRatio?.priceToEarningsGrowthRatio) ?? null,
     industry: profile?.industry ?? null,
     industryPE: null,
-    revenueGrowthYoY: num(latestRatio?.revenueGrowth) ?? null,
+    revenueGrowthYoY: null,
     quarterlyRevenueGrowth: null,
     roe: num(latestRatio?.returnOnEquity) ?? null,
     returnOnEquity5yAvg: null,
@@ -354,7 +358,7 @@ async function fetchFMPMetrics(
     profitMargin: num(latestRatio?.netProfitMargin) ?? null,
     totalRevenue: num(latestIncome?.revenue) ?? null,
     revenueHistory: [],
-    marketCap: num(profile?.mktCap) ?? null,
+    marketCap: num(profile?.marketCap) ?? null,
     currency: profile?.currency ?? null,
     fetchedAt: new Date().toISOString(),
     dataSource: "fmp",
@@ -364,7 +368,7 @@ async function fetchFMPMetrics(
   // 历史营收
   const revenueHistory: Array<{ year: number; revenue: number | null }> = [];
   for (const stmt of income) {
-    const year = parseInt(stmt.calendarYear, 10);
+    const year = parseInt(stmt.fiscalYear, 10);
     if (Number.isFinite(year)) {
       revenueHistory.push({ year, revenue: num(stmt.revenue) });
     }
@@ -372,21 +376,24 @@ async function fetchFMPMetrics(
   revenueHistory.sort((a, b) => a.year - b.year);
   result.revenueHistory = revenueHistory;
 
-  // 历史 ROE：用 ratios 里的 returnOnEquity
+  // 历史 ROE：先用 ratios 里的 returnOnEquity（如果有的话）
   const roeHistory: Array<{ year: number; roe: number | null }> = [];
   for (const r of ratios) {
-    const year = parseInt(r.calendarYear, 10);
+    const year = parseInt(r.fiscalYear, 10);
+    const roe = num(r.returnOnEquity);
     if (Number.isFinite(year)) {
-      roeHistory.push({ year, roe: num(r.returnOnEquity) });
+      roeHistory.push({ year, roe });
     }
   }
-  // 如果 ratios 里没有，用 balance + income 算
-  if (roeHistory.length === 0) {
+  // 如果 ratios 里没有有效的 ROE 数据，用 balance + income 算
+  const hasValidRoe = roeHistory.some((r) => r.roe != null);
+  if (!hasValidRoe) {
+    roeHistory.length = 0;
     for (const bs of balance) {
-      const year = parseInt(bs.calendarYear, 10);
+      const year = parseInt(bs.fiscalYear, 10);
       if (!Number.isFinite(year)) continue;
       const inc = income.find(
-        (s) => parseInt(s.calendarYear, 10) === year
+        (s) => parseInt(s.fiscalYear, 10) === year
       );
       const equity = num(bs.totalStockholdersEquity);
       const netIncome = inc ? num(inc.netIncome) : null;
@@ -475,10 +482,16 @@ export async function fetchFinancialMetrics(
   const fmpKey = await getFmpApiKey();
   if (fmpKey) {
     const fmp = await fetchFMPMetrics(upper, fmpKey);
-    if (fmp) {
+    // 如果 FMP 返回了至少一些有效数据，就使用它
+    const hasAnyData = fmp.name || fmp.trailingPE || fmp.industry || fmp.marketCap;
+    if (hasAnyData) {
       return fmp;
     }
-    warnings.push("FMP 接口未返回数据，降级到 Yahoo Finance。");
+    // 如果 FMP 返回了 warnings，把它们加到全局 warnings 里
+    if (fmp.warnings.length > 0) {
+      warnings.push(...fmp.warnings);
+    }
+    warnings.push("FMP 未返回有效数据，降级到 Yahoo Finance。");
   }
 
   // 2. Yahoo Finance quoteSummary（带 crumb 认证）
