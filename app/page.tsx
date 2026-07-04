@@ -108,6 +108,30 @@ interface StockAnalysis {
   targetUpside?: number | null;
   numberOfAnalysts?: number | null;
   recommendationMean?: number | null;
+  news?: Array<{
+    title: string;
+    source?: string;
+    date?: string;
+    summary?: string;
+    url?: string;
+  }>;
+}
+
+/** 从 LLM narrative 中提取指定章节内容 */
+function extractSection(text: string, sectionTitle: string): string | null {
+  const pattern = new RegExp(`##\\s*${sectionTitle}\\s*\\n(.*?)(?=\\n##\\s|$)`, "s");
+  const match = text.match(pattern);
+  return match ? match[1].trim() : null;
+}
+
+/** 移除 LLM narrative 中的指定章节，返回剩余内容 */
+function removeSections(text: string, sectionTitles: string[]): string {
+  let result = text;
+  for (const title of sectionTitles) {
+    const pattern = new RegExp(`\\n?##\\s*${title}\\s*\\n.*?(?=\\n##\\s|$)`, "s");
+    result = result.replace(pattern, "");
+  }
+  return result.trim();
 }
 
 // ============================================================
@@ -688,7 +712,37 @@ function AnalysisModal({
               ))}
             </div>
 
-            {/* LLM 叙述 */}
+            {/* 消息面分析 */}
+            {analysis.llmNarrative && extractSection(analysis.llmNarrative, "消息面分析") && (
+              <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-blue-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V9.75m0 0h-6.375m6.375 0v10.125c0 .621-.504 1.125-1.125 1.125h-10.125a1.125 1.125 0 01-1.125-1.125V9.75m0 0h6.375M21 9.75V6.375A2.625 2.625 0 0018.375 3.75H5.625A2.625 2.625 0 003 6.375v10.125A2.625 2.625 0 005.625 19.5h12.75A2.625 2.625 0 0021 16.875V9.75z" />
+                  </svg>
+                  <span className="text-xs font-medium text-blue-400">消息面分析</span>
+                </div>
+                <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
+                  {extractSection(analysis.llmNarrative, "消息面分析")}
+                </div>
+              </div>
+            )}
+
+            {/* 行业前景 */}
+            {analysis.llmNarrative && extractSection(analysis.llmNarrative, "行业前景") && (
+              <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-purple-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.5 4.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                  </svg>
+                  <span className="text-xs font-medium text-purple-400">行业前景</span>
+                </div>
+                <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
+                  {extractSection(analysis.llmNarrative, "行业前景")}
+                </div>
+              </div>
+            )}
+
+            {/* LLM 叙述（剩余章节） */}
             {analysis.llmNarrative && (
               <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
                 <div className="mb-2 flex items-center gap-2">
@@ -705,8 +759,38 @@ function AnalysisModal({
                   )}
                 </div>
                 <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
-                  {analysis.llmNarrative}
+                  {removeSections(analysis.llmNarrative, ["消息面分析", "行业前景"]) || analysis.llmNarrative}
                 </div>
+              </div>
+            )}
+
+            {/* 近期新闻列表 */}
+            {analysis.news && analysis.news.length > 0 && (
+              <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V9.75m0 0h-6.375m6.375 0v10.125c0 .621-.504 1.125-1.125 1.125h-10.125a1.125 1.125 0 01-1.125-1.125V9.75m0 0h6.375M21 9.75V6.375A2.625 2.625 0 0018.375 3.75H5.625A2.625 2.625 0 003 6.375v10.125A2.625 2.625 0 005.625 19.5h12.75A2.625 2.625 0 0021 16.875V9.75z" />
+                  </svg>
+                  <span className="text-xs font-medium text-zinc-300">近期新闻</span>
+                  <span className="text-[10px] text-zinc-500">· {analysis.news.length} 条</span>
+                </div>
+                <ul className="space-y-2">
+                  {analysis.news.slice(0, 5).map((n, i) => (
+                    <li key={i} className="text-xs text-zinc-400">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5 h-1 w-1 flex-shrink-0 rounded-full bg-zinc-500" />
+                        <div className="flex-1">
+                          <div className="text-zinc-300">{n.title}</div>
+                          <div className="mt-0.5 text-[10px] text-zinc-600">
+                            {n.date && new Date(n.date).toLocaleDateString("zh-CN")}
+                            {n.date && n.source && " · "}
+                            {n.source}
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

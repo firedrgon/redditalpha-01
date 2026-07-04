@@ -277,13 +277,25 @@ export function buildLLMMessages(
   overallSummary: string
 ): LLMMessage[] {
   const system = `你是一位严谨的股票分析师，使用用户启用的若干项关键财务指标为投资者筛选长期持有的优质标的。
-请基于给定的真实财务数据，给出简洁、专业、客观的分析结论。
+请基于给定的真实财务数据、近期新闻和所属行业信息，给出简洁、专业、客观的分析结论。
 不要给出具体买卖建议或价格预测，只评估该公司是否符合用户启用的指标标准。
-输出格式：
-1. 用 1-2 段总结性文字点评该公司
-2. 列出每项指标各自的判定（通过/不通过/数据缺失）和一句理由
-3. 末尾给出总评：是否符合标准、风险提示
-请用中文回答，字数控制在 600 字以内。`;
+输出格式（必须包含以下 4 个章节标题）：
+## 公司概览
+用 1-2 段总结性文字点评该公司。
+
+## 指标判定
+列出每项指标各自的判定（通过/不通过/数据缺失）和一句理由。
+
+## 消息面分析
+基于提供的近期新闻，总结 2-4 条最重要的利好和利空因素。如果新闻不足，说明"近期新闻有限"。
+
+## 行业前景
+结合公司所属行业，分析该行业未来 1-3 年的主要趋势、增长动力和潜在风险。
+
+## 总评
+给出是否符合标准、风险提示。
+
+请用中文回答，字数控制在 900 字以内。`;
 
   const dataLines: string[] = [];
   dataLines.push(`股票代码：${ticker}`);
@@ -311,6 +323,20 @@ export function buildLLMMessages(
     else label = "强力卖出";
     dataLines.push(`分析师推荐评级：${metrics.recommendationMean.toFixed(2)}（${label}）`);
   }
+  if (metrics.news && metrics.news.length > 0) {
+    dataLines.push("");
+    dataLines.push(`【近期相关新闻（共 ${metrics.news.length} 条）】`);
+    for (const n of metrics.news.slice(0, 8)) {
+      const dateStr = n.date ? new Date(n.date).toLocaleDateString("zh-CN") : "";
+      dataLines.push(`- ${dateStr ? `[${dateStr}] ` : ""}${n.title}${n.source ? `（${n.source}）` : ""}`);
+      if (n.summary) dataLines.push(`  摘要：${n.summary.slice(0, 200)}${n.summary.length > 200 ? "..." : ""}`);
+    }
+  } else {
+    dataLines.push("");
+    dataLines.push("【近期相关新闻】");
+    dataLines.push("- 未获取到相关新闻。");
+  }
+
   dataLines.push("");
   dataLines.push(`【启用的指标数据（共 ${results.length} 项）】`);
   for (const r of results) {

@@ -65,6 +65,14 @@ export interface FinancialMetrics {
   revenueHistory: Array<{ year: number; revenue: number | null }>;
   marketCap?: number | null;
   currency?: string | null;
+  // 新闻
+  news?: Array<{
+    title: string;
+    source?: string;
+    date?: string;
+    summary?: string;
+    url?: string;
+  }>;
   fetchedAt: string;
   dataSource:
     | "fmp"
@@ -731,6 +739,19 @@ interface FinnhubCompanyBasicFinancials {
   series?: Record<string, Array<{ period: string; v: number }>>;
 }
 
+interface FinnhubNewsItem {
+  category?: string;
+  datetime?: number;
+  headline?: string;
+  id?: number;
+  image?: string;
+  related?: string;
+  source?: string;
+  summary?: string;
+  url?: string;
+  title?: string;
+}
+
 async function finnhubGet<T>(path: string, apiKey: string): Promise<{ data: T | null; error?: string }> {
   try {
     const url = `${FINNHUB_BASE}${path}${path.includes("?") ? "&" : "?"}token=${apiKey}`;
@@ -792,22 +813,31 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
     warnings,
   };
 
-  const [quoteRes, profileRes, recRes, metricsRes] = await Promise.all([
+  // 取最近 7 天新闻
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const to = today.toISOString().split("T")[0];
+  const from = weekAgo.toISOString().split("T")[0];
+
+  const [quoteRes, profileRes, recRes, metricsRes, newsRes] = await Promise.all([
     finnhubGet<FinnhubQuote>(`/quote?symbol=${upper}`, apiKey),
     finnhubGet<FinnhubCompanyProfile>(`/stock/profile2?symbol=${upper}`, apiKey),
     finnhubGet<FinnhubRecommendationTrendItem[]>(`/stock/recommendation?symbol=${upper}`, apiKey),
     finnhubGet<FinnhubCompanyBasicFinancials>(`/stock/metric?symbol=${upper}&metric=all`, apiKey),
+    finnhubGet<FinnhubNewsItem[]>(`/company-news?symbol=${upper}&from=${from}&to=${to}`, apiKey),
   ]);
 
   if (quoteRes.error) warnings.push(quoteRes.error);
   if (profileRes.error) warnings.push(profileRes.error);
   if (recRes.error) warnings.push(recRes.error);
   if (metricsRes.error) warnings.push(metricsRes.error);
+  if (newsRes.error) warnings.push(newsRes.error);
 
   const quote = quoteRes.data;
   const profile = profileRes.data;
   const recommendations = recRes.data;
   const metrics = metricsRes.data?.metric;
+  const news = newsRes.data;
 
   if (quote) {
     result.currentPrice = quote.c ?? null;
@@ -896,6 +926,16 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
       result.industryPE = indPE;
       warnings.push(`行业 PE 用 ${result.industry} 行业经验值 ${indPE}（仅供参考）。`);
     }
+  }
+
+  if (news && news.length > 0) {
+    result.news = news.slice(0, 10).map((n) => ({
+      title: n.headline || n.title || "",
+      source: n.source,
+      date: n.datetime ? new Date(n.datetime * 1000).toISOString() : undefined,
+      summary: n.summary,
+      url: n.url,
+    }));
   }
 
   return result;
