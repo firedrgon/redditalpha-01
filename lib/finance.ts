@@ -2,10 +2,10 @@
  * 财务数据获取（多数据源自动降级）
  *
  * 数据获取优先级（从高到低）：
- *   1. Financial Modeling Prep (FMP) — 数据最完整，需 API Key
- *   2. Tiingo — EOD 价格 + 基本面，免费 tier 500 req/day
- *   3. Finnhub — 分析师目标价和财务数据，免费 tier 60 req/min
- *   4. Alpha Vantage — FMP Premium 股票补充，免费 tier 25 req/day
+ *   1. Tiingo — EOD 价格 + 基本面，免费 tier 500 req/day（首选）
+ *   2. Finnhub — 分析师目标价、财务数据和新闻，免费 tier 60 req/min
+ *   3. Financial Modeling Prep (FMP) — 数据最完整，需 API Key
+ *   4. Alpha Vantage — 补充，免费 tier 25 req/day
  *   5. Yahoo Finance quoteSummary（带 crumb 认证）
  *   6. Yahoo Finance v7/quote（字段较少，但通常不要 crumb）
  *   7. 全 null fallback
@@ -1366,13 +1366,13 @@ function mergeMetrics(
 
 /**
  * 拉取并计算 5 项指标所需的数据
- * 数据源优先级：FMP → Tiingo → Finnhub → Alpha Vantage → Yahoo Finance → fallback
+ * 数据源优先级：Tiingo → Finnhub → FMP → Alpha Vantage → Yahoo Finance → fallback
  *
  * 策略说明：
+ * - Tiingo 免费版 500 req/day，作为首选完整数据源
+ * - Finnhub 免费版 60 req/min，提供分析师目标价和新闻
  * - FMP profile 端点是免费的，优先获取（价格、公司名、行业等）
  * - FMP 的 ratios/income/balance-sheet 对部分股票是 Premium 的，返回 402
- * - Tiingo 免费版 500 req/day，作为第二优先完整数据源
- * - Finnhub 免费版 60 req/min，主要用于补充分析师目标价和新闻
  * - Alpha Vantage 免费版有 25 次/天限制，用于补充财务数据
  * - Yahoo Finance 作为最后兜底
  */
@@ -1419,7 +1419,31 @@ async function fetchFinancialMetricsInternal(
     hasCore(m) || hasProfile(m) || m.targetMeanPrice != null;
 
   // ============================================================
-  // 1. 优先 FMP
+  // 1. 优先 Tiingo
+  // ============================================================
+  if (tiingoKey) {
+    const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
+    if (hasAny(tiingo)) {
+      return tiingo;
+    }
+    warnings.push(...tiingo.warnings);
+    warnings.push("Tiingo 未返回有效数据，降级到 Finnhub。");
+  }
+
+  // ============================================================
+  // 2. Finnhub
+  // ============================================================
+  if (finnhubKey) {
+    const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
+    if (hasAny(finnhub)) {
+      return finnhub;
+    }
+    warnings.push(...finnhub.warnings);
+    warnings.push("Finnhub 未返回有效数据，降级到 FMP。");
+  }
+
+  // ============================================================
+  // 3. FMP
   // ============================================================
   if (fmpKey) {
     const fmp = await fetchFMPMetrics(upper, fmpKey);
@@ -1467,30 +1491,6 @@ async function fetchFinancialMetricsInternal(
     // FMP 连 profile 都没有，降级
     warnings.push(...fmp.warnings);
     warnings.push("FMP 未返回任何数据，尝试其他数据源。");
-  }
-
-  // ============================================================
-  // 2. Tiingo
-  // ============================================================
-  if (tiingoKey) {
-    const tiingo = await fetchTiingoMetrics(upper, tiingoKey);
-    if (hasAny(tiingo)) {
-      return tiingo;
-    }
-    warnings.push(...tiingo.warnings);
-    warnings.push("Tiingo 未返回有效数据，降级到 Finnhub。");
-  }
-
-  // ============================================================
-  // 3. Finnhub
-  // ============================================================
-  if (finnhubKey) {
-    const finnhub = await fetchFinnhubMetrics(upper, finnhubKey);
-    if (hasAny(finnhub)) {
-      return finnhub;
-    }
-    warnings.push(...finnhub.warnings);
-    warnings.push("Finnhub 未返回有效数据，降级到 Alpha Vantage。");
   }
 
   // ============================================================

@@ -1355,12 +1355,141 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-zinc-100">
+                      Tiingo
+                    </span>
+                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                      免费
+                    </span>
+                    <span className="text-[10px] text-zinc-600">需要 Key</span>
+                    <span className="rounded border border-orange-500/30 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-400">
+                      首选
+                    </span>
+                    {hasTiingoKey && (
+                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                        已配置
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    当前首选数据源。免费 tier 每天 500 次请求，提供 EOD 价格、财务基本面、分析师目标价等。失败时自动降级到 Finnhub → FMP → Alpha Vantage → Yahoo Finance。
+                  </p>
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    免费额度：500 次/天
+                  </div>
+                  {hasTiingoKey && tiingoKeyMasked && (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      已配置 Key：{tiingoKeyMasked}
+                    </div>
+                  )}
+                  <div className="mt-1">
+                    <a
+                      href="https://www.tiingo.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
+                    >
+                      注册 / 获取 API Key →
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="password"
+                  value={tiingoKeyInput}
+                  onChange={(e) => setTiingoKeyInput(e.target.value)}
+                  placeholder="输入 Tiingo API Key"
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveTiingoKey}
+                  disabled={!tiingoKeyInput.trim() || savingTiingo}
+                  className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
+                >
+                  {savingTiingo ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">
+                      Finnhub
+                    </span>
+                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                      免费
+                    </span>
+                    <span className="text-[10px] text-zinc-600">需要 Key</span>
+                    <span className="rounded border border-orange-500/30 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-400">
+                      次选
+                    </span>
+                    {hasFinnhubKey && (
+                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                        已配置
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    免费 tier 60 次/分钟，提供财务指标、分析师目标价和评级、公司新闻、公司概况等。Tiingo 不可用时作为次选数据源。
+                  </p>
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    免费额度：60 次/分钟
+                  </div>
+                  {hasFinnhubKey && finnhubKeyMasked && (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      已配置 Key：{finnhubKeyMasked}
+                    </div>
+                  )}
+                  <div className="mt-1">
+                    <a
+                      href="https://finnhub.io/register"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
+                    >
+                      注册 / 获取 API Key →
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="password"
+                  value={finnhubKeyInput}
+                  onChange={(e) => setFinnhubKeyInput(e.target.value)}
+                  placeholder="输入 Finnhub API Key"
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveFinnhubKey}
+                  disabled={!finnhubKeyInput.trim() || savingFinnhub}
+                  className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
+                >
+                  {savingFinnhub ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">
                       Financial Modeling Prep (FMP)
                     </span>
                     <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
                       免费
                     </span>
                     <span className="text-[10px] text-zinc-600">需要 Key</span>
+                    <span className="rounded border border-zinc-500/30 bg-zinc-500/10 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                      备选
+                    </span>
                     {hasFmpKey && (
                       <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
                         已配置
@@ -1368,7 +1497,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-zinc-400">
-                    提供美股完整财务数据（PE、PEG、ROE、营收增长、速动比率等），免费 tier 每天 250 次请求。配置后作为首选数据源，失败时自动降级到 Tiingo → Finnhub → Alpha Vantage → Yahoo Finance。
+                    提供美股完整财务数据（PE、PEG、ROE、营收增长、速动比率等），免费 tier 每天 250 次请求。部分股票为 Premium 数据，当 Tiingo / Finnhub 失败时作为备选数据源。
                   </p>
                   <div className="mt-1 text-[11px] text-zinc-500">
                     免费额度：每天 250 次请求
@@ -1428,7 +1557,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-zinc-400">
-                    FMP 的补充数据源，部分 FMP Premium 股票在 Alpha Vantage 中可免费访问。免费 tier 每天 25 次请求。
+                    Tiingo / Finnhub / FMP 的补充数据源，部分 Premium 股票在 Alpha Vantage 中可免费访问。免费 tier 每天 25 次请求。
                   </p>
                   <div className="mt-1 text-[11px] text-zinc-500">
                     免费额度：每天 25 次请求
@@ -1470,132 +1599,12 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            <div className="mt-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-zinc-100">
-                      Tiingo
-                    </span>
-                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
-                      免费
-                    </span>
-                    <span className="text-[10px] text-zinc-600">需要 Key</span>
-                    {hasTiingoKey && (
-                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
-                        已配置
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs text-zinc-400">
-                    免费 tier 每天 500 次请求，提供 EOD 价格、财务基本面、分析师目标价等。稳定可靠。
-                  </p>
-                  <div className="mt-1 text-[11px] text-zinc-500">
-                    免费额度：500 次/天
-                  </div>
-                  {hasTiingoKey && tiingoKeyMasked && (
-                    <div className="mt-1 text-[11px] text-zinc-600">
-                      已配置 Key：{tiingoKeyMasked}
-                    </div>
-                  )}
-                  <div className="mt-1">
-                    <a
-                      href="https://www.tiingo.com/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
-                    >
-                      注册 / 获取 API Key →
-                    </a>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-3 flex gap-2">
-                <input
-                  type="password"
-                  value={tiingoKeyInput}
-                  onChange={(e) => setTiingoKeyInput(e.target.value)}
-                  placeholder="输入 Tiingo API Key"
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveTiingoKey}
-                  disabled={!tiingoKeyInput.trim() || savingTiingo}
-                  className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
-                >
-                  {savingTiingo ? "保存中..." : "保存"}
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-zinc-100">
-                      Finnhub
-                    </span>
-                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
-                      免费
-                    </span>
-                    <span className="text-[10px] text-zinc-600">需要 Key</span>
-                    {hasFinnhubKey && (
-                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
-                        已配置
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs text-zinc-400">
-                    免费 tier 60 次/分钟，提供财务指标、分析师目标价和评级、公司概况等。
-                  </p>
-                  <div className="mt-1 text-[11px] text-zinc-500">
-                    免费额度：60 次/分钟
-                  </div>
-                  {hasFinnhubKey && finnhubKeyMasked && (
-                    <div className="mt-1 text-[11px] text-zinc-600">
-                      已配置 Key：{finnhubKeyMasked}
-                    </div>
-                  )}
-                  <div className="mt-1">
-                    <a
-                      href="https://finnhub.io/register"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
-                    >
-                      注册 / 获取 API Key →
-                    </a>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-3 flex gap-2">
-                <input
-                  type="password"
-                  value={finnhubKeyInput}
-                  onChange={(e) => setFinnhubKeyInput(e.target.value)}
-                  placeholder="输入 Finnhub API Key"
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveFinnhubKey}
-                  disabled={!finnhubKeyInput.trim() || savingFinnhub}
-                  className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
-                >
-                  {savingFinnhub ? "保存中..." : "保存"}
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3 text-[11px] text-zinc-500">
+            <div className="mt-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3 text-[11px] text-zinc-500">
               <div className="font-medium text-zinc-400 mb-1">数据源优先级</div>
               <ol className="ml-4 list-decimal space-y-0.5">
-                <li>FMP — 数据最完整（首选）</li>
-                <li>Tiingo — EOD + 基本面（500/天）</li>
-                <li>Finnhub — 分析师目标价 + 财务（60/min）</li>
+                <li>Tiingo — EOD + 基本面（500/天，首选）</li>
+                <li>Finnhub — 分析师目标价 + 财务 + 新闻（60/min）</li>
+                <li>FMP — 数据最完整（备选，部分股票为 Premium）</li>
                 <li>Alpha Vantage — 补充（25/天）</li>
                 <li>Yahoo Finance quoteSummary（带 crumb）</li>
                 <li>Yahoo Finance v7/quote（字段较少）</li>
