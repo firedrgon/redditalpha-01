@@ -97,6 +97,8 @@ interface StockAnalysis {
   llmError?: string;
   fetchedAt: string;
   cached?: boolean;
+  dataSource?: string;
+  warnings?: string[];
   strategyIdsUsed?: string[];
 }
 
@@ -593,6 +595,30 @@ function AnalysisModal({
                 <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
                   {analysis.llmNarrative}
                 </div>
+              </div>
+            )}
+
+            {/* 数据来源 & 警告：解释为何部分指标显示"未能获取该指标数据" */}
+            {analysis.warnings && analysis.warnings.length > 0 && (
+              <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.852l.041-.02M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                  </svg>
+                  <span className="text-xs font-medium text-zinc-300">
+                    数据来源与警告
+                  </span>
+                  {analysis.dataSource && (
+                    <span className="text-[10px] text-zinc-500">
+                      · {analysis.dataSource}
+                    </span>
+                  )}
+                </div>
+                <ul className="ml-4 list-disc space-y-0.5 text-[11px] leading-relaxed text-zinc-400">
+                  {analysis.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
               </div>
             )}
 

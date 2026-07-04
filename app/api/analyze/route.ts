@@ -76,6 +76,8 @@ export async function GET(request: NextRequest) {
     overallSummary,
     strategyIdsUsed: strategies.map((s) => s.id),
     fetchedAt: new Date().toISOString(),
+    dataSource: metrics.dataSource,
+    warnings: metrics.warnings,
   };
 
   // 5. 调用 LLM 补充叙述（可选）

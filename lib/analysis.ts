@@ -41,6 +41,9 @@ export interface StockAnalysis {
   strategyIdsUsed: string[];
   fetchedAt: string;
   cached?: boolean; // 是否来自缓存
+  // 财务数据来源 & 警告（用于排查"未能获取该指标数据"类问题）
+  dataSource?: string;
+  warnings?: string[];
 }
 
 function fmtPct(v: number | null): string {
