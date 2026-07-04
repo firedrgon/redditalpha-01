@@ -273,7 +273,7 @@ export const DEFAULT_STRATEGIES: Strategy[] = [
   },
   {
     id: "default-target-upside",
-    name: "分析师目标价上涨空间 ≥ 10%",
+    name: "目标价上涨空间 ≥ 10%",
     description: "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
     categoryId: "cat-analyst",
     metricField: "targetUpside",

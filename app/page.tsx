@@ -683,30 +683,30 @@ function AnalysisModal({
               {analysis.metrics.map((m) => (
                 <div
                   key={m.key}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3.5"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-zinc-100">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-zinc-100 leading-snug">
                           {m.title}
                         </span>
                         <VerdictBadge verdict={m.verdict} />
                       </div>
-                      <p className="mt-0.5 text-xs text-zinc-500">
+                      <p className="mt-1 text-xs text-zinc-500 leading-relaxed">
                         {m.description}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-mono text-orange-400">
+                    <div className="flex-shrink-0 text-right">
+                      <div className="text-base font-mono font-semibold text-orange-400">
                         {m.value}
                       </div>
-                      <div className="text-[10px] text-zinc-600">
+                      <div className="mt-0.5 text-[10px] text-zinc-600">
                         阈值 {m.threshold}
                       </div>
                     </div>
                   </div>
-                  <p className="mt-2 text-xs text-zinc-400">{m.reasoning}</p>
+                  <p className="mt-3 text-xs text-zinc-400 leading-relaxed">{m.reasoning}</p>
                 </div>
               ))}
             </div>
