@@ -3,7 +3,7 @@
  *
  * 调用流程：
  *   1. 候选 provider 优先级：activeProvider -> working=true -> 未测试但有 Key/无需Key
- *   2. 按 provider.protocol 走对应协议（openai/gemini/huggingface/duckduckgo）
+ *   2. 按 provider.protocol 走对应协议（openai/gemini/duckduckgo）
  *   3. 失败则更新本地 working=false 并尝试下一个 provider
  *
  * testProvider() / refreshProviderStatuses() 用于定时健康检查
@@ -207,8 +207,6 @@ async function callProvider(
       return callOpenAICompatible(provider, apiKey, messages, options);
     case "gemini":
       return callGemini(provider, apiKey, messages, options);
-    case "huggingface":
-      return callHuggingFace(provider, apiKey, messages, options);
     case "duckduckgo":
       return callDuckDuckGo(provider, messages, options);
     default:
@@ -216,7 +214,7 @@ async function callProvider(
   }
 }
 
-/** OpenAI 兼容协议（Groq / OpenRouter / Together 等） */
+/** OpenAI 兼容协议（Groq / OpenRouter 等） */
 async function callOpenAICompatible(
   provider: LLMProvider,
   apiKey: string,
@@ -307,40 +305,6 @@ async function callGemini(
 
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(`${provider.name} 返回内容为空`);
-  return text as string;
-}
-
-/** HuggingFace Inference API（OpenAI 兼容端点） */
-async function callHuggingFace(
-  provider: LLMProvider,
-  apiKey: string,
-  messages: LLMMessage[],
-  options: { signal?: AbortSignal } = {}
-): Promise<string> {
-  const url = `${provider.endpoint}/${provider.model}/v1/chat/completions`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      messages,
-      temperature: 0.3,
-      max_tokens: 3072,
-    }),
-    signal: options.signal,
-  });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`${provider.name} HTTP ${res.status}: ${detail.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
   if (!text) throw new Error(`${provider.name} 返回内容为空`);
   return text as string;
 }

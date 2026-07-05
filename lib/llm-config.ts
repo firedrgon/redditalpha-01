@@ -78,10 +78,6 @@ function readEnvKeys(): Record<string, string> {
     ["GROQ_API_KEY", "groq"],
     ["GEMINI_API_KEY", "gemini"],
     ["GOOGLE_API_KEY", "gemini"],
-    ["HUGGINGFACE_API_KEY", "huggingface"],
-    ["HF_API_KEY", "huggingface"],
-    ["TOGETHER_API_KEY", "together"],
-    ["TOGETHERAI_API_KEY", "together"],
   ];
   for (const [alias, providerId] of aliases) {
     const v = process.env[alias];

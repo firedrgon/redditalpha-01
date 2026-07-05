@@ -17,8 +17,8 @@ export interface LLMProvider {
   signupUrl: string;
   docsUrl?: string;
   description: string;
-  /** 调用方式：openai（OpenAI 兼容协议）/ gemini / huggingface / duckduckgo */
-  protocol: "openai" | "gemini" | "huggingface" | "duckduckgo";
+  /** 调用方式：openai（OpenAI 兼容协议）/ gemini / duckduckgo */
+  protocol: "openai" | "gemini" | "duckduckgo";
   freeQuota: string;
 }
 
@@ -44,8 +44,7 @@ export const GEMINI_PROVIDER_IDS = [
  * 排序原则：
  *   1. 高配额免费层优先（Gemini 1500/天、Groq 14400/天）
  *   2. 低配额免费层（OpenRouter 50/天共享）作为深度分析补充
- *   3. 需要 Key 但有赠金的（Together）再次之
- *   4. 无需 Key 的兜底（DuckDuckGo）最后
+ *   3. 无需 Key 的兜底（DuckDuckGo）最后
  *
  * 注意：OpenRouter 所有模型共享每日 50 次配额，若排在 Groq 之前会很快耗尽，
  * 因此放在 Groq 之后作为补充（用于深度推理场景）。
@@ -60,8 +59,6 @@ export const PREFERRED_ACTIVE_ORDER = [
   "openrouter-hermes-405b",
   "openrouter-llama-3.3",
   "openrouter-free",
-  "together",
-  "huggingface",
   "duckduckgo",
 ] as const;
 
@@ -182,32 +179,6 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     description: "OpenRouter 自动路由到可用的免费模型，200K 上下文",
     protocol: "openai",
     freeQuota: "免费层：约 20 req/min，每天 50 req",
-  },
-  {
-    id: "huggingface",
-    name: "HuggingFace Inference",
-    endpoint: "https://api-inference.huggingface.co/models",
-    model: "meta-llama/Llama-3.3-70B-Instruct",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://huggingface.co/settings/tokens",
-    docsUrl: "https://huggingface.co/docs/api-inference",
-    description: "HuggingFace 推理 API，免费但限速较严",
-    protocol: "huggingface",
-    freeQuota: "免费层：未严格公开，约 100 req/天",
-  },
-  {
-    id: "together",
-    name: "Together AI",
-    endpoint: "https://api.together.xyz/v1/chat/completions",
-    model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://api.together.xyz/settings/api-keys",
-    docsUrl: "https://docs.together.ai",
-    description: "注册赠送 $5 免费额度，支持多种开源模型",
-    protocol: "openai",
-    freeQuota: "新用户 $5 免费额度",
   },
   {
     id: "duckduckgo",
