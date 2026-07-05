@@ -75,7 +75,17 @@ export interface FinancialMetrics {
   }>;
   // 情绪面数据
   sentiment?: {
-    marketFearGreed?: { value: number; classification: string } | null;
+    // 基于新闻标题关键词分析得出的股票自身情绪（非市场整体）
+    newsSentiment?: {
+      positiveCount: number;
+      negativeCount: number;
+      neutralCount: number;
+      total: number;
+      score: number; // -1 ~ 1，正为偏多，负为偏空
+      classification: string; // 偏多 / 偏空 / 中性
+      positiveKeywords: string[]; // 命中的正面关键词（去重）
+      negativeKeywords: string[]; // 命中的负面关键词（去重）
+    } | null;
     analystRating?: {
       consensus: string;
       strongBuy: number;
@@ -86,13 +96,6 @@ export interface FinancialMetrics {
       total: number;
       score: number;
     } | null;
-    redditMentions?: Array<{
-      title: string;
-      subreddit: string;
-      score: number;
-      url?: string;
-      createdUtc?: number;
-    }> | null;
   };
   fetchedAt: string;
   dataSource:
@@ -1079,31 +1082,106 @@ async function finnhubGet<T>(path: string, apiKey: string): Promise<{ data: T | 
  */
 
 /**
- * 获取市场整体 Fear & Greed Index（alternative.me，免费无需 Key）
- * 返回 0（极度恐惧）~ 100（极度贪婪）
+ * 基于新闻标题关键词分析股票自身的新闻情绪（非市场整体情绪）
+ *
+ * 免费且无需额外 API 调用——复用已抓取的 news 列表，统计正面/负面关键词频次。
+ *
+ * 返回：
+ *   - positiveCount / negativeCount / neutralCount: 各类新闻条数
+ *   - score: -1 ~ 1，正为偏多，负为偏空
+ *   - classification: 偏多 / 偏空 / 中性
+ *   - positiveKeywords / negativeKeywords: 命中的关键词（去重，供 LLM 参考）
  */
-async function fetchMarketFearGreed(): Promise<{ value: number; classification: string } | null> {
-  try {
-    const res = await fetch("https://api.alternative.me/fng/?limit=1", {
-      headers: { "User-Agent": UA },
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const fg = data?.data?.[0];
-    if (fg?.value && fg?.value_classification) {
-      return { value: parseInt(fg.value, 10), classification: fg.value_classification };
+const POSITIVE_KEYWORDS = [
+  "surge", "soar", "jump", "beat", "upgrade", "buy", "undervalued", "opportunity",
+  "growth", "strong", "bull", "rally", "gain", "profit", "raise", "boost", "positive",
+  "record", "high", "breakthrough", "win", "deal", "partnership", "approval", "fda",
+  "outperform", "overweight", "top pick", "accumulate", "initiate", "expansion",
+  "innovate", "launch", "demand", "recovery", "turnaround", "guidance raise",
+];
+
+const NEGATIVE_KEYWORDS = [
+  "fall", "drop", "decline", "miss", "downgrade", "sell", "overvalued", "risk",
+  "weak", "bear", "lawsuit", "investigation", "loss", "cut", "lower", "negative",
+  "low", "fail", "recall", "fraud", "probe", "warning", "guidance cut", "halt",
+  "suspend", "bankrupt", "default", "down", "plunge", "crash", "bubble", "concern",
+  "headwind", "pressure", "slump", "shrink", "exit", "depart", "resign", "underperform",
+];
+
+function analyzeNewsSentiment(
+  news: Array<{ title: string; summary?: string } | undefined> | undefined
+): {
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  total: number;
+  score: number;
+  classification: string;
+  positiveKeywords: string[];
+  negativeKeywords: string[];
+} | null {
+  if (!news || news.length === 0) return null;
+
+  let positiveCount = 0;
+  let negativeCount = 0;
+  const posKeywords = new Set<string>();
+  const negKeywords = new Set<string>();
+
+  for (const item of news) {
+    if (!item || !item.title) continue;
+    // 标题 + summary 一起做关键词匹配（summary 可能更长，信息更全）
+    const text = `${item.title} ${item.summary || ""}`.toLowerCase();
+    let isPositive = false;
+    let isNegative = false;
+
+    for (const kw of POSITIVE_KEYWORDS) {
+      if (text.includes(kw)) {
+        isPositive = true;
+        posKeywords.add(kw);
+      }
     }
-    return null;
-  } catch {
-    return null;
+    for (const kw of NEGATIVE_KEYWORDS) {
+      if (text.includes(kw)) {
+        isNegative = true;
+        negKeywords.add(kw);
+      }
+    }
+
+    // 一条新闻同时命中正负关键词视为中性（消息面混乱）
+    if (isPositive && !isNegative) positiveCount++;
+    else if (isNegative && !isPositive) negativeCount++;
+    // 其余为中性
   }
+
+  const total = news.length;
+  const neutralCount = total - positiveCount - negativeCount;
+  // score = (positive - negative) / total，范围 [-1, 1]
+  const score = total > 0 ? (positiveCount - negativeCount) / total : 0;
+  let classification: string;
+  if (score > 0.2) classification = "偏多";
+  else if (score < -0.2) classification = "偏空";
+  else classification = "中性";
+
+  return {
+    positiveCount,
+    negativeCount,
+    neutralCount,
+    total,
+    score: parseFloat(score.toFixed(3)),
+    classification,
+    positiveKeywords: Array.from(posKeywords),
+    negativeKeywords: Array.from(negKeywords),
+  };
 }
 
 /**
  * 从 stockanalysis.com 爬取分析师评级分布（S&P Global 数据，免费无需 Key）
- * 在 fetchStockAnalysisTargets 中已有页面抓取，这里提取评级分布部分
+ *
+ * 页面内嵌按月份的评级趋势数组，格式（字段顺序不固定）：
+ *   {buy:0,date:"2026-06-29",hold:10,sell:0,month:"Jun '26",score:2.857,
+ *    total:14,updated:"2026-06-29",consensus:"Buy",strongBuy:4,strongSell:0}
+ *
+ * 数组按月份升序，最后一个对象是最新月份。提取所有匹配对象取最后一个。
  */
 async function fetchAnalystRatingDist(
   ticker: string
@@ -1127,70 +1205,69 @@ async function fetchAnalystRatingDist(
     });
     if (!res.ok) return null;
     const html = await res.text();
-    // 提取评级分布对象: {consensus:"Buy",strongBuy:7,buy:1,hold:5,sell:0,strongSell:0,total:13,score:5.77}
-    const match = html.match(
-      /consensus:"(\w+)"[^}]*strongBuy:(\d+)[^}]*buy:(\d+)[^}]*hold:(\d+)[^}]*sell:(\d+)[^}]*strongSell:(\d+)[^}]*total:(\d+)[^}]*score:([\d.]+)/
-    );
-    if (!match) return null;
-    return {
-      consensus: match[1],
-      strongBuy: parseInt(match[2], 10),
-      buy: parseInt(match[3], 10),
-      hold: parseInt(match[4], 10),
-      sell: parseInt(match[5], 10),
-      strongSell: parseInt(match[6], 10),
-      total: parseInt(match[7], 10),
-      score: parseFloat(match[8]),
-    };
+
+    // 匹配所有按月份的评级对象（字段顺序不固定，逐字段提取）
+    // 对象格式：{buy:0,date:"2026-06-29",hold:10,sell:0,month:"Jun '26",score:2.857,total:14,...}
+    const objRegex = /\{[^{}]*date:"[^"]+"[^{}]*total:\d+[^{}]*\}/g;
+    const matches = html.match(objRegex) || [];
+
+    let latest: {
+      consensus: string;
+      strongBuy: number;
+      buy: number;
+      hold: number;
+      sell: number;
+      strongSell: number;
+      total: number;
+      score: number;
+    } | null = null;
+
+    for (const objStr of matches) {
+      const getField = (key: string): string | null => {
+        const m = objStr.match(new RegExp(`${key}:(\\d+(?:\\.\\d+)?)`));
+        return m ? m[1] : null;
+      };
+      const consensusMatch = objStr.match(/consensus:"([^"]+)"/);
+      if (!consensusMatch) continue;
+      const total = getField("total");
+      const strongBuy = getField("strongBuy");
+      const buy = getField("buy");
+      const hold = getField("hold");
+      const sell = getField("sell");
+      const strongSell = getField("strongSell");
+      const score = getField("score");
+      if (!total || !strongBuy || !hold) continue;
+      latest = {
+        consensus: consensusMatch[1],
+        strongBuy: parseInt(strongBuy, 10),
+        buy: parseInt(buy || "0", 10),
+        hold: parseInt(hold, 10),
+        sell: parseInt(sell || "0", 10),
+        strongSell: parseInt(strongSell || "0", 10),
+        total: parseInt(total, 10),
+        score: parseFloat(score || "0"),
+      };
+    }
+
+    return latest;
   } catch {
     return null;
   }
 }
 
 /**
- * 从 pullpush.io 获取 Reddit 提及数据（免费无需认证）
- * 搜索最近一周包含 ticker 的帖子
- */
-async function fetchRedditMentions(
-  ticker: string
-): Promise<Array<{ title: string; subreddit: string; score: number; url?: string; createdUtc?: number }> | null> {
-  const upper = ticker.toUpperCase();
-  try {
-    const url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(`$${upper}`)}&size=8&sort=desc&sort_type=created_utc&after=7d`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const posts = data?.data ?? [];
-    if (!Array.isArray(posts) || posts.length === 0) return null;
-    return posts.slice(0, 8).map((p: Record<string, unknown>) => ({
-      title: String(p.title ?? ""),
-      subreddit: String(p.subreddit ?? ""),
-      score: Number(p.score ?? 0),
-      url: p.url ? String(p.url) : undefined,
-      createdUtc: p.created_utc ? Number(p.created_utc) : undefined,
-    }));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 从 stockanalysis.com 爬取分析师目标价（数据来源 Benzinga，免费无需 Key）
+ * 从 stockanalysis.com 爬取分析师目标价（数据来源 S&P Global，免费无需 Key）
  * 提供完整的 low / median / average / high + consensus rating + 分析师数量
  *
  * 页面结构（2026 实测）：
  *   1. 服务器端渲染的 HTML 表格（最可靠，数据最新）：
  *      <td>Price</td><td>$low</td><td>$avg</td><td>$median</td><td>$high</td>
  *      列顺序：Low | Average | Median | High
- *   2. 内嵌 JSON targets:{low,high,count,median,average,updated}（可能是缓存旧数据）
- *   3. 摘要文本 "The N analysts..." 和 "Price Target: $X" 是客户端 JS 渲染的，
- *      服务器 HTML 里没有，无法抓取。
+ *   2. 摘要文本（服务端渲染）："According to N analysts polled by S&P Global,
+ *      X stock has a consensus rating of "Y" and an average price target of $Z..."
+ *   3. 内嵌 JSON targets:{low,high,count,median,average,updated}（可能是缓存旧数据）
  *
- * 提取优先级：HTML 表格 > JSON targets > 文本备选正则
+ * 提取优先级：HTML 表格 > 摘要文本 > JSON targets > 文本备选正则
  */
 async function fetchStockAnalysisTargets(
   ticker: string
@@ -1285,14 +1362,15 @@ async function fetchStockAnalysisTargets(
       const lowMatch = html.match(/lowest is \$([\d.]+)/);
       if (lowMatch) targetLow = parseFloat(lowMatch[1]);
     }
-    // 分析师数量：摘要文本 / 旧格式
-    if (numberOfAnalysts == null) {
-      const summaryMatch = html.match(/The (\d+) analysts that cover/);
-      if (summaryMatch) numberOfAnalysts = parseInt(summaryMatch[1], 10);
-    }
+    // 分析师数量：摘要文本 "According to 14 analysts polled by S&P Global"
+    // 旧格式 "The X analysts that cover" / "According to X analysts"
     if (numberOfAnalysts == null) {
       const analystMatch = html.match(/According to (\d+) analysts/);
       if (analystMatch) numberOfAnalysts = parseInt(analystMatch[1], 10);
+    }
+    if (numberOfAnalysts == null) {
+      const summaryMatch = html.match(/The (\d+) analysts that cover/);
+      if (summaryMatch) numberOfAnalysts = parseInt(summaryMatch[1], 10);
     }
 
     // consensus 评级提取
@@ -2295,19 +2373,27 @@ export async function fetchFinancialMetrics(
   }
 
   // ============================================================
-  // 情绪面数据：市场 Fear & Greed + 分析师评级分布 + Reddit 提及
-  // 全部免费数据源，并行获取，任一失败不影响其他
+  // 情绪面数据：新闻情绪（关键词分析）+ 分析师评级分布
+  // 全部基于已抓取数据或免费源，无需额外 Key
+  // 注：Reddit (pullpush.io) / StockTwits 公开 API 均不可用，未纳入
   // ============================================================
   try {
-    const [marketFG, analystRating, redditMentions] = await Promise.all([
-      fetchMarketFearGreed(),
-      fetchAnalystRatingDist(upper),
-      fetchRedditMentions(upper),
-    ]);
+    const analystRating = await fetchAnalystRatingDist(upper);
     const sentiment: NonNullable<typeof result.sentiment> = {};
-    if (marketFG) sentiment.marketFearGreed = marketFG;
-    if (analystRating) sentiment.analystRating = analystRating;
-    if (redditMentions) sentiment.redditMentions = redditMentions;
+    // 新闻情绪：基于已抓取的 news 列表做关键词分析（无需额外 API）
+    const newsSentiment = analyzeNewsSentiment(result.news);
+    if (newsSentiment) sentiment.newsSentiment = newsSentiment;
+    if (analystRating) {
+      sentiment.analystRating = analystRating;
+      // 最新月份的分析师总数和推荐均值覆盖到 metrics
+      // fetchAnalystRatingDist 按月份趋势取最新月份，比 fetchStockAnalysisTargets
+      // 里的 JSON targets 缓存更准确（后者可能滞后数月）
+      // score 字段就是 recommendationMean（1=Strong Buy ... 5=Strong Sell 的加权平均）
+      result.numberOfAnalysts = analystRating.total;
+      if (analystRating.score > 0) {
+        result.recommendationMean = analystRating.score;
+      }
+    }
     if (Object.keys(sentiment).length > 0) {
       result.sentiment = sentiment;
     }

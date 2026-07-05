@@ -343,16 +343,13 @@ export function buildLLMMessages(
 如果无明显利空，说明"当前无明显利空因素"并解释原因。
 
 ## 情绪面分析
-基于市场情绪、分析师评级和 Reddit 讨论，从三个维度分析：
+基于新闻情绪和分析师评级，从两个维度分析：
 
-### 市场情绪
-结合 Fear & Greed Index 分析整体市场情绪对该股的影响。
+### 新闻情绪
+基于近期新闻标题的关键词情绪分析（正面/负面词频），判断市场消息面对该股的偏多/偏空倾向。结合命中的关键词说明判断依据。
 
 ### 机构情绪
 基于分析师评级分布分析机构多空倾向和共识。
-
-### 散户情绪
-基于 Reddit 讨论数据分析散户关注度。
 最后给出情绪面综合判断：偏多/偏空/中性。
 
 ## 行业前景
@@ -408,8 +405,15 @@ export function buildLLMMessages(
     const s = metrics.sentiment;
     dataLines.push("");
     dataLines.push("【情绪面数据】");
-    if (s.marketFearGreed) {
-      dataLines.push(`- 市场 Fear & Greed Index：${s.marketFearGreed.value}（${s.marketFearGreed.classification}）`);
+    if (s.newsSentiment) {
+      const ns = s.newsSentiment;
+      dataLines.push(`- 新闻情绪（基于 ${ns.total} 条新闻关键词分析）：正面 ${ns.positiveCount} 条，负面 ${ns.negativeCount} 条，中性 ${ns.neutralCount} 条，综合判定 ${ns.classification}（score ${ns.score}）`);
+      if (ns.positiveKeywords.length > 0) {
+        dataLines.push(`  正面关键词：${ns.positiveKeywords.join(", ")}`);
+      }
+      if (ns.negativeKeywords.length > 0) {
+        dataLines.push(`  负面关键词：${ns.negativeKeywords.join(", ")}`);
+      }
     }
     if (s.analystRating) {
       const ar = s.analystRating;
@@ -417,14 +421,6 @@ export function buildLLMMessages(
       const bearish = ar.sell + ar.strongSell;
       dataLines.push(`- 分析师评级分布：共识 ${ar.consensus}（Strong Buy ${ar.strongBuy} / Buy ${ar.buy} / Hold ${ar.hold} / Sell ${ar.sell} / Strong Sell ${ar.strongSell}，共 ${ar.total} 位）`);
       dataLines.push(`  看多 ${bullish} 位，看空 ${bearish} 位，看多比例 ${ar.total > 0 ? ((bullish / ar.total) * 100).toFixed(1) : 0}%`);
-    }
-    if (s.redditMentions && s.redditMentions.length > 0) {
-      dataLines.push(`- Reddit 近一周讨论（共 ${s.redditMentions.length} 条）：`);
-      for (const r of s.redditMentions.slice(0, 5)) {
-        dataLines.push(`  - r/${r.subreddit}: ${r.title.slice(0, 80)}（score: ${r.score}）`);
-      }
-    } else {
-      dataLines.push("- Reddit 近一周讨论：未获取到相关讨论。");
     }
   } else {
     dataLines.push("");
