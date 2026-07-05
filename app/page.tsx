@@ -756,36 +756,6 @@ function AnalysisModal({
               </div>
             )}
 
-            {/* 近期新闻列表 */}
-            {analysis.news && analysis.news.length > 0 && (
-              <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V9.75m0 0h-6.375m6.375 0v10.125c0 .621-.504 1.125-1.125 1.125h-10.125a1.125 1.125 0 01-1.125-1.125V9.75m0 0h6.375M21 9.75V6.375A2.625 2.625 0 0018.375 3.75H5.625A2.625 2.625 0 003 6.375v10.125A2.625 2.625 0 005.625 19.5h12.75A2.625 2.625 0 0021 16.875V9.75z" />
-                  </svg>
-                  <span className="text-xs font-medium text-zinc-300">近期新闻</span>
-                  <span className="text-[10px] text-zinc-500">· {analysis.news.length} 条</span>
-                </div>
-                <ul className="space-y-2">
-                  {analysis.news.slice(0, 5).map((n, i) => (
-                    <li key={i} className="text-xs text-zinc-400">
-                      <div className="flex items-start gap-2">
-                        <span className="mt-0.5 h-1 w-1 flex-shrink-0 rounded-full bg-zinc-500" />
-                        <div className="flex-1">
-                          <div className="text-zinc-300">{n.title}</div>
-                          <div className="mt-0.5 text-[10px] text-zinc-600">
-                            {n.date && new Date(n.date).toLocaleDateString("zh-CN")}
-                            {n.date && n.source && " · "}
-                            {n.source}
-                          </div>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
             {/* 数据来源 & 警告：解释为何部分指标显示"未能获取该指标数据" */}
             {analysis.warnings && analysis.warnings.length > 0 && (
               <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3">
