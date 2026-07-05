@@ -980,6 +980,116 @@ async function finnhubGet<T>(path: string, apiKey: string): Promise<{ data: T | 
  * 用 Finnhub 拉取财务数据
  * 端点：quote / profile / recommendation / stock/metrics
  */
+
+/**
+ * 从 stockanalysis.com 爬取分析师目标价（数据来源 S&P Global，免费无需 Key）
+ * 提供完整的 low / median / average / high + consensus rating + 分析师数量
+ * 页面 HTML 内嵌 JSON: targets:{low,high,count,median,average,updated}
+ */
+async function fetchStockAnalysisTargets(
+  ticker: string
+): Promise<{
+  targetLow: number | null;
+  targetHigh: number | null;
+  targetMedian: number | null;
+  targetAverage: number | null;
+  numberOfAnalysts: number | null;
+  recommendationMean: number | null;
+} | null> {
+  const upper = ticker.toUpperCase();
+  const url = `https://stockanalysis.com/stocks/${upper.toLowerCase()}/forecast/`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // 提取 targets:{low:XX,high:XX,count:XX,median:XX,average:XX,...}
+    const targetsMatch = html.match(/targets:\{([^}]+)\}/);
+    let targetLow: number | null = null;
+    let targetHigh: number | null = null;
+    let targetMedian: number | null = null;
+    let targetAverage: number | null = null;
+    let numberOfAnalysts: number | null = null;
+
+    if (targetsMatch) {
+      const low = targetsMatch[1].match(/low:(\d+(?:\.\d+)?)/)?.[1];
+      const high = targetsMatch[1].match(/high:(\d+(?:\.\d+)?)/)?.[1];
+      const median = targetsMatch[1].match(/median:(\d+(?:\.\d+)?)/)?.[1];
+      const average = targetsMatch[1].match(/average:(\d+(?:\.\d+)?)/)?.[1];
+      const count = targetsMatch[1].match(/count:(\d+)/)?.[1];
+      if (low) targetLow = parseFloat(low);
+      if (high) targetHigh = parseFloat(high);
+      if (median) targetMedian = parseFloat(median);
+      if (average) targetAverage = parseFloat(average);
+      if (count) numberOfAnalysts = parseInt(count, 10);
+    }
+
+    // 如果 targets 对象没匹配到，从页面文本提取（备选）
+    if (targetAverage == null) {
+      const avgMatch = html.match(/average price target of \$([\d.]+)/);
+      if (avgMatch) targetAverage = parseFloat(avgMatch[1]);
+    }
+    if (targetHigh == null) {
+      const highMatch = html.match(/highest is \$([\d.]+)/);
+      if (highMatch) targetHigh = parseFloat(highMatch[1]);
+    }
+    if (targetLow == null) {
+      const lowMatch = html.match(/lowest is \$([\d.]+)/);
+      if (lowMatch) targetLow = parseFloat(lowMatch[1]);
+    }
+    if (numberOfAnalysts == null) {
+      const analystMatch = html.match(/According to (\d+) analysts/);
+      if (analystMatch) numberOfAnalysts = parseInt(analystMatch[1], 10);
+    }
+
+    // 提取评级 consensus + strongBuy/strongSell 计算 recommendationMean
+    let recommendationMean: number | null = null;
+    const ratingMatch = html.match(
+      /consensus:"(\w+)"[^}]*strongBuy:(\d+)[^}]*strongSell:(\d+)/
+    );
+    if (ratingMatch) {
+      const consensus = ratingMatch[1];
+      // S&P Global consensus -> 近似 recommendationMean (1=Strong Buy ... 5=Strong Sell)
+      const consensusMap: Record<string, number> = {
+        "Strong Buy": 1,
+        Buy: 2,
+        Overweight: 2,
+        Hold: 3,
+        Neutral: 3,
+        Underweight: 4,
+        Sell: 4,
+        "Strong Sell": 5,
+      };
+      recommendationMean = consensusMap[consensus] ?? null;
+    }
+
+    // 至少有一个有效值才返回
+    if (
+      targetLow == null &&
+      targetHigh == null &&
+      targetAverage == null &&
+      targetMedian == null
+    ) {
+      return null;
+    }
+
+    return {
+      targetLow,
+      targetHigh,
+      targetMedian,
+      targetAverage,
+      numberOfAnalysts,
+      recommendationMean,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 从 Yahoo Finance RSS 获取公司新闻（无需 API Key / crumb 认证）
  * 端点：https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}
@@ -1675,6 +1785,56 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // 补充新闻失败不影响主结果
+    }
+  }
+
+  // ============================================================
+  // 分析师目标价：优先爬取 stockanalysis.com（免费、无需 Key、数据最完整）
+  // 数据来源：S&P Global，提供 low/median/average/high + consensus rating + 分析师数量
+  // ============================================================
+  if (
+    result.targetMeanPrice == null ||
+    result.targetHighPrice == null ||
+    result.targetLowPrice == null ||
+    result.targetMedianPrice == null
+  ) {
+    try {
+      const sa = await fetchStockAnalysisTargets(upper);
+      if (sa) {
+        let hasNewData = false;
+        if (sa.targetLow != null && result.targetLowPrice == null) {
+          result.targetLowPrice = sa.targetLow;
+          hasNewData = true;
+        }
+        if (sa.targetHigh != null && result.targetHighPrice == null) {
+          result.targetHighPrice = sa.targetHigh;
+          hasNewData = true;
+        }
+        if (sa.targetMedian != null && result.targetMedianPrice == null) {
+          result.targetMedianPrice = sa.targetMedian;
+          hasNewData = true;
+        }
+        if (sa.targetAverage != null && result.targetMeanPrice == null) {
+          result.targetMeanPrice = sa.targetAverage;
+          hasNewData = true;
+        }
+        if (sa.numberOfAnalysts != null && result.numberOfAnalysts == null) {
+          result.numberOfAnalysts = sa.numberOfAnalysts;
+          hasNewData = true;
+        }
+        if (sa.recommendationMean != null && result.recommendationMean == null) {
+          result.recommendationMean = sa.recommendationMean;
+          hasNewData = true;
+        }
+        if (hasNewData) {
+          result.warnings.push("分析师目标价由 stockanalysis.com (S&P Global) 补充。");
+          if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+            result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+          }
+        }
+      }
+    } catch {
+      // 爬取失败不影响主结果
     }
   }
 
