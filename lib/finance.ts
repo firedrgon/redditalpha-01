@@ -1774,6 +1774,41 @@ export async function fetchFinancialMetrics(
     }
   }
 
+  // Yahoo quoteSummary 失败后，用 v7/quote 兜底补充目标价（无需 crumb）
+  if (
+    result.targetMeanPrice == null ||
+    result.targetHighPrice == null ||
+    result.targetLowPrice == null ||
+    result.targetMedianPrice == null
+  ) {
+    try {
+      const v7 = await fetchV7Quote(upper);
+      if (v7) {
+        const mean = num(v7.targetMeanPrice);
+        const high = num(v7.targetHighPrice);
+        const low = num(v7.targetLowPrice);
+        const median = num(v7.targetMedianPrice);
+        const analysts = num(v7.numberOfAnalystOpinions);
+        const recMean = num(v7.recommendationMean);
+        let hasNewData = false;
+        if (mean != null && result.targetMeanPrice == null) { result.targetMeanPrice = mean; hasNewData = true; }
+        if (high != null && result.targetHighPrice == null) { result.targetHighPrice = high; hasNewData = true; }
+        if (low != null && result.targetLowPrice == null) { result.targetLowPrice = low; hasNewData = true; }
+        if (median != null && result.targetMedianPrice == null) { result.targetMedianPrice = median; hasNewData = true; }
+        if (analysts != null && result.numberOfAnalysts == null) { result.numberOfAnalysts = analysts; hasNewData = true; }
+        if (recMean != null && result.recommendationMean == null) { result.recommendationMean = recMean; hasNewData = true; }
+        if (hasNewData) {
+          result.warnings.push("分析师目标价由 Yahoo v7/quote 补充。");
+          if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+            result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+          }
+        }
+      }
+    } catch {
+      // v7 兜底失败不影响主结果
+    }
+  }
+
   // 若主数据源有 PE 但没有行业 PE，尝试用 Finnhub profile 补充行业信息（轻量级）
   if (
     finnhubKey &&
