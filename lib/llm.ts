@@ -11,7 +11,14 @@
  */
 
 import { readConfig, writeConfig } from "./llm-config";
-import { LLM_PROVIDERS, type LLMProvider, OPENROUTER_PROVIDER_IDS, PREFERRED_ACTIVE_ORDER } from "./llm-providers";
+import {
+  LLM_PROVIDERS,
+  type LLMProvider,
+  OPENROUTER_PROVIDER_IDS,
+  SILICONFLOW_PROVIDER_IDS,
+  SILICONFLOW_KNOWN_FREE_MODELS,
+  PREFERRED_ACTIVE_ORDER,
+} from "./llm-providers";
 
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
@@ -540,4 +547,131 @@ export async function refreshOpenRouterModels(): Promise<{
   }
 
   return { updated, availableModels: availableSlugs };
+}
+
+/**
+ * 从 SiliconFlow API 获取最新文本模型列表。
+ * 与已知免费模型列表对比，返回可用/已下架/新增候选。
+ */
+export async function fetchSiliconFlowModels(): Promise<{
+  all: string[];
+  availableFree: string[];
+  removed: string[];
+  newCandidates: string[];
+}> {
+  const config = await readConfig();
+  let apiKey = "";
+  for (const id of SILICONFLOW_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      apiKey = s.apiKey.trim();
+      break;
+    }
+  }
+  if (!apiKey) {
+    return { all: [], availableFree: [], removed: [], newCandidates: [] };
+  }
+
+  const url = "https://api.siliconflow.cn/v1/models?type=text&sub_type=chat";
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `SiliconFlow /v1/models HTTP ${res.status}: ${detail.slice(0, 200)}`
+    );
+  }
+  const data = (await res.json()) as { data?: Array<{ id: string }> };
+  const all = (data.data ?? []).map((m) => m.id);
+  const modelIds = new Set(all);
+
+  const availableFree = SILICONFLOW_KNOWN_FREE_MODELS.filter((id) =>
+    modelIds.has(id)
+  );
+  const removed = SILICONFLOW_KNOWN_FREE_MODELS.filter(
+    (id) => !modelIds.has(id)
+  );
+  const knownSet = new Set<string>(SILICONFLOW_KNOWN_FREE_MODELS);
+  const newCandidates = all.filter(
+    (id) =>
+      !knownSet.has(id) &&
+      // 仅关注可能免费的模型（开源模型系列）
+      /^(Qwen|deepseek-ai|meta-llama|THUDM|internlm|mistralai)\//.test(id)
+  );
+
+  return { all, availableFree, removed, newCandidates };
+}
+
+/**
+ * 检查并更新 SiliconFlow provider 的可用性：
+ *   - 模型仍存在：清除 working 标记，下次调用时重新检测
+ *   - 模型已下架：标记 working=false，避免后续调用失败
+ *
+ * 注意：SiliconFlow 模型命名较稳定（不像 OpenRouter 会经常改 slug），
+ * 这里只更新可用性，不做自动替换。新模型通过 newCandidates 返回供人工评估。
+ */
+export async function refreshSiliconFlowModels(): Promise<{
+  updated: Array<{ providerId: string; action: string }>;
+  availableModels: string[];
+  removedModels: string[];
+  newCandidates: string[];
+}> {
+  const { availableFree, removed, newCandidates } = await fetchSiliconFlowModels();
+  if (availableFree.length === 0 && removed.length === 0) {
+    return {
+      updated: [],
+      availableModels: [],
+      removedModels: [],
+      newCandidates,
+    };
+  }
+
+  const config = await readConfig();
+  const now = Date.now();
+  const updated: Array<{ providerId: string; action: string }> = [];
+  const modelIds = new Set(availableFree);
+
+  for (const provider of LLM_PROVIDERS) {
+    if (
+      !SILICONFLOW_PROVIDER_IDS.includes(
+        provider.id as (typeof SILICONFLOW_PROVIDER_IDS)[number]
+      )
+    ) {
+      continue;
+    }
+    const status = config.providers[provider.id];
+    if (!status) continue;
+
+    const stillAvailable = modelIds.has(provider.model);
+    if (stillAvailable) {
+      if (status.working === false || status.cooldownUntil) {
+        status.working = null;
+        status.cooldownUntil = null;
+        status.lastError = null;
+        updated.push({
+          providerId: provider.id,
+          action: "恢复为未测试（模型可用）",
+        });
+      }
+    } else {
+      status.working = false;
+      status.lastTested = now;
+      status.lastError = `模型 ${provider.model} 已从 SiliconFlow 下架`;
+      updated.push({
+        providerId: provider.id,
+        action: "标记为不可用（已下架）",
+      });
+    }
+  }
+
+  await writeConfig(config);
+
+  return {
+    updated,
+    availableModels: availableFree,
+    removedModels: removed,
+    newCandidates,
+  };
 }

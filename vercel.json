@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/llm-providers/refresh-siliconflow",
+      "path": "/api/llm-providers/refresh-models",
       "schedule": "0 19 * * *"
     }
   ]
