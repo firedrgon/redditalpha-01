@@ -109,7 +109,7 @@ async function callOpenAICompatible(
   options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
 ): Promise<string> {
   const isReasoningModel = provider.model.includes("deepseek-r1");
-  const defaultMaxTokens = isReasoningModel ? 4096 : 2048;
+  const defaultMaxTokens = isReasoningModel ? 4096 : 3072;
 
   const res = await fetch(provider.endpoint, {
     method: "POST",
@@ -165,7 +165,7 @@ async function callGemini(
     contents,
     generationConfig: {
       temperature: options.temperature ?? 0.3,
-      maxOutputTokens: options.maxTokens ?? 2048,
+      maxOutputTokens: options.maxTokens ?? 3072,
     },
   };
   if (systemMsg) {
@@ -208,7 +208,7 @@ async function callHuggingFace(
       model: provider.model,
       messages,
       temperature: 0.3,
-      max_tokens: 2048,
+      max_tokens: 3072,
     }),
     signal: options.signal,
   });
