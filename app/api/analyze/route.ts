@@ -137,8 +137,22 @@ async function doRefresh(
     }
   }
 
-  saveAnalysis(analysis).catch(() => {});
-  recordFinanceSnapshot(upper, metrics).catch(() => {});
+  // 持久化分析结果。必须 await，否则 serverless 实例可能在写完成前就结束，
+  // 导致新分析数据丢失、下次进来仍是旧数据。
+  // 错误不再静默吞掉：记录到 warnings 但不影响响应（用户已拿到 analysis）。
+  try {
+    await saveAnalysis(analysis);
+  } catch (saveErr) {
+    const msg = saveErr instanceof Error ? saveErr.message : String(saveErr);
+    console.error("[analyze] saveAnalysis failed:", msg);
+    analysis.warnings = [
+      ...(analysis.warnings ?? []),
+      `分析结果保存失败: ${msg}`,
+    ];
+  }
+  recordFinanceSnapshot(upper, metrics).catch((err) => {
+    console.error("[analyze] recordFinanceSnapshot failed:", err);
+  });
 
   return { analysis };
 }
