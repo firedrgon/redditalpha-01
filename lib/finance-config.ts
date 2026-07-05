@@ -3,14 +3,17 @@
  *
  * 优先级：
  *   1. 环境变量（serverless / 只读文件系统）
- *   2. 本地配置文件 .finance-config.json
- *   3. 内存副本（写入失败时降级）
+ *   2. 数据库 AppSetting（Vercel 等无持久化文件系统）
+ *   3. 本地配置文件 .finance-config.json
+ *   4. 内存副本（写入失败时降级）
  */
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getAppSetting, setAppSetting } from "./db/app-settings";
 
 const CONFIG_FILE = path.join(process.cwd(), ".finance-config.json");
+const DB_KEY = "finance_config";
 
 export interface FinanceConfig {
   fmpApiKey: string;
@@ -55,18 +58,30 @@ export async function readFinanceConfig(): Promise<FinanceConfig> {
   if (memoryConfig) {
     config = { ...memoryConfig };
   } else {
-    try {
-      const raw = await fs.readFile(CONFIG_FILE, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<FinanceConfig>;
+    // 优先从数据库读取（Vercel 等无持久化文件系统场景）
+    const fromDb = await getAppSetting<Partial<FinanceConfig>>(DB_KEY);
+    if (fromDb) {
       config = {
-        fmpApiKey: parsed.fmpApiKey ?? "",
-        avApiKey: parsed.avApiKey ?? "",
-        tiingoApiKey: parsed.tiingoApiKey ?? "",
-        finnhubApiKey: parsed.finnhubApiKey ?? "",
-        updatedAt: parsed.updatedAt ?? 0,
+        fmpApiKey: fromDb.fmpApiKey ?? "",
+        avApiKey: fromDb.avApiKey ?? "",
+        tiingoApiKey: fromDb.tiingoApiKey ?? "",
+        finnhubApiKey: fromDb.finnhubApiKey ?? "",
+        updatedAt: fromDb.updatedAt ?? 0,
       };
-    } catch {
-      config = { ...DEFAULT_CONFIG };
+    } else {
+      try {
+        const raw = await fs.readFile(CONFIG_FILE, "utf-8");
+        const parsed = JSON.parse(raw) as Partial<FinanceConfig>;
+        config = {
+          fmpApiKey: parsed.fmpApiKey ?? "",
+          avApiKey: parsed.avApiKey ?? "",
+          tiingoApiKey: parsed.tiingoApiKey ?? "",
+          finnhubApiKey: parsed.finnhubApiKey ?? "",
+          updatedAt: parsed.updatedAt ?? 0,
+        };
+      } catch {
+        config = { ...DEFAULT_CONFIG };
+      }
     }
   }
   applyEnvKey(config);
@@ -78,6 +93,8 @@ export async function writeFinanceConfig(
 ): Promise<void> {
   const data: FinanceConfig = { ...config, updatedAt: Date.now() };
   memoryConfig = { ...data };
+  // 写入数据库（Vercel 等无持久化文件系统场景）
+  await setAppSetting(DB_KEY, data);
   try {
     await fs.writeFile(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (err) {
