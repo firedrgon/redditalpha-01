@@ -89,55 +89,6 @@ interface StockAnalysis {
   }>;
 }
 
-/**
- * 从 LLM narrative 中提取指定章节内容。
- * 兼容多种 Markdown 标题格式作为章节标题：
- *   ## 消息面分析 / ### 消息面分析 / **消息面分析** / 消息面分析：
- * 章节边界只认 #{1,6} markdown 标题（下一个 ## 或 ### 等），
- * 不把 **bold** 文本当边界——因为加粗常用于章节内的子项（如 **利好因素：**）。
- */
-function extractSection(text: string, sectionTitle: string): string | null {
-  const escaped = sectionTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(
-    `(?:^|\\n)\\s*(?:#{1,6}\\s+|\\*{2}\\s*)?${escaped}\\s*[:：]?\\s*\\*{0,2}\\s*\\n([\\s\\S]*?)(?=\\n\\s*#{1,6}\\s|$)`,
-    "m"
-  );
-  const match = text.match(pattern);
-  if (!match || !match[1]) return null;
-  const content = match[1].trim();
-  return content.length > 0 ? content : null;
-}
-
-/** 移除 LLM narrative 中的指定章节，返回剩余内容 */
-function removeSections(text: string, sectionTitles: string[]): string {
-  let result = text;
-  for (const title of sectionTitles) {
-    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(
-      `\\n?\\s*(?:#{1,6}\\s+|\\*{2}\\s*)?${escaped}\\s*[:：]?\\s*\\*{0,2}\\s*\\n[\\s\\S]*?(?=\\n\\s*#{1,6}\\s|$)`,
-      "m"
-    );
-    result = result.replace(pattern, "");
-  }
-  return result.trim();
-}
-
-/**
- * 从章节内容中提取 ### 子章节（如利好因素/利空因素）。
- * 边界是下一个 ### 或 ## 标题，或文本结尾。
- */
-function extractSubSection(text: string, subTitle: string): string | null {
-  const escaped = subTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(
-    `(?:^|\\n)\\s*#{2,3}\\s+${escaped}\\s*[:：]?\\s*\\n([\\s\\S]*?)(?=\\n\\s*#{2,3}\\s|$)`,
-    "m"
-  );
-  const match = text.match(pattern);
-  if (!match || !match[1]) return null;
-  const content = match[1].trim();
-  return content.length > 0 ? content : null;
-}
-
 // ============================================================
 // LLM Provider 类型
 // ============================================================
@@ -721,72 +672,7 @@ function AnalysisModal({
               ))}
             </div>
 
-            {/* 消息面分析 */}
-            {analysis.llmNarrative && extractSection(analysis.llmNarrative, "消息面分析") && (
-              <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-blue-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V9.75m0 0h-6.375m6.375 0v10.125c0 .621-.504 1.125-1.125 1.125h-10.125a1.125 1.125 0 01-1.125-1.125V9.75m0 0h6.375M21 9.75V6.375A2.625 2.625 0 0018.375 3.75H5.625A2.625 2.625 0 003 6.375v10.125A2.625 2.625 0 005.625 19.5h12.75A2.625 2.625 0 0021 16.875V9.75z" />
-                  </svg>
-                  <span className="text-xs font-medium text-blue-400">消息面分析</span>
-                </div>
-                {(() => {
-                  const newsContent = extractSection(analysis.llmNarrative, "消息面分析") || "";
-                  // 从消息面分析章节提取 ### 利好因素 和 ### 利空因素 子章节
-                  const bullish = extractSubSection(newsContent, "利好因素");
-                  const bearish = extractSubSection(newsContent, "利空因素");
-                  if (bullish || bearish) {
-                    return (
-                      <div className="space-y-3">
-                        {bullish && (
-                          <div className="rounded-md bg-green-500/10 p-3">
-                            <div className="mb-1.5 flex items-center gap-1.5">
-                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-green-400" fill="none" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
-                              </svg>
-                              <span className="text-xs font-medium text-green-400">利好因素</span>
-                            </div>
-                            <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{bullish}</div>
-                          </div>
-                        )}
-                        {bearish && (
-                          <div className="rounded-md bg-red-500/10 p-3">
-                            <div className="mb-1.5 flex items-center gap-1.5">
-                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-red-400" fill="none" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" />
-                              </svg>
-                              <span className="text-xs font-medium text-red-400">利空因素</span>
-                            </div>
-                            <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{bearish}</div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  // 没有子标题时，直接展示完整内容
-                  return (
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{newsContent}</div>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* 行业前景 */}
-            {analysis.llmNarrative && extractSection(analysis.llmNarrative, "行业前景") && (
-              <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-purple-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.5 4.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                  </svg>
-                  <span className="text-xs font-medium text-purple-400">行业前景</span>
-                </div>
-                <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
-                  {extractSection(analysis.llmNarrative, "行业前景")}
-                </div>
-              </div>
-            )}
-
-            {/* LLM 叙述（剩余章节） */}
+            {/* LLM 叙述（完整内容：公司概览/指标判定/消息面分析/行业前景/总评） */}
             {analysis.llmNarrative && (
               <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
                 <div className="mb-2 flex items-center gap-2">
@@ -803,7 +689,7 @@ function AnalysisModal({
                   )}
                 </div>
                 <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
-                  {removeSections(analysis.llmNarrative, ["消息面分析", "行业前景"]) || analysis.llmNarrative}
+                  {analysis.llmNarrative}
                 </div>
               </div>
             )}
