@@ -158,10 +158,29 @@ function computeOne(
 
   const { verdict, reasoning } =
     value == null
-      ? {
-          verdict: "unknown" as Verdict,
-          reasoning: "未能获取该指标数据，无法判定。",
-        }
+      ? (() => {
+          // peVsIndustry 为 null 时，区分"亏损公司 PE 不适用"和"数据缺失"
+          if (strategy.metricField === "peVsIndustry") {
+            const pe = metrics.trailingPE ?? metrics.forwardPE;
+            if (pe == null && metrics.industryPE != null) {
+              // 行业 PE 有值但个股 PE 为 null → 亏损公司，PE 不适用
+              return {
+                verdict: "unknown" as Verdict,
+                reasoning: "该公司处于亏损状态，PE 不适用，无法与行业平均比较。",
+              };
+            }
+            if (pe != null && metrics.industryPE == null) {
+              return {
+                verdict: "unknown" as Verdict,
+                reasoning: "未能获取行业 PE 数据，无法判定。",
+              };
+            }
+          }
+          return {
+            verdict: "unknown" as Verdict,
+            reasoning: "未能获取该指标数据，无法判定。",
+          };
+        })()
       : (() => {
           const passed = applyOperator(
             value,
