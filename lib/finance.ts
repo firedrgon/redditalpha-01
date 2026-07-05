@@ -468,6 +468,82 @@ function getSectorPE(industry: string | null | undefined): number | null {
 }
 
 /**
+ * stockanalysis.com sector 名称 → URL slug 映射
+ * 用于爬取实时加权平均 PE
+ */
+const SECTOR_TO_SA_SLUG: Record<string, string> = {
+  Technology: "technology",
+  Healthcare: "healthcare",
+  Financials: "financials",
+  Energy: "energy",
+  "Consumer Cyclical": "consumer-discretionary",
+  "Consumer Defensive": "consumer-staples",
+  Industrials: "industrials",
+  Utilities: "utilities",
+  Materials: "materials",
+  "Real Estate": "real-estate",
+  "Communication Services": "communication-services",
+};
+
+/** sector PE 缓存（1 小时有效，避免频繁爬取） */
+let sectorPECache: { sector: string; pe: number; expires: number } | null = null;
+
+/**
+ * 从 stockanalysis.com 爬取 sector 加权平均 PE（实时数据，无需 API Key）
+ * 页面包含 "weighted average PE ratio of XX.XX"
+ * 缓存 1 小时避免频繁请求
+ */
+async function fetchSectorPEFromSA(sector: string): Promise<number | null> {
+  if (!sector) return null;
+  // 缓存命中
+  if (sectorPECache && sectorPECache.sector === sector && sectorPECache.expires > Date.now()) {
+    return sectorPECache.pe;
+  }
+
+  const slug = SECTOR_TO_SA_SLUG[sector];
+  if (!slug) return null;
+
+  const url = `https://stockanalysis.com/stocks/sector/${slug}/`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // 提取 "weighted average PE ratio of 46.20"
+    const peMatch = html.match(/weighted average PE ratio of ([\d.]+)/);
+    if (peMatch) {
+      const pe = parseFloat(peMatch[1]);
+      if (Number.isFinite(pe) && pe > 0) {
+        sectorPECache = { sector, pe, expires: Date.now() + 60 * 60 * 1000 };
+        return pe;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 获取行业 PE：优先爬取 stockanalysis.com 实时加权平均 PE，
+ * 失败则降级到 SECTOR_DEFAULT_PE 硬编码经验值。
+ */
+async function getSectorPEResolved(industry: string | null | undefined): Promise<number | null> {
+  if (!industry) return null;
+  // 映射到 broad sector
+  const sector = SECTOR_DEFAULT_PE[industry] != null ? industry : (INDUSTRY_TO_SECTOR[industry] ?? null);
+  if (!sector) return null;
+  // 优先爬取实时数据
+  const saPE = await fetchSectorPEFromSA(sector);
+  if (saPE != null) return saPE;
+  // 降级到经验值
+  return SECTOR_DEFAULT_PE[sector] ?? null;
+}
+
+/**
  * 根据行业名获取对应的 broad sector 名（用于显示）。
  */
 function getBroadSector(industry: string | null | undefined): string | null {
@@ -1993,6 +2069,29 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // 补充失败不影响主结果
+    }
+  }
+
+  // ============================================================
+  // 行业 PE：用 stockanalysis.com 实时加权平均 PE 覆盖硬编码经验值
+  // 数据源函数已用 SECTOR_DEFAULT_PE 填充了近似值，
+  // 这里异步爬取实时数据覆盖，失败则保留经验值。
+  // ============================================================
+  if (result.industry) {
+    try {
+      const livePE = await getSectorPEResolved(result.industry);
+      if (livePE != null) {
+        const broadSector = getBroadSector(result.industry) ?? result.industry;
+        const isFromSA = sectorPECache?.sector === broadSector;
+        result.industryPE = livePE;
+        if (isFromSA) {
+          result.warnings.push(
+            `行业 PE 来自 stockanalysis.com 实时数据：${broadSector} 加权平均 PE = ${livePE}。`
+          );
+        }
+      }
+    } catch {
+      // 爬取失败保留经验值
     }
   }
 
