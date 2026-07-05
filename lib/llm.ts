@@ -11,7 +11,7 @@
  */
 
 import { readConfig, writeConfig } from "./llm-config";
-import { LLM_PROVIDERS, type LLMProvider, OPENROUTER_PROVIDER_IDS } from "./llm-providers";
+import { LLM_PROVIDERS, type LLMProvider, OPENROUTER_PROVIDER_IDS, PREFERRED_ACTIVE_ORDER } from "./llm-providers";
 
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
@@ -67,11 +67,20 @@ export async function chatCompletion(
 ): Promise<LLMResponse> {
   const config = await readConfig();
 
+  // 候选 provider 顺序：
+  //   1. 用户指定的 activeProvider 最优先
+  //   2. 其余按 PREFERRED_ACTIVE_ORDER（配额+质量综合优先）排序
+  //   3. 不在 PREFERRED_ACTIVE_ORDER 中的（理论不应有）按声明顺序补在最后
   const candidates: LLMProvider[] = [];
   const active = config.activeProvider
     ? LLM_PROVIDERS.find((p) => p.id === config.activeProvider)
     : null;
   if (active) candidates.push(active);
+  for (const id of PREFERRED_ACTIVE_ORDER) {
+    if (candidates.find((c) => c.id === id)) continue;
+    const p = LLM_PROVIDERS.find((x) => x.id === id);
+    if (p) candidates.push(p);
+  }
   for (const p of LLM_PROVIDERS) {
     if (candidates.find((c) => c.id === p.id)) continue;
     candidates.push(p);

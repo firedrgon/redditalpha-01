@@ -38,15 +38,26 @@ export const GEMINI_PROVIDER_IDS = [
   "gemini-2.0",
 ] as const;
 
-/** 自动选择活跃 provider 时的优先级（分析质量优先） */
+/**
+ * 自动选择活跃 provider 时的优先级（配额 + 质量综合优先）。
+ *
+ * 排序原则：
+ *   1. 高配额免费层优先（Gemini 1500/天、Groq 14400/天）
+ *   2. 低配额免费层（OpenRouter 50/天共享）作为深度分析补充
+ *   3. 需要 Key 但有赠金的（Together）再次之
+ *   4. 无需 Key 的兜底（DuckDuckGo）最后
+ *
+ * 注意：OpenRouter 所有模型共享每日 50 次配额，若排在 Groq 之前会很快耗尽，
+ * 因此放在 Groq 之后作为补充（用于深度推理场景）。
+ */
 export const PREFERRED_ACTIVE_ORDER = [
   "gemini",
   "gemini-2.0",
+  "groq",
   "openrouter-nemotron-ultra",
   "openrouter-qwen3",
   "openrouter-gpt-oss-120b",
   "openrouter-hermes-405b",
-  "groq",
   "openrouter-llama-3.3",
   "openrouter-free",
   "together",
