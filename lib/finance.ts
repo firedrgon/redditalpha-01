@@ -980,6 +980,50 @@ async function finnhubGet<T>(path: string, apiKey: string): Promise<{ data: T | 
  * 用 Finnhub 拉取财务数据
  * 端点：quote / profile / recommendation / stock/metrics
  */
+/**
+ * 从 Yahoo Finance RSS 获取公司新闻（无需 API Key / crumb 认证）
+ * 端点：https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}
+ */
+async function fetchYahooRSSNews(
+  ticker: string
+): Promise<Array<{ title: string; source?: string; date?: string; summary?: string; url?: string }> | null> {
+  const upper = ticker.toUpperCase();
+  const url = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(upper)}&region=US&lang=en-US`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const xml = await res.text();
+    // 解析 RSS <item> 条目
+    const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+    if (items.length === 0) return null;
+    const news = items.slice(0, 15).map((item) => {
+      const title = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/)?.[1]
+        ?? item.match(/<title>([\s\S]*?)<\/title>/)?.[1]
+        ?? "";
+      const link = item.match(/<link>([\s\S]*?)<\/link>/)?.[1]?.trim() ?? "";
+      const pubDate = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1]?.trim() ?? "";
+      const desc = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1]
+        ?? item.match(/<description>([\s\S]*?)<\/description>/)?.[1]
+        ?? "";
+      // 去除 description 里的 HTML 标签
+      const summary = desc.replace(/<[^>]+>/g, "").trim();
+      return {
+        title: title.trim(),
+        source: "Yahoo Finance",
+        date: pubDate ? new Date(pubDate).toISOString() : undefined,
+        summary: summary || undefined,
+        url: link || undefined,
+      };
+    }).filter((n) => n.title);
+    return news.length > 0 ? news : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 从 Finnhub 获取最近 7 天公司新闻 */
 async function fetchFinnhubNews(
   ticker: string,
@@ -1610,7 +1654,18 @@ export async function fetchFinancialMetrics(
   const upper = ticker.trim().toUpperCase();
   const result = await fetchFinancialMetricsInternal(ticker);
 
-  // 无论主数据源是什么，只要有 Finnhub Key，就尝试补充新闻
+  // 新闻获取：优先使用 Yahoo Finance RSS（无需 Key / crumb，稳定性最好），
+  // 若 Yahoo 无结果再用 Finnhub 补充。
+  if (!result.news || result.news.length === 0) {
+    try {
+      const yNews = await fetchYahooRSSNews(upper);
+      if (yNews && yNews.length > 0) {
+        result.news = yNews;
+      }
+    } catch {
+      // Yahoo RSS 失败不影响主流程
+    }
+  }
   const finnhubKey = await getFinnhubApiKey();
   if (finnhubKey && (!result.news || result.news.length === 0)) {
     try {
