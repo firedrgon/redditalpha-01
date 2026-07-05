@@ -5,6 +5,7 @@ import {
   removeFavorite,
   isFavorite,
   updateFavorite,
+  clearCachedAnalysisDB as clearCachedAnalysis,
 } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -86,6 +87,13 @@ export async function DELETE(request: NextRequest) {
 
   try {
     await removeFavorite(ticker);
+    // 同步清除该 ticker 的分析缓存，避免残留无主数据。
+    // 分析缓存删除失败不影响收藏删除的主流程。
+    try {
+      await clearCachedAnalysis(ticker);
+    } catch (cacheErr) {
+      console.error("[favorites] clearCachedAnalysis failed:", cacheErr);
+    }
     return NextResponse.json({ success: true });
   } catch (err) {
     return NextResponse.json(
