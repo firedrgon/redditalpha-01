@@ -41,6 +41,7 @@ interface FavoriteItem {
   ticker: string;
   name?: string | null;
   addedAt: number;
+  pinned?: boolean;
 }
 
 // ============================================================
@@ -321,15 +322,28 @@ function FavoriteCard({
   item,
   onRemove,
   onAnalyze,
+  onTogglePin,
 }: {
   item: FavoriteItem;
   onRemove: (ticker: string) => void;
   onAnalyze: (item: FavoriteItem) => void;
+  onTogglePin: (ticker: string, pinned: boolean) => void;
 }) {
   const redditUrl = `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
+  const isPinned = !!item.pinned;
   return (
-    <div className="group relative flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-left transition-all hover:border-orange-500/50 hover:bg-zinc-900">
-      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold bg-zinc-800 text-yellow-400">
+    <div
+      className={`group relative flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all hover:bg-zinc-900 ${
+        isPinned
+          ? "border-orange-500/60 bg-orange-500/5 shadow-[0_0_0_1px_rgba(249,115,22,0.15)]"
+          : "border-zinc-800 bg-zinc-900/60 hover:border-orange-500/50"
+      }`}
+    >
+      <span
+        className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+          isPinned ? "bg-orange-500/20 text-orange-400" : "bg-zinc-800 text-yellow-400"
+        }`}
+      >
         <StarIcon filled className="h-4 w-4" />
       </span>
       <a
@@ -342,6 +356,11 @@ function FavoriteCard({
           <span className="text-lg font-bold text-white tracking-wide">
             {item.ticker}
           </span>
+          {isPinned && (
+            <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
+              置顶
+            </span>
+          )}
           {item.name && (
             <span className="text-xs text-zinc-400">{item.name}</span>
           )}
@@ -351,6 +370,18 @@ function FavoriteCard({
         </div>
       </a>
       <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onTogglePin(item.ticker, !isPinned)}
+          className={`rounded-md border px-2 py-1 text-xs transition-all ${
+            isPinned
+              ? "border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
+              : "border-zinc-700 text-zinc-400 hover:border-orange-500/50 hover:text-orange-400"
+          }`}
+          title={isPinned ? "取消置顶" : "置顶"}
+        >
+          {isPinned ? "取消置顶" : "置顶"}
+        </button>
         <button
           type="button"
           onClick={() => onAnalyze(item)}
@@ -2639,10 +2670,11 @@ export default function Home() {
         if (cancelled) return;
         if (json.favorites && Array.isArray(json.favorites)) {
           setFavorites(
-            json.favorites.map((f: { ticker: string; name?: string | null; createdAt: number }) => ({
+            json.favorites.map((f: { ticker: string; name?: string | null; createdAt: number; pinned?: boolean }) => ({
               ticker: f.ticker,
               name: f.name ?? null,
               addedAt: f.createdAt,
+              pinned: !!f.pinned,
             }))
           );
         }
@@ -2703,6 +2735,41 @@ export default function Home() {
       console.error("Failed to remove favorite:", err);
     }
   }, []);
+
+  // 置顶 / 取消置顶：先在前端更新状态并重排序，再异步同步到后端
+  const togglePinFavorite = useCallback(
+    async (ticker: string, pinned: boolean) => {
+      const upper = ticker.trim().toUpperCase();
+      setFavorites((prev) => {
+        const updated = prev.map((f) =>
+          f.ticker.toUpperCase() === upper ? { ...f, pinned } : f
+        );
+        // 客户端按 pinned 优先 + addedAt 降序重排
+        return [...updated].sort((a, b) => {
+          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+          return b.addedAt - a.addedAt;
+        });
+      });
+      try {
+        await fetch("/api/favorites", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: upper, pinned }),
+        });
+      } catch (err) {
+        console.error("Failed to toggle pin:", err);
+        // 失败时回滚
+        setFavorites((prev) =>
+          prev.map((f) =>
+            f.ticker.toUpperCase() === upper
+              ? { ...f, pinned: !pinned }
+              : f
+          )
+        );
+      }
+    },
+    []
+  );
 
   const toggleFavorite = useCallback(
     async (ticker: string, name?: string | null) => {
@@ -3144,6 +3211,7 @@ export default function Home() {
                     item={item}
                     onRemove={removeFavorite}
                     onAnalyze={handleAnalyze}
+                    onTogglePin={togglePinFavorite}
                   />
                 ))}
               </div>

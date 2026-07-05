@@ -7,6 +7,8 @@ export interface Favorite {
   name?: string | null;
   note?: string | null;
   tags: string[];
+  pinned: boolean;
+  pinnedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -20,15 +22,30 @@ function mapFavorite(r: PrismaFavorite): Favorite {
     name: r.name,
     note: r.note,
     tags: r.tags ? JSON.parse(r.tags) : [],
+    pinned: r.pinned,
+    pinnedAt: r.pinnedAt ? r.pinnedAt.getTime() : null,
     createdAt: r.createdAt.getTime(),
     updatedAt: r.updatedAt.getTime(),
   };
 }
 
+/**
+ * 排序：置顶项优先（按 pinnedAt 降序，null 在后），非置顶项按 createdAt 降序
+ */
+function sortFavorites(list: Favorite[]): Favorite[] {
+  return [...list].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (a.pinned && b.pinned) {
+      const aT = a.pinnedAt ?? 0;
+      const bT = b.pinnedAt ?? 0;
+      return bT - aT;
+    }
+    return b.createdAt - a.createdAt;
+  });
+}
+
 function getMemoryAll(): Favorite[] {
-  return Array.from(memoryFavorites.values()).sort(
-    (a, b) => b.createdAt - a.createdAt
-  );
+  return sortFavorites(Array.from(memoryFavorites.values()));
 }
 
 export async function listFavorites(): Promise<Favorite[]> {
@@ -37,9 +54,9 @@ export async function listFavorites(): Promise<Favorite[]> {
 
   try {
     const rows = await prisma.favorite.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ pinned: "desc" }, { pinnedAt: "desc" }, { createdAt: "desc" }],
     });
-    return rows.map(mapFavorite);
+    return sortFavorites(rows.map(mapFavorite));
   } catch {
     return getMemoryAll();
   }
@@ -62,6 +79,8 @@ export async function addFavorite(
           name: data?.name ?? null,
           note: data?.note ?? null,
           tags: data?.tags ?? [],
+          pinned: false,
+          pinnedAt: null,
           createdAt: now,
           updatedAt: now,
         };
@@ -96,11 +115,61 @@ export async function addFavorite(
           name: data?.name ?? null,
           note: data?.note ?? null,
           tags: data?.tags ?? [],
+          pinned: false,
+          pinnedAt: null,
           createdAt: now,
           updatedAt: now,
         };
     memoryFavorites.set(upper, fav);
     return fav;
+  }
+}
+
+/**
+ * 设置收藏项的置顶状态
+ * 置顶时记录 pinnedAt（用于置顶项之间的排序），取消置顶时清空
+ */
+export async function setPinned(
+  ticker: string,
+  pinned: boolean
+): Promise<Favorite> {
+  const upper = ticker.toUpperCase();
+  const prisma = getPrisma();
+  if (!prisma) {
+    const existing = memoryFavorites.get(upper);
+    if (!existing) throw new Error("收藏不存在");
+    const now = Date.now();
+    const updated: Favorite = {
+      ...existing,
+      pinned,
+      pinnedAt: pinned ? now : null,
+      updatedAt: now,
+    };
+    memoryFavorites.set(upper, updated);
+    return updated;
+  }
+
+  try {
+    const row = await prisma.favorite.update({
+      where: { ticker: upper },
+      data: {
+        pinned,
+        pinnedAt: pinned ? new Date() : null,
+      },
+    });
+    return mapFavorite(row);
+  } catch {
+    const existing = memoryFavorites.get(upper);
+    if (!existing) throw new Error("收藏不存在");
+    const now = Date.now();
+    const updated: Favorite = {
+      ...existing,
+      pinned,
+      pinnedAt: pinned ? now : null,
+      updatedAt: now,
+    };
+    memoryFavorites.set(upper, updated);
+    return updated;
   }
 }
 

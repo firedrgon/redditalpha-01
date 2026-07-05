@@ -67,6 +67,8 @@ model Favorite {
   name      String?
   note      String?
   tags      String?  // JSON 字符串：string[]
+  pinned    Boolean  @default(false) // 是否置顶
+  pinnedAt  DateTime? // 置顶时间，用于置顶项之间的排序
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
