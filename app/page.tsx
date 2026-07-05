@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const SUBREDDITS = [
   { id: "wallstreetbets", label: "WSB", full: "r/WallStreetBets" },
@@ -410,6 +412,54 @@ function AnalysisModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forceCount, setForceCount] = useState(0); // 变化时触发重新分析
+  const [sharing, setSharing] = useState(false);
+  const shareRef = useRef<HTMLDivElement>(null);
+
+  const handleShare = async () => {
+    if (!shareRef.current || !analysis) return;
+    setSharing(true);
+    try {
+      const { toPng } = await import("html-to-image");
+      const dataUrl = await toPng(shareRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#09090b",
+        filter: (node) => {
+          if (node instanceof HTMLElement) {
+            return !node.hasAttribute("data-share-ignore");
+          }
+          return true;
+        },
+      });
+
+      // 下载图片到本地
+      const date = new Date().toISOString().slice(0, 10);
+      const link = document.createElement("a");
+      link.download = `${item.ticker}-analysis-${date}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      // 打开 X 分享链接（预填文字，用户需手动上传刚下载的图片）
+      const verdictText =
+        analysis.overallVerdict === "pass"
+          ? "✅ 通过"
+          : analysis.overallVerdict === "fail"
+            ? "❌ 未通过"
+            : "❓ 数据缺失";
+      const upsideText =
+        analysis.targetUpside != null
+          ? ` | 目标价上涨空间 ${(analysis.targetUpside * 100).toFixed(1)}%`
+          : "";
+      const text = `📊 $${item.ticker} 股票分析\n\n总判定：${verdictText}${upsideText}\n\nvia Reddit Alpha`;
+      const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+      window.open(xUrl, "_blank");
+    } catch (err) {
+      console.error("生成分享图片失败:", err);
+      alert("生成分享图片失败，请重试");
+    } finally {
+      setSharing(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -451,12 +501,14 @@ function AnalysisModal({
       onClick={onClose}
     >
       <div
+        ref={shareRef}
         className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
+          data-share-ignore
           className="absolute top-3 right-3 rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
           aria-label="关闭"
         >
@@ -478,6 +530,7 @@ function AnalysisModal({
                 type="button"
                 onClick={handleReanalyze}
                 disabled={loading}
+                data-share-ignore
                 className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-40"
                 title="重新调用大模型生成 AI 分析（财务数据已自动刷新）"
               >
@@ -688,8 +741,85 @@ function AnalysisModal({
                     </span>
                   )}
                 </div>
-                <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
-                  {analysis.llmNarrative}
+                <div className="llm-narrative text-sm leading-relaxed text-zinc-200">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h1: ({ children }) => (
+                        <h1 className="mt-4 mb-2 text-lg font-bold text-orange-300">{children}</h1>
+                      ),
+                      h2: ({ children }) => (
+                        <h2 className="mt-4 mb-2 text-base font-bold text-orange-300">{children}</h2>
+                      ),
+                      h3: ({ children }) => (
+                        <h3 className="mt-3 mb-1.5 text-sm font-bold text-zinc-100">{children}</h3>
+                      ),
+                      h4: ({ children }) => (
+                        <h4 className="mt-3 mb-1 text-sm font-semibold text-zinc-100">{children}</h4>
+                      ),
+                      p: ({ children }) => (
+                        <p className="my-2 text-zinc-200">{children}</p>
+                      ),
+                      ul: ({ children }) => (
+                        <ul className="my-2 ml-5 list-disc space-y-1">{children}</ul>
+                      ),
+                      ol: ({ children }) => (
+                        <ol className="my-2 ml-5 list-decimal space-y-1">{children}</ol>
+                      ),
+                      li: ({ children }) => <li className="text-zinc-200">{children}</li>,
+                      strong: ({ children }) => (
+                        <strong className="font-semibold text-zinc-50">{children}</strong>
+                      ),
+                      em: ({ children }) => <em className="text-zinc-300">{children}</em>,
+                      blockquote: ({ children }) => (
+                        <blockquote className="my-2 border-l-2 border-orange-500/40 pl-3 text-zinc-300 italic">
+                          {children}
+                        </blockquote>
+                      ),
+                      code: ({ children, className }) => {
+                        const isInline = !className;
+                        return isInline ? (
+                          <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs text-orange-300">
+                            {children}
+                          </code>
+                        ) : (
+                          <code className="block rounded bg-zinc-900 p-3 text-xs text-zinc-300 overflow-x-auto">
+                            {children}
+                          </code>
+                        );
+                      },
+                      pre: ({ children }) => <pre className="my-2">{children}</pre>,
+                      table: ({ children }) => (
+                        <div className="my-3 overflow-x-auto">
+                          <table className="w-full border-collapse text-xs">{children}</table>
+                        </div>
+                      ),
+                      thead: ({ children }) => (
+                        <thead className="bg-zinc-800/60">{children}</thead>
+                      ),
+                      th: ({ children }) => (
+                        <th className="border border-zinc-700 px-2 py-1 text-left font-semibold text-zinc-100">
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="border border-zinc-700 px-2 py-1 text-zinc-300">{children}</td>
+                      ),
+                      hr: () => <hr className="my-3 border-zinc-700/60" />,
+                      a: ({ children, href }) => (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-orange-400 underline hover:text-orange-300"
+                        >
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
+                    {analysis.llmNarrative}
+                  </ReactMarkdown>
                 </div>
               </div>
             )}
@@ -752,6 +882,33 @@ function AnalysisModal({
             <div className="text-right text-[10px] text-zinc-600">
               数据时间：{new Date(analysis.fetchedAt).toLocaleString("zh-CN")}
               {analysis.llmReused && " · AI 分析已复用，点击右上可重新生成"}
+            </div>
+
+            {/* 分享到 X */}
+            <div className="flex justify-end pt-1" data-share-ignore>
+              <button
+                type="button"
+                onClick={handleShare}
+                disabled={sharing}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:bg-zinc-800 disabled:opacity-50"
+                title="生成分析图片并分享到 X"
+              >
+                {sharing ? (
+                  <>
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                    正在生成图片...
+                  </>
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                    </svg>
+                    分享到 X
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}

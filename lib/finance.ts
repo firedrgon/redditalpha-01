@@ -1179,9 +1179,18 @@ async function fetchRedditMentions(
 }
 
 /**
- * 从 stockanalysis.com 爬取分析师目标价（数据来源 S&P Global，免费无需 Key）
+ * 从 stockanalysis.com 爬取分析师目标价（数据来源 Benzinga，免费无需 Key）
  * 提供完整的 low / median / average / high + consensus rating + 分析师数量
- * 页面 HTML 内嵌 JSON: targets:{low,high,count,median,average,updated}
+ *
+ * 页面结构（2026 实测）：
+ *   1. 服务器端渲染的 HTML 表格（最可靠，数据最新）：
+ *      <td>Price</td><td>$low</td><td>$avg</td><td>$median</td><td>$high</td>
+ *      列顺序：Low | Average | Median | High
+ *   2. 内嵌 JSON targets:{low,high,count,median,average,updated}（可能是缓存旧数据）
+ *   3. 摘要文本 "The N analysts..." 和 "Price Target: $X" 是客户端 JS 渲染的，
+ *      服务器 HTML 里没有，无法抓取。
+ *
+ * 提取优先级：HTML 表格 > JSON targets > 文本备选正则
  */
 async function fetchStockAnalysisTargets(
   ticker: string
@@ -1204,32 +1213,70 @@ async function fetchStockAnalysisTargets(
     if (!res.ok) return null;
     const html = await res.text();
 
-    // 提取 targets:{low:XX,high:XX,count:XX,median:XX,average:XX,...}
-    const targetsMatch = html.match(/targets:\{([^}]+)\}/);
     let targetLow: number | null = null;
     let targetHigh: number | null = null;
     let targetMedian: number | null = null;
     let targetAverage: number | null = null;
     let numberOfAnalysts: number | null = null;
+    let consensus: string | null = null;
 
+    // ============================================================
+    // 策略 1（首选）：从 HTML 表格 <td> 提取（服务器端渲染，数据最新）
+    // 行格式：<td>Price</td><td>$low</td><td>$avg</td><td>$median</td><td>$high</td>
+    // 列顺序：Low | Average | Median | High
+    // ============================================================
+    const tableRowMatch = html.match(
+      /<td[^>]*>Price<\/td>\s*<td[^>]*>\$([\d.]+)<\/td>\s*<td[^>]*>\$([\d.]+)<\/td>\s*<td[^>]*>\$([\d.]+)<\/td>\s*<td[^>]*>\$([\d.]+)<\/td>/i
+    );
+    if (tableRowMatch) {
+      targetLow = parseFloat(tableRowMatch[1]);
+      targetAverage = parseFloat(tableRowMatch[2]);
+      targetMedian = parseFloat(tableRowMatch[3]);
+      targetHigh = parseFloat(tableRowMatch[4]);
+    }
+
+    // ============================================================
+    // 策略 2：从内嵌 JSON targets:{...} 提取（备选，可能是缓存数据）
+    // 格式：targets:{low:40,high:47,count:5,median:45,average:44.2,updated:"..."}
+    // ============================================================
+    const targetsMatch = html.match(/targets:\{([^}]+)\}/);
     if (targetsMatch) {
       const low = targetsMatch[1].match(/low:(\d+(?:\.\d+)?)/)?.[1];
       const high = targetsMatch[1].match(/high:(\d+(?:\.\d+)?)/)?.[1];
       const median = targetsMatch[1].match(/median:(\d+(?:\.\d+)?)/)?.[1];
       const average = targetsMatch[1].match(/average:(\d+(?:\.\d+)?)/)?.[1];
       const count = targetsMatch[1].match(/count:(\d+)/)?.[1];
-      if (low) targetLow = parseFloat(low);
-      if (high) targetHigh = parseFloat(high);
-      if (median) targetMedian = parseFloat(median);
-      if (average) targetAverage = parseFloat(average);
+      if (targetLow == null && low) targetLow = parseFloat(low);
+      if (targetHigh == null && high) targetHigh = parseFloat(high);
+      if (targetMedian == null && median) targetMedian = parseFloat(median);
+      if (targetAverage == null && average) targetAverage = parseFloat(average);
       if (count) numberOfAnalysts = parseInt(count, 10);
     }
 
-    // 如果 targets 对象没匹配到，从页面文本提取（备选）
+    // ============================================================
+    // 策略 3：备选文本正则（兼容旧版页面或客户端渲染的文本）
+    // ============================================================
+    // "average price target of $51"（摘要文本，可能客户端渲染）
     if (targetAverage == null) {
       const avgMatch = html.match(/average price target of \$([\d.]+)/);
       if (avgMatch) targetAverage = parseFloat(avgMatch[1]);
     }
+    // "Price Target: $51 (+36.22%)"
+    if (targetAverage == null) {
+      const ptMatch = html.match(/Price Target:\s*\$([\d.]+)/);
+      if (ptMatch) targetAverage = parseFloat(ptMatch[1]);
+    }
+    // "The lowest target is $41 and the highest is $70."
+    if (targetLow == null || targetHigh == null) {
+      const rangeMatch = html.match(
+        /lowest target is \$([\d.]+)[^<]*?highest is \$([\d.]+)/
+      );
+      if (rangeMatch) {
+        if (targetLow == null) targetLow = parseFloat(rangeMatch[1]);
+        if (targetHigh == null) targetHigh = parseFloat(rangeMatch[2]);
+      }
+    }
+    // 旧格式 "highest is $70" / "lowest is $41"
     if (targetHigh == null) {
       const highMatch = html.match(/highest is \$([\d.]+)/);
       if (highMatch) targetHigh = parseFloat(highMatch[1]);
@@ -1238,19 +1285,31 @@ async function fetchStockAnalysisTargets(
       const lowMatch = html.match(/lowest is \$([\d.]+)/);
       if (lowMatch) targetLow = parseFloat(lowMatch[1]);
     }
+    // 分析师数量：摘要文本 / 旧格式
+    if (numberOfAnalysts == null) {
+      const summaryMatch = html.match(/The (\d+) analysts that cover/);
+      if (summaryMatch) numberOfAnalysts = parseInt(summaryMatch[1], 10);
+    }
     if (numberOfAnalysts == null) {
       const analystMatch = html.match(/According to (\d+) analysts/);
       if (analystMatch) numberOfAnalysts = parseInt(analystMatch[1], 10);
     }
 
-    // 提取评级 consensus + strongBuy/strongSell 计算 recommendationMean
+    // consensus 评级提取
+    if (consensus == null) {
+      const consMatch = html.match(/Analyst Consensus:\s*([A-Za-z ]+)/);
+      if (consMatch) consensus = consMatch[1].trim();
+    }
+    if (consensus == null) {
+      const summaryConsensus = html.match(
+        /consensus rating of "([^"]+)"/
+      );
+      if (summaryConsensus) consensus = summaryConsensus[1];
+    }
+
+    // consensus -> recommendationMean (1=Strong Buy ... 5=Strong Sell)
     let recommendationMean: number | null = null;
-    const ratingMatch = html.match(
-      /consensus:"(\w+)"[^}]*strongBuy:(\d+)[^}]*strongSell:(\d+)/
-    );
-    if (ratingMatch) {
-      const consensus = ratingMatch[1];
-      // S&P Global consensus -> 近似 recommendationMean (1=Strong Buy ... 5=Strong Sell)
+    if (consensus) {
       const consensusMap: Record<string, number> = {
         "Strong Buy": 1,
         Buy: 2,
@@ -1262,6 +1321,25 @@ async function fetchStockAnalysisTargets(
         "Strong Sell": 5,
       };
       recommendationMean = consensusMap[consensus] ?? null;
+    }
+    if (recommendationMean == null) {
+      // 旧格式：从 JSON consensus:"Hold" + strongBuy/strongSell 提取
+      const ratingMatch = html.match(
+        /consensus:"(\w+)"[^}]*strongBuy:(\d+)[^}]*strongSell:(\d+)/
+      );
+      if (ratingMatch) {
+        const consensusMap: Record<string, number> = {
+          "Strong Buy": 1,
+          Buy: 2,
+          Overweight: 2,
+          Hold: 3,
+          Neutral: 3,
+          Underweight: 4,
+          Sell: 4,
+          "Strong Sell": 5,
+        };
+        recommendationMean = consensusMap[ratingMatch[1]] ?? null;
+      }
     }
 
     // 至少有一个有效值才返回

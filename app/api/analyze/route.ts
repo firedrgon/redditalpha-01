@@ -123,7 +123,6 @@ async function doRefresh(
         const controller = new AbortController();
         const llmPromise = chatCompletion(messages, {
           temperature: 0.4,
-          maxTokens: 4096,
           signal: controller.signal,
         });
         const resp = await withTimeout(

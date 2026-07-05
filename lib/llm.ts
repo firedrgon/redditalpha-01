@@ -64,6 +64,53 @@ function getCooldownMs(msg: string): number {
 }
 
 /**
+ * 单个 provider 调用的子超时（毫秒）。
+ *
+ * chatCompletion 外部总超时通常 45s，若某个 provider（尤其是 OpenRouter
+ * 推理模型如 Nemotron 550B）单次生成就要 60s+，会吃掉全部预算导致后续
+ * provider 没机会尝试。设置子超时后，单个 provider 超时即 fallback，
+ * 总预算内可尝试 1-2 个 provider。
+ */
+const PROVIDER_TIMEOUT_MS = 30_000;
+
+/**
+ * 包装 callProvider，加上单 provider 子超时。
+ * 子超时触发时 abort 当前 fetch 并抛出超时错误，由调用方 catch 后 fallback。
+ * 外部 signal（总超时）触发时也会联动 abort。
+ */
+async function callProviderWithTimeout(
+  provider: LLMProvider,
+  apiKey: string,
+  messages: LLMMessage[],
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
+): Promise<string> {
+  const controller = new AbortController();
+  // 外部 signal 联动：总超时触发时也取消当前 provider 调用
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+  const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  try {
+    return await callProvider(provider, apiKey, messages, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    // 区分：子超时 vs 外部 signal 触发 vs 其他错误
+    if (controller.signal.aborted && !options.signal?.aborted) {
+      throw new Error(`${provider.name} 单次调用超时 (${PROVIDER_TIMEOUT_MS}ms)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * 调用 LLM 完成对话
  * @throws Error 当所有 provider 均不可用时
  */
@@ -120,7 +167,7 @@ export async function chatCompletion(
     }
 
     try {
-      const text = await callProvider(provider, status.apiKey, messages, options);
+      const text = await callProviderWithTimeout(provider, status.apiKey, messages, options);
       status.working = true;
       status.lastTested = now;
       status.lastError = null;
