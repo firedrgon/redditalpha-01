@@ -15,6 +15,7 @@ import {
   LLM_PROVIDERS,
   type LLMProvider,
   OPENROUTER_PROVIDER_IDS,
+  GROQ_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
 
@@ -155,6 +156,23 @@ export async function chatCompletion(
           )
         ) {
           for (const id of OPENROUTER_PROVIDER_IDS) {
+            if (id === provider.id) continue;
+            const s = config.providers[id];
+            if (s && s.enabled && s.apiKey) {
+              s.cooldownUntil = now + getCooldownMs(msg);
+              s.working = null;
+            }
+          }
+        }
+        // Groq 系列共享同一 API Key 的速率配额（30 req/min, 14400/天）：
+        // 任一 Groq 模型 429 时，联动冷却其他 Groq 模型，避免逐个尝试。
+        if (
+          /429|rate.?limit/i.test(msg) &&
+          GROQ_PROVIDER_IDS.includes(
+            provider.id as (typeof GROQ_PROVIDER_IDS)[number]
+          )
+        ) {
+          for (const id of GROQ_PROVIDER_IDS) {
             if (id === provider.id) continue;
             const s = config.providers[id];
             if (s && s.enabled && s.apiKey) {
@@ -424,9 +442,14 @@ export async function testProvider(
 export async function refreshProviderStatuses(): Promise<{
   results: Array<{ id: string; name: string; ok: boolean; error?: string }>;
 }> {
-  // 先检查并更新 OpenRouter provider 的 model slug 为最新可用的免费模型
+  // 先检查并更新 OpenRouter / Groq provider 的 model slug 为最新可用的模型
   try {
     await refreshOpenRouterModels();
+  } catch {
+    // 模型刷新失败不影响后续测试
+  }
+  try {
+    await refreshGroqModels();
   } catch {
     // 模型刷新失败不影响后续测试
   }
@@ -545,4 +568,95 @@ export async function refreshOpenRouterModels(): Promise<{
   }
 
   return { updated, availableModels: availableSlugs };
+}
+
+/**
+ * 获取 Groq 当前可用的模型列表。
+ * 调用 OpenAI 兼容的 /openai/v1/models 接口，需要 API Key。
+ *
+ * Groq 托管的均为开源模型（Llama / Qwen / GPT-OSS / DeepSeek 等），
+ * 无付费/免费区分，但需排除不适合文本分析的模型（whisper / guard / tts 等）。
+ */
+export async function fetchGroqModels(
+  apiKey: string
+): Promise<Array<{ id: string; name: string; contextLength: number }>> {
+  if (!apiKey?.trim()) return [];
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "User-Agent": "Reddit-Alpha/1.0",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const models = data?.data ?? [];
+    // 排除不适合文本分析的模型（音频 / 安全审查 / 多模态等）
+    const excludeKeywords = /whisper|guard|tts|safety|vision|audio|moderation|embedding|preview-tool/i;
+    const suitable = models.filter((m: Record<string, unknown>) => {
+      const id = String(m.id ?? "");
+      return !excludeKeywords.test(id);
+    });
+    return suitable
+      .map((m: Record<string, unknown>) => ({
+        id: String(m.id ?? ""),
+        name: String(m.id ?? ""),
+        contextLength: Number(m.context_window ?? m.context_length ?? 0),
+      }))
+      .sort((a: { contextLength: number }, b: { contextLength: number }) => b.contextLength - a.contextLength);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 检查并更新 Groq provider 的 model slug 为最新可用的模型。
+ * 在 refreshProviderStatuses 之前调用，确保 provider 用的是当前可用的模型。
+ * 如果当前 model slug 仍然可用则不更新，不可用则按用途匹配替换。
+ */
+export async function refreshGroqModels(): Promise<{
+  updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+  availableModels: string[];
+}> {
+  // Groq 系列共享同一 API Key，从任一已配置 Key 的 provider 读取
+  const config = await readConfig();
+  let groqKey = "";
+  for (const id of GROQ_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      groqKey = s.apiKey.trim();
+      break;
+    }
+  }
+  if (!groqKey) return { updated: [], availableModels: [] };
+
+  const models = await fetchGroqModels(groqKey);
+  if (models.length === 0) return { updated: [], availableModels: [] };
+
+  const availableIds = models.map((m) => m.id);
+  const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
+
+  for (const provider of LLM_PROVIDERS) {
+    if (!GROQ_PROVIDER_IDS.includes(provider.id as typeof GROQ_PROVIDER_IDS[number])) continue;
+    // 检查当前 model 是否仍在可用列表中
+    if (availableIds.includes(provider.model)) continue;
+    // 当前 model 不可用，按 provider 用途匹配最接近的模型
+    const preferredMatch = (() => {
+      if (provider.id.includes("qwen")) return models.find((m) => m.id.includes("qwen"));
+      if (provider.id.includes("gpt-oss")) return models.find((m) => m.id.includes("gpt-oss"));
+      if (provider.id.includes("llama")) return models.find((m) => m.id.includes("llama"));
+      return null;
+    })();
+    const replacement = preferredMatch ?? models[0];
+    if (replacement && replacement.id !== provider.model) {
+      const oldModel = provider.model;
+      provider.model = replacement.id;
+      provider.name = `Groq · ${replacement.id}`;
+      updated.push({ providerId: provider.id, oldModel, newModel: replacement.id });
+    }
+  }
+
+  return { updated, availableModels: availableIds };
 }

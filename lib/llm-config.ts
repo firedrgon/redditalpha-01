@@ -15,6 +15,7 @@ import {
   LLM_PROVIDERS,
   OPENROUTER_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
+  GROQ_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
   type LLMProvider,
 } from "./llm-providers";
@@ -144,6 +145,29 @@ function applySharedGeminiKeys(config: LLMConfig): void {
   }
 }
 
+/** Groq 系列共用同一 Key（GROQ_API_KEY，UI 保存到任一 provider 即可） */
+function applySharedGroqKeys(config: LLMConfig): void {
+  let sharedKey = "";
+  let sharedSource: ProviderStatus["keySource"] | null = null;
+  for (const id of GROQ_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      sharedKey = s.apiKey.trim();
+      sharedSource = s.keySource;
+      break;
+    }
+  }
+  if (!sharedKey) return;
+  for (const id of GROQ_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s && !s.apiKey?.trim()) {
+      s.apiKey = sharedKey;
+      if (sharedSource === "env") s.keySource = "env";
+      else if (sharedSource === "local") s.keySource = "local";
+    }
+  }
+}
+
 /** 把环境变量中的 Key 注入到 config（环境变量优先级高于本地配置） */
 function applyEnvKeys(config: LLMConfig, isFreshConfig = false): LLMConfig {
   const envKeys = readEnvKeys();
@@ -212,6 +236,7 @@ export async function readConfig(): Promise<LLMConfig> {
   }
   applySharedOpenRouterKeys(config);
   applySharedGeminiKeys(config);
+  applySharedGroqKeys(config);
   applyEnvKeys(config, isFreshConfig);
   return config;
 }

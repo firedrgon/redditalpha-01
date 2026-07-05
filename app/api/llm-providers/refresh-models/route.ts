@@ -1,7 +1,7 @@
 /**
- * 定时刷新 OpenRouter 可用的免费大模型
+ * 定时刷新 OpenRouter / Groq 可用的免费大模型
  *
- * 调用 OpenRouter /api/v1/models 接口获取最新免费模型列表，
+ * 调用各平台的 /models 接口获取最新模型列表，
  * 自动替换已下架的 provider 的 model slug，保持 provider 可用。
  *
  * 触发方式：
@@ -9,7 +9,7 @@
  *   2. 手动 POST /api/llm-providers/refresh-models
  */
 import { NextResponse } from "next/server";
-import { refreshOpenRouterModels } from "@/lib/llm";
+import { refreshOpenRouterModels, refreshGroqModels } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,12 +33,23 @@ async function runRefresh() {
     availableModels: string[];
   } = { updated: [], availableModels: [] };
 
+  let groq: {
+    updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+    availableModels: string[];
+  } = { updated: [], availableModels: [] };
+
   try {
     openrouter = await refreshOpenRouterModels();
   } catch (err) {
     errors.push(
       `OpenRouter: ${err instanceof Error ? err.message : String(err)}`
     );
+  }
+
+  try {
+    groq = await refreshGroqModels();
+  } catch (err) {
+    errors.push(`Groq: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return NextResponse.json({
@@ -50,7 +61,12 @@ async function runRefresh() {
         availableCount: openrouter.availableModels.length,
         updatedCount: openrouter.updated.length,
       },
+      groq: {
+        availableCount: groq.availableModels.length,
+        updatedCount: groq.updated.length,
+      },
     },
     openrouter,
+    groq,
   });
 }

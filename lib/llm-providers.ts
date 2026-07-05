@@ -38,6 +38,13 @@ export const GEMINI_PROVIDER_IDS = [
   "gemini-2.0",
 ] as const;
 
+/** Groq 系列 provider 共享同一 API Key（GROQ_API_KEY） */
+export const GROQ_PROVIDER_IDS = [
+  "groq",
+  "groq-qwen3-32b",
+  "groq-gpt-oss-120b",
+] as const;
+
 /**
  * 自动选择活跃 provider 时的优先级（配额 + 质量综合优先）。
  *
@@ -49,6 +56,8 @@ export const GEMINI_PROVIDER_IDS = [
 export const PREFERRED_ACTIVE_ORDER = [
   "gemini",
   "gemini-2.0",
+  "groq-qwen3-32b",
+  "groq-gpt-oss-120b",
   "groq",
   "openrouter-nemotron-ultra",
   "openrouter-qwen3",
@@ -140,16 +149,42 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "groq",
-    name: "Groq",
+    name: "Groq · Llama 3.3 70B",
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "llama-3.3-70b-versatile",
     free: true,
     needsKey: true,
     signupUrl: "https://console.groq.com/keys",
     docsUrl: "https://console.groq.com/docs",
-    description: "速度最快，适合兜底；分析深度略逊于 Gemini / Qwen",
+    description: "速度最快（280 t/s），适合兜底；分析深度略逊于 Gemini / Qwen",
     protocol: "openai",
-    freeQuota: "免费层：30 req/min，每天 14400 req",
+    freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
+  },
+  {
+    id: "groq-qwen3-32b",
+    name: "Groq · Qwen3 32B",
+    endpoint: "https://api.groq.com/openai/v1/chat/completions",
+    model: "qwen/qwen3-32b",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://console.groq.com/keys",
+    docsUrl: "https://console.groq.com/docs",
+    description: "中文表达最好，32B 参数分析能力够，400 t/s 速度快，适合中文股票分析",
+    protocol: "openai",
+    freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
+  },
+  {
+    id: "groq-gpt-oss-120b",
+    name: "Groq · GPT-OSS 120B",
+    endpoint: "https://api.groq.com/openai/v1/chat/completions",
+    model: "openai/gpt-oss-120b",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://console.groq.com/keys",
+    docsUrl: "https://console.groq.com/docs",
+    description: "OpenAI 开源 120B 推理模型，分析深度最强，500 t/s，适合复杂财务推理",
+    protocol: "openai",
+    freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
   },
   {
     id: "openrouter-llama-3.3",
