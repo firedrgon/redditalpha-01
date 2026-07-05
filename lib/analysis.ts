@@ -53,6 +53,14 @@ export interface StockAnalysis {
   // 财务数据来源 & 警告（用于排查"未能获取该指标数据"类问题）
   dataSource?: string;
   warnings?: string[];
+  // 近期新闻（用于前端展示）
+  news?: Array<{
+    title: string;
+    source?: string;
+    date?: string;
+    summary?: string;
+    url?: string;
+  }>;
 }
 
 function fmtPct(v: number | null): string {

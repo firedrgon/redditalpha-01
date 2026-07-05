@@ -19,7 +19,9 @@ import { recordFinanceSnapshot } from "@/lib/db";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const FETCH_TIMEOUT_MS = 7000;
+// fetchFinancialMetrics 内部会串行尝试多个数据源（Tiingo→Finnhub→FMP→AV→Yahoo），
+// 每个 API 2-3 秒，7 秒极易超时。改为 15 秒给足时间获取完整数据（含新闻）。
+const FETCH_TIMEOUT_MS = 15000;
 const LLM_TIMEOUT_MS = 30000;
 
 function withTimeout<T>(
@@ -63,7 +65,9 @@ async function doRefresh(
       "财务数据获取"
     );
   } catch (err) {
-    if (cached) {
+    // force 模式下不返回旧缓存：用户明确点了"重新分析"，
+    // 超时后返回旧数据会让用户误以为重新生成成功，但实际是旧内容。
+    if (!force && cached) {
       return { analysis: { ...cached, cached: true } };
     }
     throw err;
@@ -97,6 +101,7 @@ async function doRefresh(
     targetUpside: metrics.targetUpside,
     numberOfAnalysts: metrics.numberOfAnalysts,
     recommendationMean: metrics.recommendationMean,
+    news: metrics.news,
   };
 
   if (useLLM) {
