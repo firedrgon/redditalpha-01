@@ -320,7 +320,7 @@ export function buildLLMMessages(
 请基于给定的真实财务数据、近期新闻和所属行业信息，给出专业、深入、客观的分析结论。
 不要给出具体买卖建议或价格预测，只评估该公司是否符合用户启用的指标标准。
 
-输出格式（必须包含以下 5 个章节，每个章节用 ## 标题）：
+输出格式（必须包含以下 6 个章节，每个章节用 ## 标题）：
 
 ## 公司概览
 用 2-3 段文字详细介绍该公司：主营业务、市场地位、核心产品或服务、竞争优势（护城河）、近年重要发展等。
@@ -344,6 +344,19 @@ export function buildLLMMessages(
 - 分析公司可能的应对策略或缓解因素
 如果无明显利空，说明"当前无明显利空因素"并解释原因。
 如果新闻有限，基于行业近期整体趋势补充分析。要有分析深度，不要只列条目。
+
+## 情绪面分析
+基于提供的市场情绪、分析师评级分布和 Reddit 讨论数据，从以下三个维度分析：
+
+### 市场情绪
+结合市场 Fear & Greed Index 数值，分析当前整体市场情绪对该股的影响（极端恐惧时可能带来抄底机会，极端贪婪时需警惕回调）。
+
+### 机构情绪
+基于分析师评级分布（strongBuy/buy/hold/sell/strongSell），分析机构多空倾向。计算看多比例，说明机构共识是否一致。
+
+### 散户情绪
+基于 Reddit 讨论数据（帖子数量、热度），分析散户关注度。讨论热烈可能意味着高波动或短期炒作风险。如果讨论较少，说明散户关注度低。
+结合三个维度，给出情绪面综合判断：偏多/偏空/中性，以及潜在的情绪反转风险。
 
 ## 行业前景
 结合公司所属行业，从以下角度深入分析该行业未来 1-3 年的发展：
@@ -398,6 +411,36 @@ export function buildLLMMessages(
     dataLines.push("【近期相关新闻】");
     dataLines.push("- 未获取到相关新闻。");
   }
+
+  // 情绪面数据
+  if (metrics.sentiment) {
+    const s = metrics.sentiment;
+    dataLines.push("");
+    dataLines.push("【情绪面数据】");
+    if (s.marketFearGreed) {
+      dataLines.push(`- 市场 Fear & Greed Index：${s.marketFearGreed.value}（${s.marketFearGreed.classification}）`);
+    }
+    if (s.analystRating) {
+      const ar = s.analystRating;
+      const bullish = ar.strongBuy + ar.buy;
+      const bearish = ar.sell + ar.strongSell;
+      dataLines.push(`- 分析师评级分布：共识 ${ar.consensus}（Strong Buy ${ar.strongBuy} / Buy ${ar.buy} / Hold ${ar.hold} / Sell ${ar.sell} / Strong Sell ${ar.strongSell}，共 ${ar.total} 位）`);
+      dataLines.push(`  看多 ${bullish} 位，看空 ${bearish} 位，看多比例 ${ar.total > 0 ? ((bullish / ar.total) * 100).toFixed(1) : 0}%`);
+    }
+    if (s.redditMentions && s.redditMentions.length > 0) {
+      dataLines.push(`- Reddit 近一周讨论（共 ${s.redditMentions.length} 条）：`);
+      for (const r of s.redditMentions.slice(0, 5)) {
+        dataLines.push(`  - r/${r.subreddit}: ${r.title.slice(0, 80)}（score: ${r.score}）`);
+      }
+    } else {
+      dataLines.push("- Reddit 近一周讨论：未获取到相关讨论。");
+    }
+  } else {
+    dataLines.push("");
+    dataLines.push("【情绪面数据】");
+    dataLines.push("- 未获取到情绪面数据。");
+  }
+
 
   dataLines.push("");
   dataLines.push(`【启用的指标数据（共 ${results.length} 项）】`);

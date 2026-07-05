@@ -73,6 +73,27 @@ export interface FinancialMetrics {
     summary?: string;
     url?: string;
   }>;
+  // 情绪面数据
+  sentiment?: {
+    marketFearGreed?: { value: number; classification: string } | null;
+    analystRating?: {
+      consensus: string;
+      strongBuy: number;
+      buy: number;
+      hold: number;
+      sell: number;
+      strongSell: number;
+      total: number;
+      score: number;
+    } | null;
+    redditMentions?: Array<{
+      title: string;
+      subreddit: string;
+      score: number;
+      url?: string;
+      createdUtc?: number;
+    }> | null;
+  };
   fetchedAt: string;
   dataSource:
     | "fmp"
@@ -1056,6 +1077,106 @@ async function finnhubGet<T>(path: string, apiKey: string): Promise<{ data: T | 
  * 用 Finnhub 拉取财务数据
  * 端点：quote / profile / recommendation / stock/metrics
  */
+
+/**
+ * 获取市场整体 Fear & Greed Index（alternative.me，免费无需 Key）
+ * 返回 0（极度恐惧）~ 100（极度贪婪）
+ */
+async function fetchMarketFearGreed(): Promise<{ value: number; classification: string } | null> {
+  try {
+    const res = await fetch("https://api.alternative.me/fng/?limit=1", {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const fg = data?.data?.[0];
+    if (fg?.value && fg?.value_classification) {
+      return { value: parseInt(fg.value, 10), classification: fg.value_classification };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 stockanalysis.com 爬取分析师评级分布（S&P Global 数据，免费无需 Key）
+ * 在 fetchStockAnalysisTargets 中已有页面抓取，这里提取评级分布部分
+ */
+async function fetchAnalystRatingDist(
+  ticker: string
+): Promise<{
+  consensus: string;
+  strongBuy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strongSell: number;
+  total: number;
+  score: number;
+} | null> {
+  const upper = ticker.toUpperCase();
+  const url = `https://stockanalysis.com/stocks/${upper.toLowerCase()}/forecast/`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // 提取评级分布对象: {consensus:"Buy",strongBuy:7,buy:1,hold:5,sell:0,strongSell:0,total:13,score:5.77}
+    const match = html.match(
+      /consensus:"(\w+)"[^}]*strongBuy:(\d+)[^}]*buy:(\d+)[^}]*hold:(\d+)[^}]*sell:(\d+)[^}]*strongSell:(\d+)[^}]*total:(\d+)[^}]*score:([\d.]+)/
+    );
+    if (!match) return null;
+    return {
+      consensus: match[1],
+      strongBuy: parseInt(match[2], 10),
+      buy: parseInt(match[3], 10),
+      hold: parseInt(match[4], 10),
+      sell: parseInt(match[5], 10),
+      strongSell: parseInt(match[6], 10),
+      total: parseInt(match[7], 10),
+      score: parseFloat(match[8]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 pullpush.io 获取 Reddit 提及数据（免费无需认证）
+ * 搜索最近一周包含 ticker 的帖子
+ */
+async function fetchRedditMentions(
+  ticker: string
+): Promise<Array<{ title: string; subreddit: string; score: number; url?: string; createdUtc?: number }> | null> {
+  const upper = ticker.toUpperCase();
+  try {
+    const url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(`$${upper}`)}&size=8&sort=desc&sort_type=created_utc&after=7d`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const posts = data?.data ?? [];
+    if (!Array.isArray(posts) || posts.length === 0) return null;
+    return posts.slice(0, 8).map((p: Record<string, unknown>) => ({
+      title: String(p.title ?? ""),
+      subreddit: String(p.subreddit ?? ""),
+      score: Number(p.score ?? 0),
+      url: p.url ? String(p.url) : undefined,
+      createdUtc: p.created_utc ? Number(p.created_utc) : undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 从 stockanalysis.com 爬取分析师目标价（数据来源 S&P Global，免费无需 Key）
@@ -2093,6 +2214,27 @@ export async function fetchFinancialMetrics(
     } catch {
       // 爬取失败保留经验值
     }
+  }
+
+  // ============================================================
+  // 情绪面数据：市场 Fear & Greed + 分析师评级分布 + Reddit 提及
+  // 全部免费数据源，并行获取，任一失败不影响其他
+  // ============================================================
+  try {
+    const [marketFG, analystRating, redditMentions] = await Promise.all([
+      fetchMarketFearGreed(),
+      fetchAnalystRatingDist(upper),
+      fetchRedditMentions(upper),
+    ]);
+    const sentiment: NonNullable<typeof result.sentiment> = {};
+    if (marketFG) sentiment.marketFearGreed = marketFG;
+    if (analystRating) sentiment.analystRating = analystRating;
+    if (redditMentions) sentiment.redditMentions = redditMentions;
+    if (Object.keys(sentiment).length > 0) {
+      result.sentiment = sentiment;
+    }
+  } catch {
+    // 情绪数据获取失败不影响主流程
   }
 
   // ============================================================
