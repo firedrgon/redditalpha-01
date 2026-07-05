@@ -43,11 +43,11 @@ function isTransientError(msg: string): boolean {
 }
 
 /**
- * 判断错误是否为永久错误（Key 无效 / 模型不存在 / 鉴权失败）。
+ * 判断错误是否为永久错误（Key 无效 / 模型不存在 / 鉴权失败 / 余额不足）。
  * 这类错误不会因重试而消失，应直接标记 working=false 跳过。
  */
 function isPermanentError(msg: string): boolean {
-  return /HTTP 401|HTTP 403|HTTP 404|invalid api key|unauthorized|forbidden|not found|模型不存在/i.test(
+  return /HTTP 401|HTTP 403|HTTP 404|invalid api key|unauthorized|forbidden|not found|模型不存在|balance insufficient|余额不足|insufficient.*balance/i.test(
     msg
   );
 }
@@ -191,7 +191,10 @@ export async function chatCompletion(
 
   // 给出针对性建议
   let hint = "请在 LLM 设置中配置 API Key。";
-  if (lastErr && /429|rate.?limit/i.test(lastErr.message)) {
+  if (lastErr && /balance insufficient|余额不足|insufficient.*balance/i.test(lastErr.message)) {
+    hint =
+      "SiliconFlow 账户余额不足。请在 https://cloud.siliconflow.cn/account 充值，或切换到免费的 Gemini / Groq / SiliconFlow Qwen 作为主用 provider。";
+  } else if (lastErr && /429|rate.?limit/i.test(lastErr.message)) {
     hint =
       "免费层限流（OpenRouter 共享每日 50 次配额）。请在 ⚙ 设置中配置 Gemini 或 Groq 的免费 Key 作为主用，或等待冷却后重试。";
   } else if (skippedCooldown > 0 && skippedNoKey > 0) {

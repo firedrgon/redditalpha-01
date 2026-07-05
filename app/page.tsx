@@ -726,12 +726,21 @@ function AnalysisModal({
                 <div className="mt-1 text-xs text-zinc-400">
                   {analysis.llmError}
                 </div>
-                {/* 限流 / 冷却类错误：建议换主用 provider 或等待 */}
-                {/限流|冷却|429|rate.?limit/i.test(analysis.llmError) && (
+                {/* 余额不足：建议充值或切换免费 provider */}
+                {/balance insufficient|余额不足|insufficient.*balance/i.test(
+                  analysis.llmError
+                ) && (
                   <div className="mt-1 text-[11px] text-zinc-600">
-                    免费层配额耗尽或限流中。建议在 ⚙ 设置中配置 Gemini 2.5 Flash 或 Groq 免费 Key 作为主用，或等待 5 分钟自动恢复后重试。
+                    SiliconFlow 付费模型余额不足。请在 cloud.siliconflow.cn/account 充值，或在 ⚙ 设置中切换到免费的 Gemini / Groq / SiliconFlow Qwen。
                   </div>
                 )}
+                {/* 限流 / 冷却类错误：建议换主用 provider 或等待 */}
+                {/限流|冷却|429|rate.?limit/i.test(analysis.llmError) &&
+                  !/balance insufficient|余额不足/i.test(analysis.llmError) && (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      免费层配额耗尽或限流中。建议在 ⚙ 设置中配置 Gemini 2.5 Flash 或 Groq 免费 Key 作为主用，或等待 5 分钟自动恢复后重试。
+                    </div>
+                  )}
                 {/* 仅在确实缺 Key / 配置问题时才提示去设置 */}
                 {/未配置 API Key|未配置.*Key/i.test(analysis.llmError) &&
                   !/限流|冷却|429/i.test(analysis.llmError) && (
