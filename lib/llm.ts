@@ -15,8 +15,6 @@ import {
   LLM_PROVIDERS,
   type LLMProvider,
   OPENROUTER_PROVIDER_IDS,
-  SILICONFLOW_PROVIDER_IDS,
-  SILICONFLOW_KNOWN_FREE_MODELS,
   PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
 
@@ -43,11 +41,11 @@ function isTransientError(msg: string): boolean {
 }
 
 /**
- * 判断错误是否为永久错误（Key 无效 / 模型不存在 / 鉴权失败 / 余额不足）。
+ * 判断错误是否为永久错误（Key 无效 / 模型不存在 / 鉴权失败）。
  * 这类错误不会因重试而消失，应直接标记 working=false 跳过。
  */
 function isPermanentError(msg: string): boolean {
-  return /HTTP 401|HTTP 403|HTTP 404|invalid api key|unauthorized|forbidden|not found|模型不存在|balance insufficient|余额不足|insufficient.*balance/i.test(
+  return /HTTP 401|HTTP 403|HTTP 404|invalid api key|unauthorized|forbidden|not found|模型不存在/i.test(
     msg
   );
 }
@@ -191,10 +189,7 @@ export async function chatCompletion(
 
   // 给出针对性建议
   let hint = "请在 LLM 设置中配置 API Key。";
-  if (lastErr && /balance insufficient|余额不足|insufficient.*balance/i.test(lastErr.message)) {
-    hint =
-      "SiliconFlow 账户余额不足。请在 https://cloud.siliconflow.cn/account 充值，或切换到免费的 Gemini / Groq / SiliconFlow Qwen 作为主用 provider。";
-  } else if (lastErr && /429|rate.?limit/i.test(lastErr.message)) {
+  if (lastErr && /429|rate.?limit/i.test(lastErr.message)) {
     hint =
       "免费层限流（OpenRouter 共享每日 50 次配额）。请在 ⚙ 设置中配置 Gemini 或 Groq 的免费 Key 作为主用，或等待冷却后重试。";
   } else if (skippedCooldown > 0 && skippedNoKey > 0) {
@@ -550,131 +545,4 @@ export async function refreshOpenRouterModels(): Promise<{
   }
 
   return { updated, availableModels: availableSlugs };
-}
-
-/**
- * 从 SiliconFlow API 获取最新文本模型列表。
- * 与已知免费模型列表对比，返回可用/已下架/新增候选。
- */
-export async function fetchSiliconFlowModels(): Promise<{
-  all: string[];
-  availableFree: string[];
-  removed: string[];
-  newCandidates: string[];
-}> {
-  const config = await readConfig();
-  let apiKey = "";
-  for (const id of SILICONFLOW_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s?.apiKey?.trim()) {
-      apiKey = s.apiKey.trim();
-      break;
-    }
-  }
-  if (!apiKey) {
-    return { all: [], availableFree: [], removed: [], newCandidates: [] };
-  }
-
-  const url = "https://api.siliconflow.cn/v1/models?type=text&sub_type=chat";
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(
-      `SiliconFlow /v1/models HTTP ${res.status}: ${detail.slice(0, 200)}`
-    );
-  }
-  const data = (await res.json()) as { data?: Array<{ id: string }> };
-  const all = (data.data ?? []).map((m) => m.id);
-  const modelIds = new Set(all);
-
-  const availableFree = SILICONFLOW_KNOWN_FREE_MODELS.filter((id) =>
-    modelIds.has(id)
-  );
-  const removed = SILICONFLOW_KNOWN_FREE_MODELS.filter(
-    (id) => !modelIds.has(id)
-  );
-  const knownSet = new Set<string>(SILICONFLOW_KNOWN_FREE_MODELS);
-  const newCandidates = all.filter(
-    (id) =>
-      !knownSet.has(id) &&
-      // 仅关注可能免费的模型（开源模型系列）
-      /^(Qwen|deepseek-ai|meta-llama|THUDM|internlm|mistralai)\//.test(id)
-  );
-
-  return { all, availableFree, removed, newCandidates };
-}
-
-/**
- * 检查并更新 SiliconFlow provider 的可用性：
- *   - 模型仍存在：清除 working 标记，下次调用时重新检测
- *   - 模型已下架：标记 working=false，避免后续调用失败
- *
- * 注意：SiliconFlow 模型命名较稳定（不像 OpenRouter 会经常改 slug），
- * 这里只更新可用性，不做自动替换。新模型通过 newCandidates 返回供人工评估。
- */
-export async function refreshSiliconFlowModels(): Promise<{
-  updated: Array<{ providerId: string; action: string }>;
-  availableModels: string[];
-  removedModels: string[];
-  newCandidates: string[];
-}> {
-  const { availableFree, removed, newCandidates } = await fetchSiliconFlowModels();
-  if (availableFree.length === 0 && removed.length === 0) {
-    return {
-      updated: [],
-      availableModels: [],
-      removedModels: [],
-      newCandidates,
-    };
-  }
-
-  const config = await readConfig();
-  const now = Date.now();
-  const updated: Array<{ providerId: string; action: string }> = [];
-  const modelIds = new Set(availableFree);
-
-  for (const provider of LLM_PROVIDERS) {
-    if (
-      !SILICONFLOW_PROVIDER_IDS.includes(
-        provider.id as (typeof SILICONFLOW_PROVIDER_IDS)[number]
-      )
-    ) {
-      continue;
-    }
-    const status = config.providers[provider.id];
-    if (!status) continue;
-
-    const stillAvailable = modelIds.has(provider.model);
-    if (stillAvailable) {
-      if (status.working === false || status.cooldownUntil) {
-        status.working = null;
-        status.cooldownUntil = null;
-        status.lastError = null;
-        updated.push({
-          providerId: provider.id,
-          action: "恢复为未测试（模型可用）",
-        });
-      }
-    } else {
-      status.working = false;
-      status.lastTested = now;
-      status.lastError = `模型 ${provider.model} 已从 SiliconFlow 下架`;
-      updated.push({
-        providerId: provider.id,
-        action: "标记为不可用（已下架）",
-      });
-    }
-  }
-
-  await writeConfig(config);
-
-  return {
-    updated,
-    availableModels: availableFree,
-    removedModels: removed,
-    newCandidates,
-  };
 }

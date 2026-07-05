@@ -15,7 +15,6 @@ import {
   LLM_PROVIDERS,
   OPENROUTER_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
-  SILICONFLOW_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
   type LLMProvider,
 } from "./llm-providers";
@@ -79,7 +78,6 @@ function readEnvKeys(): Record<string, string> {
     ["GROQ_API_KEY", "groq"],
     ["GEMINI_API_KEY", "gemini"],
     ["GOOGLE_API_KEY", "gemini"],
-    ["SILICONFLOW_API_KEY", "siliconflow-qwen-72b"],
   ];
   for (const [alias, providerId] of aliases) {
     const v = process.env[alias];
@@ -95,12 +93,6 @@ function readEnvKeys(): Record<string, string> {
   if (geminiKey) {
     for (const id of GEMINI_PROVIDER_IDS) {
       if (!out[id]) out[id] = geminiKey;
-    }
-  }
-  const siliconflowKey = process.env.SILICONFLOW_API_KEY?.trim();
-  if (siliconflowKey) {
-    for (const id of SILICONFLOW_PROVIDER_IDS) {
-      if (!out[id]) out[id] = siliconflowKey;
     }
   }
   return out;
@@ -143,29 +135,6 @@ function applySharedGeminiKeys(config: LLMConfig): void {
   }
   if (!sharedKey) return;
   for (const id of GEMINI_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s && !s.apiKey?.trim()) {
-      s.apiKey = sharedKey;
-      if (sharedSource === "env") s.keySource = "env";
-      else if (sharedSource === "local") s.keySource = "local";
-    }
-  }
-}
-
-/** SiliconFlow 系列共用同一 Key（UI 保存到任一 provider 即可） */
-function applySharedSiliconFlowKeys(config: LLMConfig): void {
-  let sharedKey = "";
-  let sharedSource: ProviderStatus["keySource"] | null = null;
-  for (const id of SILICONFLOW_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s?.apiKey?.trim()) {
-      sharedKey = s.apiKey.trim();
-      sharedSource = s.keySource;
-      break;
-    }
-  }
-  if (!sharedKey) return;
-  for (const id of SILICONFLOW_PROVIDER_IDS) {
     const s = config.providers[id];
     if (s && !s.apiKey?.trim()) {
       s.apiKey = sharedKey;
@@ -243,7 +212,6 @@ export async function readConfig(): Promise<LLMConfig> {
   }
   applySharedOpenRouterKeys(config);
   applySharedGeminiKeys(config);
-  applySharedSiliconFlowKeys(config);
   applyEnvKeys(config, isFreshConfig);
   return config;
 }
