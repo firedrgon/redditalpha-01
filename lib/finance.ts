@@ -746,9 +746,14 @@ async function fetchAVMetrics(
     numberOfAnalysts,
     recommendationMean,
     targetUpside: null,
-    revenueGrowthYoY: num(overview?.RevenueGrowth) ? num(overview?.RevenueGrowth)! / 100 :
-                    (num(overview?.QuarterlyRevenueGrowthYOY) ?? null),
-    quarterlyRevenueGrowth: num(overview?.QuarterlyRevenueGrowthYOY) ?? null,
+    revenueGrowthYoY: num(overview?.RevenueGrowth) != null
+      ? num(overview?.RevenueGrowth)! / 100
+      : (num(overview?.QuarterlyRevenueGrowthYOY) != null
+          ? num(overview?.QuarterlyRevenueGrowthYOY)! / 100
+          : null),
+    quarterlyRevenueGrowth: num(overview?.QuarterlyRevenueGrowthYOY) != null
+      ? num(overview?.QuarterlyRevenueGrowthYOY)! / 100
+      : null,
     roe: num(overview?.ROE) ? num(overview?.ROE)! / 100 :
          (num(overview?.ReturnOnEquityTTM) ?? null),
     returnOnEquity5yAvg: null,
@@ -1092,14 +1097,12 @@ async function fetchFinnhubMetrics(ticker: string, apiKey: string): Promise<Fina
       num(metrics.currentRatioAnnual) ?? num(metrics.currentRatioQuarterly) ?? null;
 
     // 成长（百分比 → 小数）
+    // 仅采用 revenueGrowthTTMYoy（滚动 12 个月同比），
+    // 不再用 revenueGrowth5Y（5 年 CAGR）顶替——两者口径完全不同，
+    // CAGR 会与"单年同比"出现数个百分点偏差，导致和财报口径对不上。
     const revenueGrowthTTMYoy = num(metrics.revenueGrowthTTMYoy);
-    const revenueGrowth5Y = num(metrics.revenueGrowth5Y);
     result.revenueGrowthYoY =
-      revenueGrowthTTMYoy != null
-        ? revenueGrowthTTMYoy / 100
-        : revenueGrowth5Y != null
-          ? revenueGrowth5Y / 100
-          : null;
+      revenueGrowthTTMYoy != null ? revenueGrowthTTMYoy / 100 : null;
   }
 
   if (recommendations && recommendations.length > 0) {
@@ -1743,6 +1746,31 @@ export async function fetchFinancialMetrics(
     }
   }
 
+  // ============================================================
+  // 口径统一：营收年增长统一为"最近两个完整财年同比"
+  // 数据源现成字段（TTM / 季度同比 / CAGR 等）仅作辅助，
+  // 只要 revenueHistory 有 ≥2 年，就用末两年自算覆盖，避免口径混杂
+  // 导致与财报口径（财年同比）对不上。
+  // ============================================================
+  if (result.revenueHistory.length >= 2) {
+    const latest = result.revenueHistory[result.revenueHistory.length - 1];
+    const prev = result.revenueHistory[result.revenueHistory.length - 2];
+    if (latest?.revenue && prev?.revenue && prev.revenue > 0) {
+      const computed = latest.revenue / prev.revenue - 1;
+      if (result.revenueGrowthYoY == null) {
+        result.revenueGrowthYoY = computed;
+        result.warnings.push(
+          `revenueGrowthYoY 由历史营收估算（${prev.year}→${latest.year} 财年同比）。`
+        );
+      } else if (Math.abs(result.revenueGrowthYoY - computed) > 0.001) {
+        result.warnings.push(
+          `revenueGrowthYoY 口径统一：数据源值 ${(result.revenueGrowthYoY * 100).toFixed(2)}% → 历史营收同比 ${(computed * 100).toFixed(2)}%（${prev.year}→${latest.year}）。`
+        );
+        result.revenueGrowthYoY = computed;
+      }
+    }
+  }
+
   return result;
 }
 
@@ -1965,7 +1993,9 @@ async function fetchFinancialMetricsInternal(
       fallback.trailingPE = num(v7.trailingPE);
       fallback.forwardPE = num(v7.forwardPE);
       fallback.pegRatio = num(v7.pegRatio);
-      fallback.revenueGrowthYoY = num(v7.earningsGrowth);
+      // v7/quote 端点不返回营收增长字段；
+      // 旧代码错把 earningsGrowth（盈利增长）当 revenueGrowthYoY 使用，
+      // 现在置 null，由上层历史营收估算或 warning 提示缺失。
       fallback.roe = num(v7.returnOnEquity);
       fallback.quickRatio = num(v7.quickRatio);
       fallback.currentRatio = num(v7.currentRatio);
@@ -2033,8 +2063,10 @@ async function fetchFinancialMetricsInternal(
   }
 
   // 成长
+  // Yahoo financialData.revenueGrowth 实为最近季度营收同比，
+  // financialData.earningsGrowth 是盈利增长（旧代码错用为营收季度增速）。
   fallback.revenueGrowthYoY = num(financialData.revenueGrowth);
-  fallback.quarterlyRevenueGrowth = num(financialData.earningsGrowth);
+  fallback.quarterlyRevenueGrowth = num(financialData.revenueGrowth);
 
   // 流动性
   fallback.quickRatio = num(financialData.quickRatio);
