@@ -176,6 +176,16 @@ function computeOne(
               };
             }
           }
+          // pegRatio 为 null 时，亏损公司 PEG 不适用（PEG = PE / 盈利增速，依赖 EPS）
+          if (strategy.metricField === "pegRatio") {
+            const pe = metrics.trailingPE ?? metrics.forwardPE;
+            if (pe == null) {
+              return {
+                verdict: "unknown" as Verdict,
+                reasoning: "该公司处于亏损状态，PE 不适用，PEG 无法计算。",
+              };
+            }
+          }
           return {
             verdict: "unknown" as Verdict,
             reasoning: "未能获取该指标数据，无法判定。",
