@@ -20,15 +20,18 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const FETCH_TIMEOUT_MS = 7000;
-const LLM_TIMEOUT_MS = 5000;
+const LLM_TIMEOUT_MS = 30000;
 
 function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
-  label: string
+  label: string,
+  controller?: AbortController
 ): Promise<T> {
-  return new Promise((resolve, reject) => {
+  const abortController = controller || new AbortController();
+  return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
+      abortController.abort();
       reject(new Error(`${label} 超时 (${ms}ms)`));
     }, ms);
     promise.then(
@@ -110,13 +113,16 @@ async function doRefresh(
           overall,
           overallSummary
         );
+        const controller = new AbortController();
+        const llmPromise = chatCompletion(messages, {
+          temperature: 0.4,
+          signal: controller.signal,
+        });
         const resp = await withTimeout(
-          chatCompletion(messages, {
-            temperature: 0.4,
-            maxTokens: 1024,
-          }),
+          llmPromise,
           llmTimeoutMs,
-          "LLM 分析"
+          "LLM 分析",
+          controller
         );
         analysis.llmNarrative = resp.text;
         analysis.llmProvider = `${resp.providerName} (${resp.model})`;

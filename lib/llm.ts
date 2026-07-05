@@ -31,11 +31,10 @@ export interface LLMResponse {
  */
 export async function chatCompletion(
   messages: LLMMessage[],
-  options: { temperature?: number; maxTokens?: number } = {}
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal } = {}
 ): Promise<LLMResponse> {
   const config = await readConfig();
 
-  // 候选 provider 优先级
   const candidates: LLMProvider[] = [];
   const active = config.activeProvider
     ? LLM_PROVIDERS.find((p) => p.id === config.activeProvider)
@@ -86,7 +85,7 @@ async function callProvider(
   provider: LLMProvider,
   apiKey: string,
   messages: LLMMessage[],
-  options: { temperature?: number; maxTokens?: number }
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
 ): Promise<string> {
   switch (provider.protocol) {
     case "openai":
@@ -94,9 +93,9 @@ async function callProvider(
     case "gemini":
       return callGemini(provider, apiKey, messages, options);
     case "huggingface":
-      return callHuggingFace(provider, apiKey, messages);
+      return callHuggingFace(provider, apiKey, messages, options);
     case "duckduckgo":
-      return callDuckDuckGo(provider, messages);
+      return callDuckDuckGo(provider, messages, options);
     default:
       throw new Error(`未知协议：${provider.protocol}`);
   }
@@ -107,8 +106,11 @@ async function callOpenAICompatible(
   provider: LLMProvider,
   apiKey: string,
   messages: LLMMessage[],
-  options: { temperature?: number; maxTokens?: number }
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
 ): Promise<string> {
+  const isReasoningModel = provider.model.includes("deepseek-r1");
+  const defaultMaxTokens = isReasoningModel ? 4096 : 2048;
+
   const res = await fetch(provider.endpoint, {
     method: "POST",
     headers: {
@@ -121,8 +123,9 @@ async function callOpenAICompatible(
       model: provider.model,
       messages,
       temperature: options.temperature ?? 0.3,
-      max_tokens: options.maxTokens ?? 1024,
+      max_tokens: options.maxTokens ?? defaultMaxTokens,
     }),
+    signal: options.signal,
   });
 
   if (!res.ok) {
@@ -131,7 +134,13 @@ async function callOpenAICompatible(
   }
 
   const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
+  const choice = data?.choices?.[0];
+  let text = choice?.message?.content;
+
+  if (isReasoningModel && !text) {
+    text = choice?.message?.reasoning_content || choice?.message?.reasoning;
+  }
+
   if (!text) throw new Error(`${provider.name} 返回内容为空`);
   return text as string;
 }
@@ -141,7 +150,7 @@ async function callGemini(
   provider: LLMProvider,
   apiKey: string,
   messages: LLMMessage[],
-  options: { temperature?: number; maxTokens?: number }
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
 ): Promise<string> {
   const url = `${provider.endpoint}/${provider.model}:generateContent?key=${apiKey}`;
   const systemMsg = messages.find((m) => m.role === "system");
@@ -156,7 +165,7 @@ async function callGemini(
     contents,
     generationConfig: {
       temperature: options.temperature ?? 0.3,
-      maxOutputTokens: options.maxTokens ?? 1024,
+      maxOutputTokens: options.maxTokens ?? 2048,
     },
   };
   if (systemMsg) {
@@ -167,6 +176,7 @@ async function callGemini(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: options.signal,
   });
 
   if (!res.ok) {
@@ -184,9 +194,9 @@ async function callGemini(
 async function callHuggingFace(
   provider: LLMProvider,
   apiKey: string,
-  messages: LLMMessage[]
+  messages: LLMMessage[],
+  options: { signal?: AbortSignal } = {}
 ): Promise<string> {
-  // HuggingFace 已提供 OpenAI 兼容的 chat 端点
   const url = `${provider.endpoint}/${provider.model}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
@@ -198,8 +208,9 @@ async function callHuggingFace(
       model: provider.model,
       messages,
       temperature: 0.3,
-      max_tokens: 1024,
+      max_tokens: 2048,
     }),
+    signal: options.signal,
   });
 
   if (!res.ok) {
@@ -216,9 +227,9 @@ async function callHuggingFace(
 /** DuckDuckGo AI Chat（非官方，无需 Key） */
 async function callDuckDuckGo(
   provider: LLMProvider,
-  messages: LLMMessage[]
+  messages: LLMMessage[],
+  options: { signal?: AbortSignal } = {}
 ): Promise<string> {
-  // 第一步：获取 x-vqd-4 token
   const statusRes = await fetch(
     "https://duckduckgo.com/duckchat/v1/status",
     {
@@ -228,6 +239,7 @@ async function callDuckDuckGo(
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "x-vqd-accept": "1",
       },
+      signal: options.signal,
     }
   );
   if (!statusRes.ok) {
@@ -236,7 +248,6 @@ async function callDuckDuckGo(
   const token = statusRes.headers.get("x-vqd-4");
   if (!token) throw new Error("DuckDuckGo 未返回 x-vqd-4 token");
 
-  // 第二步：发起对话
   const res = await fetch(provider.endpoint, {
     method: "POST",
     headers: {
@@ -252,6 +263,7 @@ async function callDuckDuckGo(
         content: m.content,
       })),
     }),
+    signal: options.signal,
   });
 
   if (!res.ok) {

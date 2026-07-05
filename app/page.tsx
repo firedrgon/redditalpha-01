@@ -1091,7 +1091,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             设置
           </h3>
           <p className="mt-1 text-xs text-zinc-500">
-            管理 LLM 提供商和财务数据源的 API Key。Key 保存在本地，不会上传。
+            管理 LLM 提供商和财务数据源的 API Key。设置会保存到数据库（Vercel）或本地文件。
           </p>
         </div>
 
@@ -1127,7 +1127,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 {testingAll ? "测试中..." : "测试所有已启用提供商"}
               </button>
               <span className="text-xs text-zinc-500">
-                服务端每 6 小时自动检查一次（结果写回本地）
+                服务端每 6 小时自动检查一次（结果持久化到数据库或本地）
               </span>
             </div>
 
@@ -1310,7 +1310,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         )}
 
           <div className="mt-6 border-t border-zinc-800 pt-4 text-[11px] text-zinc-600">
-            推荐配置：Groq（速度最快，免费层慷慨）→ 备选 Google Gemini（稳定）→ OpenRouter（多模型可选）
+            推荐配置：Gemini 2.5 Flash（主力）→ Qwen 2.5 / DeepSeek R1（OpenRouter 共用 Key）→ Groq（速度兜底）
           </div>
         </div>
         )}

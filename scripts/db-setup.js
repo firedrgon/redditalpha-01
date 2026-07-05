@@ -14,7 +14,7 @@ function main() {
 
   if (!dbUrl) {
     console.log("ℹ️  No database URL configured, skipping db push");
-    process.env.DATABASE_URL = "postgresql://placeholder:5432/db";
+    process.env.DATABASE_URL = "file:./dev.db";
     execSync("npx prisma generate", { stdio: "inherit" });
     return;
   }

@@ -3,17 +3,21 @@
  *
  * 优先级（高 → 低）：
  *   1. 环境变量 LLM_API_KEY_<PROVIDER_ID> （serverless / 只读文件系统场景）
- *   2. 本地配置文件 .llm-config.json（开发环境）
- *   3. 内存副本（写入失败时降级使用）
- *
- * "定时收集保存在本地"：
- *   - 本地可写时：写入 .llm-config.json
- *   - 只读文件系统时：仅更新内存副本（重启后丢失，但当前请求内仍可用）
+ *   2. 数据库 AppSetting（Vercel 等无持久化文件系统）
+ *   3. 本地配置文件 .llm-config.json（开发环境）
+ *   4. 内存副本（写入失败时降级使用）
  */
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { LLM_PROVIDERS, type LLMProvider } from "./llm-providers";
+import { getLLMConfigFromDB, saveLLMConfigToDB } from "./db/app-settings";
+import {
+  LLM_PROVIDERS,
+  OPENROUTER_PROVIDER_IDS,
+  GEMINI_PROVIDER_IDS,
+  PREFERRED_ACTIVE_ORDER,
+  type LLMProvider,
+} from "./llm-providers";
 
 const CONFIG_FILE = path.join(process.cwd(), ".llm-config.json");
 
@@ -68,7 +72,6 @@ function readEnvKeys(): Record<string, string> {
     ["GROQ_API_KEY", "groq"],
     ["GEMINI_API_KEY", "gemini"],
     ["GOOGLE_API_KEY", "gemini"],
-    ["OPENROUTER_API_KEY", "openrouter-free"],
     ["HUGGINGFACE_API_KEY", "huggingface"],
     ["HF_API_KEY", "huggingface"],
     ["TOGETHER_API_KEY", "together"],
@@ -78,19 +81,77 @@ function readEnvKeys(): Record<string, string> {
     const v = process.env[alias];
     if (v && v.trim() && !out[providerId]) out[providerId] = v.trim();
   }
+  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (openRouterKey) {
+    for (const id of OPENROUTER_PROVIDER_IDS) {
+      if (!out[id]) out[id] = openRouterKey;
+    }
+  }
+  const geminiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim();
+  if (geminiKey) {
+    for (const id of GEMINI_PROVIDER_IDS) {
+      if (!out[id]) out[id] = geminiKey;
+    }
+  }
   return out;
 }
 
+/** OpenRouter 系列共用同一 Key（UI 保存到任一 provider 即可） */
+function applySharedOpenRouterKeys(config: LLMConfig): void {
+  let sharedKey = "";
+  let sharedSource: ProviderStatus["keySource"] | null = null;
+  for (const id of OPENROUTER_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      sharedKey = s.apiKey.trim();
+      sharedSource = s.keySource;
+      break;
+    }
+  }
+  if (!sharedKey) return;
+  for (const id of OPENROUTER_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s && !s.apiKey?.trim()) {
+      s.apiKey = sharedKey;
+      if (sharedSource === "env") s.keySource = "env";
+      else if (sharedSource === "local") s.keySource = "local";
+    }
+  }
+}
+
+/** Gemini 系列共用同一 Key（UI 保存到任一 provider 即可） */
+function applySharedGeminiKeys(config: LLMConfig): void {
+  let sharedKey = "";
+  let sharedSource: ProviderStatus["keySource"] | null = null;
+  for (const id of GEMINI_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      sharedKey = s.apiKey.trim();
+      sharedSource = s.keySource;
+      break;
+    }
+  }
+  if (!sharedKey) return;
+  for (const id of GEMINI_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s && !s.apiKey?.trim()) {
+      s.apiKey = sharedKey;
+      if (sharedSource === "env") s.keySource = "env";
+      else if (sharedSource === "local") s.keySource = "local";
+    }
+  }
+}
+
 /** 把环境变量中的 Key 注入到 config（环境变量优先级高于本地配置） */
-function applyEnvKeys(config: LLMConfig): LLMConfig {
+function applyEnvKeys(config: LLMConfig, isFreshConfig = false): LLMConfig {
   const envKeys = readEnvKeys();
   for (const [id, key] of Object.entries(envKeys)) {
     const s = config.providers[id];
     if (s) {
       s.apiKey = key;
       s.keySource = "env";
-      if (!s.enabled) s.enabled = true;
-      if (s.working === null) s.working = null; // 保持未测试状态
+      // 仅在首次初始化时自动启用有环境变量 Key 的 provider
+      if (isFreshConfig) s.enabled = true;
     }
   }
   // 对没有环境变量覆盖的 provider，如果有本地 Key，标记为 local
@@ -102,52 +163,67 @@ function applyEnvKeys(config: LLMConfig): LLMConfig {
       s.keySource = "none";
     }
   }
-  if (!config.activeProvider && envKeys) {
-    const firstId = Object.keys(envKeys)[0];
-    if (firstId) config.activeProvider = firstId;
+  if (!config.activeProvider) {
+    const envActive = process.env.LLM_ACTIVE_PROVIDER?.trim();
+    if (envActive && config.providers[envActive]) {
+      config.activeProvider = envActive;
+    } else if (Object.keys(envKeys).length > 0) {
+      const preferred = PREFERRED_ACTIVE_ORDER.find((id) => envKeys[id]);
+      config.activeProvider = preferred ?? Object.keys(envKeys)[0];
+    }
   }
   return config;
 }
 
-/** 读取配置：文件 → 内存 → 默认值，最后叠加环境变量 */
+function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
+  return {
+    providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers || {}) },
+    activeProvider: parsed.activeProvider ?? null,
+    updatedAt: parsed.updatedAt ?? 0,
+  };
+}
+
+/** 读取配置：内存 → 数据库 → 文件 → 默认值，最后叠加环境变量 */
 export async function readConfig(): Promise<LLMConfig> {
   let config: LLMConfig;
+  let isFreshConfig = false;
+
   if (memoryConfig) {
     config = JSON.parse(JSON.stringify(memoryConfig)) as LLMConfig;
   } else {
-    try {
-      const raw = await fs.readFile(CONFIG_FILE, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<LLMConfig>;
-      config = {
-        providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers || {}) },
-        activeProvider: parsed.activeProvider ?? null,
-        updatedAt: parsed.updatedAt ?? 0,
-      };
-    } catch {
-      config = {
-        ...DEFAULT_CONFIG,
-        providers: { ...DEFAULT_CONFIG.providers },
-      };
+    const fromDb = await getLLMConfigFromDB<Partial<LLMConfig>>();
+    if (fromDb) {
+      config = mergeStoredConfig(fromDb);
+    } else {
+      try {
+        const raw = await fs.readFile(CONFIG_FILE, "utf-8");
+        const parsed = JSON.parse(raw) as Partial<LLMConfig>;
+        config = mergeStoredConfig(parsed);
+      } catch {
+        config = {
+          ...DEFAULT_CONFIG,
+          providers: { ...DEFAULT_CONFIG.providers },
+        };
+        isFreshConfig = true;
+      }
     }
   }
-  // 叠加环境变量（每次读取都应用，因为环境变量随时可能变化）
-  applyEnvKeys(config);
+  applySharedOpenRouterKeys(config);
+  applySharedGeminiKeys(config);
+  applyEnvKeys(config, isFreshConfig);
   return config;
 }
 
-/** 写入配置：文件可写则写文件，否则只更新内存副本 */
+/** 写入配置：内存 + 数据库（可用时）+ 本地文件（可写时） */
 export async function writeConfig(config: LLMConfig): Promise<void> {
   const data: LLMConfig = { ...config, updatedAt: Date.now() };
-  // 始终更新内存副本
   memoryConfig = JSON.parse(JSON.stringify(data)) as LLMConfig;
-  // 尝试写文件（失败则降级到内存模式）
+  await saveLLMConfigToDB(data);
   try {
     await fs.writeFile(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (err) {
-    // 只读文件系统等：忽略错误，使用内存副本
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("EROFS") && !msg.includes("read-only")) {
-      // 其他错误才抛出
       throw err;
     }
   }
