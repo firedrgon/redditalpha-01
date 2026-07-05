@@ -26,6 +26,38 @@ export interface LLMResponse {
 }
 
 /**
+ * 判断错误是否为瞬时错误（rate limit / 服务端错误 / 超时 / 网络）。
+ * 瞬时错误应设置冷却期，到期后自动重试，而不是永久标记 working=false。
+ */
+function isTransientError(msg: string): boolean {
+  return /429|HTTP 5\d\d|超时|timeout|abort|fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|rate.?limit|temporarily/i.test(
+    msg
+  );
+}
+
+/**
+ * 判断错误是否为永久错误（Key 无效 / 模型不存在 / 鉴权失败）。
+ * 这类错误不会因重试而消失，应直接标记 working=false 跳过。
+ */
+function isPermanentError(msg: string): boolean {
+  return /HTTP 401|HTTP 403|HTTP 404|invalid api key|unauthorized|forbidden|not found|模型不存在/i.test(
+    msg
+  );
+}
+
+/** 根据错误类型返回冷却时长（毫秒） */
+function getCooldownMs(msg: string): number {
+  // 429 限流：5 分钟（OpenRouter 免费层共享配额，需较长时间恢复）
+  if (/429|rate.?limit/i.test(msg)) return 5 * 60 * 1000;
+  // 5xx 服务端错误：30 秒后重试
+  if (/HTTP 5\d\d/i.test(msg)) return 30 * 1000;
+  // 超时 / 网络：1 分钟后重试
+  if (/超时|timeout|fetch failed|ECONNRESET|ETIMEDOUT/i.test(msg)) return 60 * 1000;
+  // 默认：2 分钟
+  return 2 * 60 * 1000;
+}
+
+/**
  * 调用 LLM 完成对话
  * @throws Error 当所有 provider 均不可用时
  */
@@ -45,19 +77,39 @@ export async function chatCompletion(
     candidates.push(p);
   }
 
+  const now = Date.now();
   let lastErr: Error | null = null;
+  let skippedCooldown = 0; // 因冷却跳过的 provider 数
+  let skippedNoKey = 0; // 因缺 Key 跳过的 provider 数
+  let skippedDisabled = 0; // 因 disabled / working=false 跳过的 provider 数
 
   for (const provider of candidates) {
     const status = config.providers[provider.id];
-    if (!status || !status.enabled) continue;
-    if (provider.needsKey && !status.apiKey) continue;
-    if (status.working === false) continue;
+    if (!status || !status.enabled) {
+      skippedDisabled++;
+      continue;
+    }
+    if (provider.needsKey && !status.apiKey) {
+      skippedNoKey++;
+      continue;
+    }
+    // 永久失败（401/403/404 等）：跳过
+    if (status.working === false) {
+      skippedDisabled++;
+      continue;
+    }
+    // 瞬时失败冷却中：跳过
+    if (status.cooldownUntil && status.cooldownUntil > now) {
+      skippedCooldown++;
+      continue;
+    }
 
     try {
       const text = await callProvider(provider, status.apiKey, messages, options);
       status.working = true;
-      status.lastTested = Date.now();
+      status.lastTested = now;
       status.lastError = null;
+      status.cooldownUntil = null;
       await writeConfig(config);
 
       return {
@@ -68,16 +120,70 @@ export async function chatCompletion(
       };
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-      status.working = false;
-      status.lastTested = Date.now();
+      status.lastTested = now;
       status.lastError = lastErr.message;
+      const msg = lastErr.message;
+
+      if (isPermanentError(msg)) {
+        // 永久错误（Key 无效 / 模型不存在）：标记为不可用
+        status.working = false;
+        status.cooldownUntil = null;
+      } else if (isTransientError(msg)) {
+        // 瞬时错误（429 / 5xx / 超时 / 网络）：设置冷却，到期自动重试
+        status.working = null;
+        status.cooldownUntil = now + getCooldownMs(msg);
+        // OpenRouter 免费层共享每日配额：任一模型 429 时，给所有 OpenRouter
+        // 模型设置冷却，避免短时间内逐个尝试都 429 浪费时间。
+        if (
+          /429|rate.?limit/i.test(msg) &&
+          OPENROUTER_PROVIDER_IDS.includes(
+            provider.id as (typeof OPENROUTER_PROVIDER_IDS)[number]
+          )
+        ) {
+          for (const id of OPENROUTER_PROVIDER_IDS) {
+            if (id === provider.id) continue;
+            const s = config.providers[id];
+            if (s && s.enabled && s.apiKey) {
+              s.cooldownUntil = now + getCooldownMs(msg);
+              s.working = null;
+            }
+          }
+        }
+      } else {
+        // 未知错误：保守起见也走冷却（2 分钟），不永久标记
+        status.working = null;
+        status.cooldownUntil = now + 2 * 60 * 1000;
+      }
       await writeConfig(config);
     }
   }
 
-  throw new Error(
-    `所有 LLM 提供商均不可用${lastErr ? `（最后错误：${lastErr.message}）` : ""}。请在 LLM 设置中配置 API Key。`
-  );
+  // 根据跳过原因生成更有帮助的错误消息
+  const parts: string[] = [];
+  if (lastErr) parts.push(`最后错误：${lastErr.message}`);
+  if (skippedCooldown > 0) {
+    parts.push(
+      `${skippedCooldown} 个 provider 因瞬时错误冷却中（429/超时等，将自动恢复）`
+    );
+  }
+  if (skippedNoKey > 0) {
+    parts.push(`${skippedNoKey} 个 provider 未配置 API Key`);
+  }
+  if (skippedDisabled > 0) {
+    parts.push(`${skippedDisabled} 个 provider 已禁用或永久不可用`);
+  }
+
+  // 给出针对性建议
+  let hint = "请在 LLM 设置中配置 API Key。";
+  if (lastErr && /429|rate.?limit/i.test(lastErr.message)) {
+    hint =
+      "免费层限流（OpenRouter 共享每日 50 次配额）。请在 ⚙ 设置中配置 Gemini 或 Groq 的免费 Key 作为主用，或等待冷却后重试。";
+  } else if (skippedCooldown > 0 && skippedNoKey > 0) {
+    hint =
+      "部分 provider 限流冷却中且未配置 Key。建议在 ⚙ 设置中配置 Gemini 或 Groq Key 作为备用。";
+  }
+
+  throw new Error(`所有 LLM 提供商均不可用（${parts.join("；")}）。${hint}`);
 }
 
 /** 单 provider 调用：根据协议分发 */
@@ -364,6 +470,8 @@ export async function refreshProviderStatuses(): Promise<{
     status.working = result.ok;
     status.lastTested = Date.now();
     status.lastError = result.error ?? null;
+    // 健康检查会重新判断可用性，清除历史冷却状态
+    status.cooldownUntil = null;
     results.push({
       id: provider.id,
       name: provider.name,

@@ -27,8 +27,14 @@ export interface ProviderStatus {
   keySource: "env" | "local" | "none"; // Key 来源：环境变量 / 本地配置 / 无
   enabled: boolean; // 是否启用
   lastTested: number | null; // 上次测试时间戳
-  working: boolean | null; // 是否可用（null=未测试）
+  working: boolean | null; // 是否可用（null=未测试 / 瞬时失败冷却中）
   lastError?: string | null;
+  /**
+   * 瞬时错误（429 / 5xx / 超时 / 网络）冷却结束时间戳。
+   * 期间 chatCompletion 跳过此 provider；过期后自动重试（working 保持 null）。
+   * 永久错误（401 / 403 / 404）不设置此字段，直接 working=false。
+   */
+  cooldownUntil?: number | null;
 }
 
 export interface LLMConfig {
@@ -244,6 +250,7 @@ export async function setProviderKey(
     status.enabled = status.apiKey !== "" || !getProviderById(providerId)?.needsKey;
     status.working = null;
     status.lastTested = null;
+    status.cooldownUntil = null; // 重置 Key 时清除冷却
   }
   await writeConfig(config);
   // 重新读取（确保环境变量重新应用，keySource 正确）
