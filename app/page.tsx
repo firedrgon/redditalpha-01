@@ -89,18 +89,33 @@ interface StockAnalysis {
   }>;
 }
 
-/** 从 LLM narrative 中提取指定章节内容 */
+/**
+ * 从 LLM narrative 中提取指定章节内容。
+ * 兼容多种 Markdown 标题格式：
+ *   ## 消息面分析 / ### 消息面分析 / **消息面分析** / 消息面分析：
+ * 下一个同级或更高级标题（# 开头）或文本结尾作为章节边界。
+ */
 function extractSection(text: string, sectionTitle: string): string | null {
-  const pattern = new RegExp(`##\\s*${sectionTitle}\\s*\\n(.*?)(?=\\n##\\s|$)`, "s");
+  const escaped = sectionTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(
+    `(?:^|\\n)\\s*(?:#{1,6}\\s*|\\*{1,2}\\s*)?${escaped}\\s*[:：]?\\s*\\*{0,2}\\s*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{1,6}\\s|\\*{1,2}[^*\\n]+\\*{1,2}\\s*\\n)|$)`,
+    "m"
+  );
   const match = text.match(pattern);
-  return match ? match[1].trim() : null;
+  if (!match || !match[1]) return null;
+  const content = match[1].trim();
+  return content.length > 0 ? content : null;
 }
 
 /** 移除 LLM narrative 中的指定章节，返回剩余内容 */
 function removeSections(text: string, sectionTitles: string[]): string {
   let result = text;
   for (const title of sectionTitles) {
-    const pattern = new RegExp(`\\n?##\\s*${title}\\s*\\n.*?(?=\\n##\\s|$)`, "s");
+    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(
+      `\\n?\\s*(?:#{1,6}\\s*|\\*{1,2}\\s*)?${escaped}\\s*[:：]?\\s*\\*{0,2}\\s*\\n[\\s\\S]*?(?=\\n\\s*(?:#{1,6}\\s|\\*{1,2}[^*\\n]+\\*{1,2}\\s*\\n)|$)`,
+      "m"
+    );
     result = result.replace(pattern, "");
   }
   return result.trim();

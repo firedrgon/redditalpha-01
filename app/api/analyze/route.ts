@@ -129,7 +129,11 @@ async function doRefresh(
       } catch (err) {
         analysis.llmError =
           err instanceof Error ? err.message : String(err);
-        if (cached?.llmNarrative) {
+        // force 模式下不复用旧 narrative：用户明确点了"重新分析"，
+        // 悄悄回退到旧内容会让用户误以为生成成功，且旧 narrative 基于旧新闻/数据，
+        // 与本次新数据不匹配。明确返回 llmError，让用户知道需要重试。
+        // 非 force 模式下（首次打开/后台刷新）复用旧 narrative 仍有价值。
+        if (!force && cached?.llmNarrative) {
           analysis.llmNarrative = cached.llmNarrative;
           analysis.llmProvider = cached.llmProvider;
         }
