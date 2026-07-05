@@ -22,7 +22,9 @@ export const maxDuration = 60;
 // fetchFinancialMetrics 内部会串行尝试多个数据源（Tiingo→Finnhub→FMP→AV→Yahoo），
 // 每个 API 2-3 秒，7 秒极易超时。改为 15 秒给足时间获取完整数据（含新闻）。
 const FETCH_TIMEOUT_MS = 15000;
-const LLM_TIMEOUT_MS = 30000;
+// Nemotron 3 Ultra 550B / DeepSeek R1 等大参数推理模型生成较慢，
+// 30s 易超时。提升至 45s（与 maxDuration=60 配合，留 15s 给 fetch + 落库）。
+const LLM_TIMEOUT_MS = 45000;
 
 function withTimeout<T>(
   promise: Promise<T>,

@@ -726,9 +726,21 @@ function AnalysisModal({
                 <div className="mt-1 text-xs text-zinc-400">
                   {analysis.llmError}
                 </div>
-                <div className="mt-1 text-[11px] text-zinc-600">
-                  请在右上角 ⚙ 设置中配置 LLM API Key（如 Groq 免费层）。
-                </div>
+                {/* 仅在确实缺 Key / 配置问题时才提示去设置；
+                    超时、HTTP 5xx 等运行时错误不属于此类，避免误导用户。 */}
+                {/API Key|未配置|提供商均不可用|请在 LLM 设置/i.test(
+                  analysis.llmError
+                ) && (
+                  <div className="mt-1 text-[11px] text-zinc-600">
+                    请在右上角 ⚙ 设置中配置 LLM API Key（如 Groq 免费层）。
+                  </div>
+                )}
+                {/* 超时类错误：建议换更快的模型或重试 */}
+                {/超时|timeout/i.test(analysis.llmError) && (
+                  <div className="mt-1 text-[11px] text-zinc-600">
+                    当前模型响应过慢，可在 ⚙ 设置中切换更快的模型（如 Gemini 2.5 Flash / Groq），或稍后重试。
+                  </div>
+                )}
               </div>
             )}
 
