@@ -224,10 +224,13 @@ async function callOpenAICompatible(
   // 推理模型（reasoning）会先在 reasoning_content / reasoning 字段输出思维链，
   // 最终 content 才是答案。这类模型生成较慢、token 较多，需要更大 maxTokens。
   // Nemotron 3 Ultra 550B / DeepSeek R1 / GPT-OSS 等均属推理模型。
+  // 注意：模型 ID 大小写不统一（OpenRouter 用小写 deepseek-r1，
+  // SiliconFlow 用大写 DeepSeek-R1），统一转小写比较。
+  const modelLower = provider.model.toLowerCase();
   const isReasoningModel =
-    provider.model.includes("deepseek-r1") ||
-    provider.model.includes("nemotron") ||
-    provider.model.includes("gpt-oss");
+    modelLower.includes("deepseek-r1") ||
+    modelLower.includes("nemotron") ||
+    modelLower.includes("gpt-oss");
   const defaultMaxTokens = isReasoningModel ? 4096 : 3072;
 
   const res = await fetch(provider.endpoint, {
