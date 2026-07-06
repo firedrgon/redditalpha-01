@@ -2385,13 +2385,23 @@ export async function fetchFinancialMetrics(
     if (newsSentiment) sentiment.newsSentiment = newsSentiment;
     if (analystRating) {
       sentiment.analystRating = analystRating;
-      // 最新月份的分析师总数和推荐均值覆盖到 metrics
-      // fetchAnalystRatingDist 按月份趋势取最新月份，比 fetchStockAnalysisTargets
-      // 里的 JSON targets 缓存更准确（后者可能滞后数月）
-      // score 字段就是 recommendationMean（1=Strong Buy ... 5=Strong Sell 的加权平均）
+      // 最新月份的分析师总数覆盖到 metrics
+      // 评级直接取 stockanalysis.com 页面给出的 consensus 字段（评级共识字符串），
+      // 映射成 1-5 数值；不使用 score（加权平均自行计算的分数）
       result.numberOfAnalysts = analystRating.total;
-      if (analystRating.score > 0) {
-        result.recommendationMean = analystRating.score;
+      const consensusMap: Record<string, number> = {
+        "Strong Buy": 1,
+        "Buy": 2,
+        "Overweight": 2,
+        "Hold": 3,
+        "Neutral": 3,
+        "Underweight": 4,
+        "Sell": 4,
+        "Strong Sell": 5,
+      };
+      const mean = consensusMap[analystRating.consensus];
+      if (mean != null) {
+        result.recommendationMean = mean;
       }
     }
     if (Object.keys(sentiment).length > 0) {
