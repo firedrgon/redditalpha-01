@@ -359,43 +359,45 @@ function FavoriteCard({
   const isPinned = !!item.pinned;
   return (
     <div
-      className={`group relative flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all hover:bg-zinc-900 ${
+      className={`group relative flex w-full flex-col gap-3 rounded-xl border px-4 py-3 text-left transition-all hover:bg-zinc-900 md:flex-row md:items-center ${
         isPinned
           ? "border-orange-500/60 bg-orange-500/5 shadow-[0_0_0_1px_rgba(249,115,22,0.15)]"
           : "border-zinc-800 bg-zinc-900/60 hover:border-orange-500/50"
       }`}
     >
-      <span
-        className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-          isPinned ? "bg-orange-500/20 text-orange-400" : "bg-zinc-800 text-yellow-400"
-        }`}
-      >
-        <StarIcon filled className="h-4 w-4" />
-      </span>
-      <a
-        href={redditUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex-1 min-w-0 focus:outline-none"
-      >
-        <div className="flex items-baseline gap-2">
-          <span className="text-lg font-bold text-white tracking-wide">
-            {item.ticker}
-          </span>
-          {isPinned && (
-            <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
-              置顶
+      <div className="flex items-center gap-3 min-w-0 md:flex-1">
+        <span
+          className={`inline-flex shrink-0 items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+            isPinned ? "bg-orange-500/20 text-orange-400" : "bg-zinc-800 text-yellow-400"
+          }`}
+        >
+          <StarIcon filled className="h-4 w-4" />
+        </span>
+        <a
+          href={redditUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-1 min-w-0 focus:outline-none"
+        >
+          <div className="flex items-baseline gap-2">
+            <span className="text-lg font-bold text-white tracking-wide">
+              {item.ticker}
             </span>
-          )}
-          {item.name && (
-            <span className="text-xs text-zinc-400">{item.name}</span>
-          )}
-        </div>
-        <div className="mt-1 text-xs text-zinc-500">
-          收藏于 {new Date(item.addedAt).toLocaleString("zh-CN")}
-        </div>
-      </a>
-      <div className="flex items-center gap-1">
+            {isPinned && (
+              <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
+                置顶
+              </span>
+            )}
+            {item.name && (
+              <span className="text-xs text-zinc-400">{item.name}</span>
+            )}
+          </div>
+          <div className="mt-1 text-xs text-zinc-500">
+            收藏于 {new Date(item.addedAt).toLocaleString("zh-CN")}
+          </div>
+        </a>
+      </div>
+      <div className="flex items-center gap-1 flex-wrap justify-end">
         <a
           href={futuUrl(item.ticker)}
           target="_blank"
