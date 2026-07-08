@@ -18,6 +18,11 @@ const SUBREDDITS = [
 // 刷新间隔：10 分钟
 const REFRESH_INTERVAL = 10 * 60; // 秒
 
+// 外部跳转链接生成
+const futuUrl = (ticker: string) => `https://www.futunn.com/stock/${ticker}-US`;
+const tradingViewUrl = (ticker: string) =>
+  `https://cn.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
+
 interface Ticker {
   rank: number;
   ticker: string;
@@ -261,16 +266,12 @@ function TickerCard({
   onToggleFavorite: (ticker: Ticker) => void;
 }) {
   const pct = maxCount > 0 ? (ticker.countPast24h / maxCount) * 100 : 0;
-  const redditUrl = `https://www.reddit.com/r/${subreddit}/search?q=${encodeURIComponent(ticker.ticker)}&sort=relevance&t=week`;
+  const t = ticker.ticker;
+  const redditUrl = `https://www.reddit.com/r/${subreddit}/search?q=${encodeURIComponent(t)}&sort=relevance&t=week`;
   return (
     <div className="group relative flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-left transition-all hover:border-orange-500/50 hover:bg-zinc-900">
       <RankBadge rank={ticker.rank} />
-      <a
-        href={redditUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex-1 min-w-0 pr-8 focus:outline-none"
-      >
+      <div className="flex-1 min-w-0 pr-8">
         <div className="flex items-center justify-between">
           <div className="flex items-baseline gap-2">
             <span className="text-lg font-bold text-white tracking-wide">
@@ -292,11 +293,36 @@ function TickerCard({
         </div>
         <div className="mt-1 flex items-center justify-between text-xs text-zinc-500">
           <span>提及次数 (24h)</span>
-          <span className="opacity-0 transition-opacity group-hover:opacity-100 text-orange-400/70">
-            在 Reddit 查看 →
-          </span>
+          <div className="flex items-center gap-2 opacity-60 transition-opacity group-hover:opacity-100">
+            <a
+              href={redditUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400/70 hover:text-orange-400"
+            >
+              Reddit
+            </a>
+            <span className="text-zinc-700">·</span>
+            <a
+              href={futuUrl(t)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400/70 hover:text-orange-400"
+            >
+              富途
+            </a>
+            <span className="text-zinc-700">·</span>
+            <a
+              href={tradingViewUrl(t)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400/70 hover:text-orange-400"
+            >
+              TradingView
+            </a>
+          </div>
         </div>
-      </a>
+      </div>
       <button
         type="button"
         onClick={(e) => {
@@ -370,6 +396,24 @@ function FavoriteCard({
         </div>
       </a>
       <div className="flex items-center gap-1">
+        <a
+          href={futuUrl(item.ticker)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+          title="在富途牛牛查看"
+        >
+          富途
+        </a>
+        <a
+          href={tradingViewUrl(item.ticker)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+          title="在 TradingView 查看"
+        >
+          TradingView
+        </a>
         <button
           type="button"
           onClick={() => onTogglePin(item.ticker, !isPinned)}
