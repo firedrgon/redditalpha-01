@@ -21,7 +21,7 @@ const REFRESH_INTERVAL = 10 * 60; // 秒
 // 外部跳转链接生成
 const futuUrl = (ticker: string) => `https://www.futunn.com/stock/${ticker}-US`;
 const tradingViewUrl = (ticker: string) =>
-  `https://cn.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
+  `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
 
 interface Ticker {
   rank: number;
