@@ -19,6 +19,7 @@ import {
   PREFERRED_ACTIVE_ORDER,
   type LLMProvider,
 } from "./llm-providers";
+import { getCachedModels } from "./db/llm-model-cache";
 
 const CONFIG_FILE = path.join(process.cwd(), ".llm-config.json");
 
@@ -235,50 +236,67 @@ function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
   };
 }
 
-function applyPersistedModels(config: LLMConfig): void {
-  if (config.dynamicOpenRouterModels) {
-    for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
-      const providerId = OPENROUTER_PROVIDER_IDS[i];
-      const modelInfo = config.dynamicOpenRouterModels[i];
-      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
-      if (provider && modelInfo) {
-        provider.model = `${modelInfo.slug}:free`;
-        provider.name = `OpenRouter · ${modelInfo.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
+async function applyPersistedModels(config: LLMConfig): Promise<void> {
+  // 从数据库读取动态模型缓存
+  const cachedModels = await getCachedModels();
+  if (cachedModels.length > 0) {
+    for (const cached of cachedModels) {
+      const provider = LLM_PROVIDERS.find((p) => p.id === cached.providerId);
+      if (provider) {
+        provider.model = cached.modelSlug;
+        provider.name = cached.modelName;
       }
     }
   }
-  if (config.dynamicGeminiModels) {
-    for (let i = 0; i < GEMINI_PROVIDER_IDS.length; i++) {
-      const providerId = GEMINI_PROVIDER_IDS[i];
-      const modelInfo = config.dynamicGeminiModels[i];
-      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
-      if (provider && modelInfo) {
-        provider.model = modelInfo.slug;
-        provider.name = `Google Gemini · ${modelInfo.name.trim()}`;
+
+  // 兼容旧配置：如果数据库没有缓存，尝试从 config JSON 中读取（迁移期过渡）
+  if (cachedModels.length === 0) {
+    if (config.dynamicOpenRouterModels) {
+      for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
+        const providerId = OPENROUTER_PROVIDER_IDS[i];
+        const modelInfo = config.dynamicOpenRouterModels[i];
+        const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+        if (provider && modelInfo) {
+          provider.model = `${modelInfo.slug}:free`;
+          provider.name = `OpenRouter · ${modelInfo.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
+        }
+      }
+    }
+    if (config.dynamicGeminiModels) {
+      for (let i = 0; i < GEMINI_PROVIDER_IDS.length; i++) {
+        const providerId = GEMINI_PROVIDER_IDS[i];
+        const modelInfo = config.dynamicGeminiModels[i];
+        const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+        if (provider && modelInfo) {
+          provider.model = modelInfo.slug;
+          provider.name = `Google Gemini · ${modelInfo.name.trim()}`;
+        }
+      }
+    }
+    if (config.dynamicGroqModels) {
+      for (let i = 0; i < GROQ_PROVIDER_IDS.length; i++) {
+        const providerId = GROQ_PROVIDER_IDS[i];
+        const modelInfo = config.dynamicGroqModels[i];
+        const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+        if (provider && modelInfo) {
+          provider.model = modelInfo.slug;
+          const readableName = modelInfo.name
+            .replace(/^openai\//, "")
+            .replace(/^qwen\//, "")
+            .replace(/^meta-llama\//, "")
+            .replace(/-instruct$/, "")
+            .replace(/-versatile$/, "")
+            .replace(/-turbo$/, "")
+            .replace(/-/g, " ")
+            .replace(/\b(\w)/g, (c) => c.toUpperCase())
+            .trim();
+          provider.name = `Groq · ${readableName || modelInfo.id}`;
+        }
       }
     }
   }
-  if (config.dynamicGroqModels) {
-    for (let i = 0; i < GROQ_PROVIDER_IDS.length; i++) {
-      const providerId = GROQ_PROVIDER_IDS[i];
-      const modelInfo = config.dynamicGroqModels[i];
-      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
-      if (provider && modelInfo) {
-        provider.model = modelInfo.slug;
-        const readableName = modelInfo.name
-          .replace(/^openai\//, "")
-          .replace(/^qwen\//, "")
-          .replace(/^meta-llama\//, "")
-          .replace(/-instruct$/, "")
-          .replace(/-versatile$/, "")
-          .replace(/-turbo$/, "")
-          .replace(/-/g, " ")
-          .replace(/\b(\w)/g, (c) => c.toUpperCase())
-          .trim();
-        provider.name = `Groq · ${readableName || modelInfo.id}`;
-      }
-    }
-  }
+
+  // 应用 provider 级别的 model 覆盖（向后兼容）
   for (const [id, status] of Object.entries(config.providers)) {
     if (status.model) {
       const provider = LLM_PROVIDERS.find((p) => p.id === id);
@@ -314,7 +332,7 @@ export async function readConfig(): Promise<LLMConfig> {
       }
     }
   }
-  applyPersistedModels(config);
+  await applyPersistedModels(config);
   applySharedOpenRouterKeys(config);
   applySharedGeminiKeys(config);
   applySharedGroqKeys(config);

@@ -19,6 +19,7 @@ import {
   GEMINI_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
+import { saveCachedModels, getCachedModels } from "./db/llm-model-cache";
 
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
@@ -734,6 +735,7 @@ export async function refreshOpenRouterModels(): Promise<{
 
   const availableSlugs = freeModels.map((m) => m.slug);
   const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
+  const dbModels: Array<{ providerId: string; modelSlug: string; modelName: string }> = [];
 
   for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
     const providerId = OPENROUTER_PROVIDER_IDS[i];
@@ -743,21 +745,18 @@ export async function refreshOpenRouterModels(): Promise<{
 
     const oldModel = provider.model;
     const newModelSlug = `${model.slug}:free`;
+    const newModelName = `OpenRouter · ${model.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
     if (oldModel !== newModelSlug) {
       provider.model = newModelSlug;
-      provider.name = `OpenRouter · ${model.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
+      provider.name = newModelName;
       updated.push({ providerId, oldModel, newModel: newModelSlug });
     }
+    dbModels.push({ providerId, modelSlug: newModelSlug, modelName: newModelName });
   }
 
-  const config = await readConfig();
-  config.dynamicOpenRouterModels = freeModels.map((m) => ({
-    id: m.id,
-    name: m.name,
-    slug: m.slug,
-  }));
-  await writeConfig(config);
+  await saveCachedModels("openrouter", dbModels);
 
+  const config = await readConfig();
   const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
   let openrouterKey = "";
   for (const id of OPENROUTER_PROVIDER_IDS) {
@@ -809,6 +808,7 @@ export async function refreshGroqModels(): Promise<{
 
   const availableSlugs = models.map((m) => m.slug);
   const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
+  const dbModels: Array<{ providerId: string; modelSlug: string; modelName: string }> = [];
 
   for (let i = 0; i < GROQ_PROVIDER_IDS.length; i++) {
     const providerId = GROQ_PROVIDER_IDS[i];
@@ -818,29 +818,26 @@ export async function refreshGroqModels(): Promise<{
 
     const oldModel = provider.model;
     const newModelSlug = model.slug;
+    const readableName = model.name
+      .replace(/^openai\//, "")
+      .replace(/^qwen\//, "")
+      .replace(/^meta-llama\//, "")
+      .replace(/-instruct$/, "")
+      .replace(/-versatile$/, "")
+      .replace(/-turbo$/, "")
+      .replace(/-/g, " ")
+      .replace(/\b(\w)/g, (c) => c.toUpperCase())
+      .trim();
+    const newModelName = `Groq · ${readableName || model.id}`;
     if (oldModel !== newModelSlug) {
-      const readableName = model.name
-        .replace(/^openai\//, "")
-        .replace(/^qwen\//, "")
-        .replace(/^meta-llama\//, "")
-        .replace(/-instruct$/, "")
-        .replace(/-versatile$/, "")
-        .replace(/-turbo$/, "")
-        .replace(/-/g, " ")
-        .replace(/\b(\w)/g, (c) => c.toUpperCase())
-        .trim();
       provider.model = newModelSlug;
-      provider.name = `Groq · ${readableName || model.id}`;
+      provider.name = newModelName;
       updated.push({ providerId, oldModel, newModel: newModelSlug });
     }
+    dbModels.push({ providerId, modelSlug: newModelSlug, modelName: newModelName });
   }
 
-  config.dynamicGroqModels = models.map((m) => ({
-    id: m.id,
-    name: m.name,
-    slug: m.slug,
-  }));
-  await writeConfig(config);
+  await saveCachedModels("groq", dbModels);
 
   const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
   if (groqKey) {
@@ -884,6 +881,7 @@ export async function refreshGeminiModels(): Promise<{
 
   const availableSlugs = models.map((m) => m.slug);
   const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
+  const dbModels: Array<{ providerId: string; modelSlug: string; modelName: string }> = [];
 
   for (let i = 0; i < GEMINI_PROVIDER_IDS.length; i++) {
     const providerId = GEMINI_PROVIDER_IDS[i];
@@ -893,19 +891,16 @@ export async function refreshGeminiModels(): Promise<{
 
     const oldModel = provider.model;
     const newModelSlug = model.slug;
+    const newModelName = `Google Gemini · ${model.name.trim()}`;
     if (oldModel !== newModelSlug) {
       provider.model = newModelSlug;
-      provider.name = `Google Gemini · ${model.name.trim()}`;
+      provider.name = newModelName;
       updated.push({ providerId, oldModel, newModel: newModelSlug });
     }
+    dbModels.push({ providerId, modelSlug: newModelSlug, modelName: newModelName });
   }
 
-  config.dynamicGeminiModels = models.map((m) => ({
-    id: m.id,
-    name: m.name,
-    slug: m.slug,
-  }));
-  await writeConfig(config);
+  await saveCachedModels("gemini", dbModels);
 
   const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
   if (geminiKey) {

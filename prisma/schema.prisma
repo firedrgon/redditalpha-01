@@ -79,6 +79,20 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 }
 
+model LlmModelCache {
+  id            String   @id @default(cuid())
+  platform      String   // "openrouter" | "groq" | "gemini"
+  providerId    String   // 对应 LLM_PROVIDERS 的 id，如 "openrouter-1"
+  modelSlug     String   // 模型标识符，如 "nvidia/nemotron-3-ultra-550b-a55b:free"
+  modelName     String   // 人类可读名称，如 "Nemotron 3 Ultra 550B"
+  sortOrder     Int      // 排序顺序
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([platform, providerId])
+  @@index([platform])
+}
+
 model FinanceSnapshot {
   id              String   @id @default(cuid())
   ticker          String
