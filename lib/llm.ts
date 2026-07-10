@@ -300,7 +300,8 @@ async function callOpenAICompatible(
   const isReasoningModel =
     modelLower.includes("deepseek-r1") ||
     modelLower.includes("nemotron") ||
-    modelLower.includes("gpt-oss");
+    modelLower.includes("gpt-oss") ||
+    modelLower === "openrouter/free";
   const defaultMaxTokens = isReasoningModel ? 4096 : 3072;
 
   const res = await fetch(provider.endpoint, {
@@ -486,17 +487,19 @@ export async function testProvider(
   try {
     // 推理模型（Gemini 2.5 / DeepSeek R1 / Nemotron / GPT-OSS）会先思考再回答，
     // 测试时需要更大 maxTokens，否则思考阶段就耗尽 token 导致无最终输出。
+    // openrouter/free 会自动路由到未知模型，按推理模型处理以防 token 不足。
     const modelLower = provider.model.toLowerCase();
     const isReasoningModel =
       modelLower.includes("gemini-2.5") ||
       modelLower.includes("deepseek-r1") ||
       modelLower.includes("nemotron") ||
-      modelLower.includes("gpt-oss");
+      modelLower.includes("gpt-oss") ||
+      modelLower === "openrouter/free";
     const text = await callProvider(
       provider,
       status.apiKey,
       [{ role: "user", content: "请回复 OK。" }],
-      { maxTokens: isReasoningModel ? 512 : 16 }
+      { maxTokens: isReasoningModel ? 1024 : 64 }
     );
     return { ok: text.length > 0, error: undefined };
   } catch (err) {
