@@ -517,16 +517,13 @@ export async function testProvider(
 export async function refreshProviderStatuses(): Promise<{
   results: Array<{ id: string; name: string; ok: boolean; error?: string }>;
 }> {
-  // 先检查并更新 OpenRouter / Groq provider 的 model slug 为最新可用的模型
   try {
     await refreshOpenRouterModels();
   } catch {
-    // 模型刷新失败不影响后续测试
   }
   try {
     await refreshGroqModels();
   } catch {
-    // 模型刷新失败不影响后续测试
   }
 
   const config = await readConfig();
@@ -545,11 +542,12 @@ export async function refreshProviderStatuses(): Promise<{
       continue;
     }
 
+    status.model = provider.model;
+
     const result = await testProvider(provider.id);
     status.working = result.ok;
     status.lastTested = Date.now();
     status.lastError = result.error ?? null;
-    // 健康检查会重新判断可用性，清除历史冷却状态
     status.cooldownUntil = null;
     results.push({
       id: provider.id,
@@ -621,10 +619,8 @@ export async function refreshOpenRouterModels(): Promise<{
 
   for (const provider of LLM_PROVIDERS) {
     if (!OPENROUTER_PROVIDER_IDS.includes(provider.id as typeof OPENROUTER_PROVIDER_IDS[number])) continue;
-    // 检查当前 model slug 是否仍在可用列表中
-    if (availableSlugs.includes(provider.model)) continue;
-    // 当前 model 不可用，按优先级替换
-    // 优先选择与 provider 名称/用途最匹配的模型
+    const currentModelWithoutFree = provider.model.replace(/:free$/, "");
+    if (availableSlugs.includes(currentModelWithoutFree)) continue;
     const preferredMatch = (() => {
       if (provider.id.includes("nemotron")) return freeModels.find((m) => m.id.includes("nemotron-ultra"));
       if (provider.id.includes("qwen")) return freeModels.find((m) => m.id.includes("qwen"));
@@ -634,7 +630,7 @@ export async function refreshOpenRouterModels(): Promise<{
       return null;
     })();
     const replacement = preferredMatch ?? freeModels[0];
-    if (replacement && replacement.id !== provider.model) {
+    if (replacement && replacement.id !== currentModelWithoutFree) {
       const oldModel = provider.model;
       provider.model = replacement.id;
       provider.name = `OpenRouter · ${replacement.name.replace(/\s*\(free\)\s*/i, "").trim()}`;

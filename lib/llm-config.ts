@@ -36,6 +36,7 @@ export interface ProviderStatus {
    * 永久错误（401 / 403 / 404）不设置此字段，直接 working=false。
    */
   cooldownUntil?: number | null;
+  model?: string; // 定时刷新时更新的 model slug，用于持久化
 }
 
 export interface LLMConfig {
@@ -209,6 +210,17 @@ function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
   };
 }
 
+function applyPersistedModels(config: LLMConfig): void {
+  for (const [id, status] of Object.entries(config.providers)) {
+    if (status.model) {
+      const provider = LLM_PROVIDERS.find((p) => p.id === id);
+      if (provider) {
+        provider.model = status.model;
+      }
+    }
+  }
+}
+
 /** 读取配置：内存 → 数据库 → 文件 → 默认值，最后叠加环境变量 */
 export async function readConfig(): Promise<LLMConfig> {
   let config: LLMConfig;
@@ -234,6 +246,7 @@ export async function readConfig(): Promise<LLMConfig> {
       }
     }
   }
+  applyPersistedModels(config);
   applySharedOpenRouterKeys(config);
   applySharedGeminiKeys(config);
   applySharedGroqKeys(config);
