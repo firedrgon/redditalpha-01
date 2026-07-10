@@ -3,7 +3,7 @@
  *
  * 调用流程：
  *   1. 候选 provider 优先级：activeProvider -> working=true -> 未测试但有 Key/无需Key
- *   2. 按 provider.protocol 走对应协议（openai/gemini/duckduckgo）
+ *   2. 按 provider.protocol 走对应协议（openai/gemini）
  *   3. 失败则更新本地 working=false 并尝试下一个 provider
  *
  * testProvider() / refreshProviderStatuses() 用于定时健康检查
@@ -16,6 +16,7 @@ import {
   type LLMProvider,
   OPENROUTER_PROVIDER_IDS,
   GROQ_PROVIDER_IDS,
+  GEMINI_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
 
@@ -277,8 +278,6 @@ async function callProvider(
       return callOpenAICompatible(provider, apiKey, messages, options);
     case "gemini":
       return callGemini(provider, apiKey, messages, options);
-    case "duckduckgo":
-      return callDuckDuckGo(provider, messages, options);
     default:
       throw new Error(`未知协议：${provider.protocol}`);
   }
@@ -400,73 +399,6 @@ async function callGemini(
   return text;
 }
 
-/** DuckDuckGo AI Chat（非官方，无需 Key） */
-async function callDuckDuckGo(
-  provider: LLMProvider,
-  messages: LLMMessage[],
-  options: { signal?: AbortSignal } = {}
-): Promise<string> {
-  const statusRes = await fetch(
-    "https://duckduckgo.com/duckchat/v1/status",
-    {
-      method: "GET",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "x-vqd-accept": "1",
-      },
-      signal: options.signal,
-    }
-  );
-  if (!statusRes.ok) {
-    throw new Error(`DuckDuckGo status HTTP ${statusRes.status}`);
-  }
-  const token = statusRes.headers.get("x-vqd-4");
-  if (!token) throw new Error("DuckDuckGo 未返回 x-vqd-4 token");
-
-  const res = await fetch(provider.endpoint, {
-    method: "POST",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-      "Content-Type": "application/json",
-      "x-vqd-4": token,
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      messages: messages.map((m) => ({
-        role: m.role === "assistant" ? "assistant" : m.role,
-        content: m.content,
-      })),
-    }),
-    signal: options.signal,
-  });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`DuckDuckGo chat HTTP ${res.status}: ${detail.slice(0, 200)}`);
-  }
-
-  // DuckDuckGo 返回 SSE 流，按行解析 data: {...}
-  const raw = await res.text();
-  const chunks: string[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data:")) continue;
-    const payload = trimmed.slice(5).trim();
-    if (payload === "[DONE]") break;
-    try {
-      const json = JSON.parse(payload);
-      if (json.message) chunks.push(json.message);
-    } catch {
-      // 跳过无法解析的行
-    }
-  }
-  const text = chunks.join("");
-  if (!text) throw new Error("DuckDuckGo 返回内容为空");
-  return text;
-}
-
 /**
  * 测试某个 provider 是否可用
  * 用于定时健康检查
@@ -561,13 +493,22 @@ export async function refreshProviderStatuses(): Promise<{
   return { results };
 }
 
+interface OpenRouterModelInfo {
+  id: string;
+  name: string;
+  slug: string;
+  contextLength: number;
+  supportsTools: boolean;
+  supportsReasoning: boolean;
+  supportsStructuredOutputs: boolean;
+  createdAt: number;
+}
+
 /**
- * 从 OpenRouter API 获取最新免费模型列表。
- * 返回适合股票分析的免费模型 slug（排除编码/内容安全/音频专用模型）。
+ * 从 OpenRouter API 获取最新免费模型列表，并按财务分析适配度评分排序。
+ * 返回前5个最适合财务分析的免费模型。
  */
-export async function fetchOpenRouterFreeModels(): Promise<
-  Array<{ id: string; name: string; contextLength: number }>
-> {
+export async function fetchOpenRouterFreeModels(): Promise<OpenRouterModelInfo[]> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/models", {
       headers: { "User-Agent": "Reddit-Alpha/1.0" },
@@ -577,80 +518,83 @@ export async function fetchOpenRouterFreeModels(): Promise<
     if (!res.ok) return [];
     const data = await res.json();
     const models = data?.data ?? [];
-    // 筛选免费模型
-    const free = models.filter(
-      (m: Record<string, unknown>) => {
-        const pricing = m.pricing as Record<string, unknown> | undefined;
-        return pricing?.prompt === "0" && pricing?.completion === "0";
-      }
-    );
-    // 排除不适合分析的模型
-    const excludeKeywords = /content-safety|code|audio|whisper|tts|vision|vl$|clip|lyria|laguna|poolside|cohere\/north/i;
-    const suitable = free.filter((m: Record<string, unknown>) => {
-      const id = String(m.id ?? "");
-      return !excludeKeywords.test(id);
+
+    const free = models.filter((m: Record<string, unknown>) => {
+      const pricing = m.pricing as Record<string, unknown> | undefined;
+      return pricing?.prompt === "0" && pricing?.completion === "0";
     });
-    return suitable
-      .map((m: Record<string, unknown>) => ({
-        id: String(m.id ?? ""),
-        name: String(m.name ?? ""),
-        contextLength: Number(m.context_length ?? 0),
-      }))
-      .sort((a: { contextLength: number }, b: { contextLength: number }) => b.contextLength - a.contextLength);
+
+    const excludeKeywords = /content-safety|code|audio|whisper|tts|vision|vl$|clip|lyria|laguna|poolside|cohere\/north/i;
+
+    const scored = free
+      .filter((m: Record<string, unknown>) => {
+        const id = String(m.id ?? "");
+        if (excludeKeywords.test(id)) return false;
+        const modalities = (m.architecture as Record<string, unknown>)?.input_modalities as string[] | undefined;
+        return !modalities || modalities.length === 0 || modalities.every((mod) => mod === "text");
+      })
+      .map((m: Record<string, unknown>) => {
+        const id = String(m.id ?? "");
+        const supportedParams = (m.supported_parameters as string[]) ?? [];
+        const supportedFeatures = (m.supported_features as string[]) ?? [];
+        const allFeatures = [...supportedParams, ...supportedFeatures];
+        return {
+          id: id,
+          name: String(m.name ?? id),
+          slug: id,
+          contextLength: Number(m.context_length ?? 0),
+          supportsTools: allFeatures.includes("tools") || allFeatures.includes("function_calling"),
+          supportsReasoning: allFeatures.includes("reasoning"),
+          supportsStructuredOutputs: allFeatures.includes("structured_outputs") || allFeatures.includes("json_mode"),
+          createdAt: Number(m.created ?? 0),
+        };
+      });
+
+    const now = Date.now() / 1000;
+    return scored
+      .map((model: OpenRouterModelInfo) => {
+        const daysOld = Math.floor((now - model.createdAt) / (24 * 3600));
+        const recencyScore = Math.max(0, 365 - daysOld) * 10;
+        return {
+          ...model,
+          score:
+            model.contextLength * 0.5 +
+            (model.supportsTools ? 2000 : 0) +
+            (model.supportsReasoning ? 1500 : 0) +
+            (model.supportsStructuredOutputs ? 1000 : 0) +
+            recencyScore,
+        };
+      })
+      .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
+      .slice(0, 5)
+      .map((m: OpenRouterModelInfo & { score: number }) => ({
+        id: m.id,
+        name: m.name,
+        slug: m.slug,
+        contextLength: m.contextLength,
+        supportsTools: m.supportsTools,
+        supportsReasoning: m.supportsReasoning,
+        supportsStructuredOutputs: m.supportsStructuredOutputs,
+        createdAt: m.createdAt,
+      }));
   } catch {
     return [];
   }
 }
 
-/**
- * 检查并更新 OpenRouter provider 的 model slug 为最新可用的免费模型。
- * 在 refreshProviderStatuses 之前调用，确保 provider 用的是当前可用的模型。
- * 如果当前 model slug 仍然可用则不更新，不可用则替换为列表中最佳的。
- */
-export async function refreshOpenRouterModels(): Promise<{
-  updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
-  availableModels: string[];
-}> {
-  const freeModels = await fetchOpenRouterFreeModels();
-  if (freeModels.length === 0) return { updated: [], availableModels: [] };
-
-  const availableSlugs = freeModels.map((m) => m.id);
-  const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
-
-  for (const provider of LLM_PROVIDERS) {
-    if (!OPENROUTER_PROVIDER_IDS.includes(provider.id as typeof OPENROUTER_PROVIDER_IDS[number])) continue;
-    const currentModelWithoutFree = provider.model.replace(/:free$/, "");
-    if (availableSlugs.includes(currentModelWithoutFree)) continue;
-    const preferredMatch = (() => {
-      if (provider.id.includes("nemotron")) return freeModels.find((m) => m.id.includes("nemotron-ultra"));
-      if (provider.id.includes("qwen")) return freeModels.find((m) => m.id.includes("qwen"));
-      if (provider.id.includes("gpt-oss")) return freeModels.find((m) => m.id.includes("gpt-oss"));
-      if (provider.id.includes("hermes")) return freeModels.find((m) => m.id.includes("hermes") || m.id.includes("llama-3.3"));
-      if (provider.id.includes("llama")) return freeModels.find((m) => m.id.includes("llama"));
-      return null;
-    })();
-    const replacement = preferredMatch ?? freeModels[0];
-    if (replacement && replacement.id !== currentModelWithoutFree) {
-      const oldModel = provider.model;
-      provider.model = replacement.id;
-      provider.name = `OpenRouter · ${replacement.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
-      updated.push({ providerId: provider.id, oldModel, newModel: replacement.id });
-    }
-  }
-
-  return { updated, availableModels: availableSlugs };
+interface GroqModelInfo {
+  id: string;
+  name: string;
+  slug: string;
+  contextLength: number;
+  createdAt: number;
 }
 
 /**
- * 获取 Groq 当前可用的模型列表。
+ * 获取 Groq 当前可用的模型列表，按财务分析适配度评分排序，返回前3个。
  * 调用 OpenAI 兼容的 /openai/v1/models 接口，需要 API Key。
- *
- * Groq 托管的均为开源模型（Llama / Qwen / GPT-OSS / DeepSeek 等），
- * 无付费/免费区分，但需排除不适合文本分析的模型（whisper / guard / tts 等）。
  */
-export async function fetchGroqModels(
-  apiKey: string
-): Promise<Array<{ id: string; name: string; contextLength: number }>> {
+export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> {
   if (!apiKey?.trim()) return [];
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
@@ -664,34 +608,182 @@ export async function fetchGroqModels(
     if (!res.ok) return [];
     const data = await res.json();
     const models = data?.data ?? [];
-    // 排除不适合文本分析的模型（音频 / 安全审查 / 多模态等）
     const excludeKeywords = /whisper|guard|tts|safety|vision|audio|moderation|embedding|preview-tool/i;
-    const suitable = models.filter((m: Record<string, unknown>) => {
-      const id = String(m.id ?? "");
-      return !excludeKeywords.test(id);
-    });
-    return suitable
+
+    const scored = models
+      .filter((m: Record<string, unknown>) => {
+        const id = String(m.id ?? "");
+        return !excludeKeywords.test(id);
+      })
       .map((m: Record<string, unknown>) => ({
         id: String(m.id ?? ""),
         name: String(m.id ?? ""),
+        slug: String(m.id ?? ""),
         contextLength: Number(m.context_window ?? m.context_length ?? 0),
-      }))
-      .sort((a: { contextLength: number }, b: { contextLength: number }) => b.contextLength - a.contextLength);
+        createdAt: Number(m.created ?? 0),
+      }));
+
+    const now = Date.now() / 1000;
+    return scored
+      .map((model: GroqModelInfo) => {
+        const daysOld = Math.floor((now - model.createdAt) / (24 * 3600));
+        const recencyScore = Math.max(0, 365 - daysOld) * 10;
+        return {
+          ...model,
+          score: model.contextLength * 0.5 + recencyScore,
+        };
+      })
+      .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
+      .slice(0, 3)
+      .map((m: GroqModelInfo & { score: number }) => ({
+        id: m.id,
+        name: m.name,
+        slug: m.slug,
+        contextLength: m.contextLength,
+        createdAt: m.createdAt,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+interface GeminiModelInfo {
+  id: string;
+  name: string;
+  slug: string;
+  contextLength: number;
+  createdAt: number;
+}
+
+/**
+ * 获取 Gemini 当前可用的模型列表，按财务分析适配度评分排序，返回前2个。
+ * 调用 Google Gemini API /v1beta/models 接口，需要 API Key。
+ */
+export async function fetchGeminiModels(apiKey: string): Promise<GeminiModelInfo[]> {
+  if (!apiKey?.trim()) return [];
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+      headers: { "User-Agent": "Reddit-Alpha/1.0" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const models = data?.models ?? [];
+
+    const scored = models
+      .filter((m: Record<string, unknown>) => {
+        const supportedMethods = (m.supportedGenerationMethods as string[]) ?? [];
+        return supportedMethods.includes("generateContent");
+      })
+      .map((m: Record<string, unknown>) => {
+        const nameStr = String(m.name ?? "");
+        return {
+          id: nameStr,
+          name: String(m.displayName ?? nameStr),
+          slug: nameStr.replace(/^models\//, ""),
+          contextLength: Number((m.inputTokenLimit as number) ?? 0),
+          createdAt: Number(m.createTime ? new Date(String(m.createTime)).getTime() / 1000 : 0),
+        };
+      });
+
+    const now = Date.now() / 1000;
+    return scored
+      .map((model: GeminiModelInfo) => {
+        const daysOld = Math.floor((now - model.createdAt) / (24 * 3600));
+        const recencyScore = Math.max(0, 365 - daysOld) * 10;
+        return {
+          ...model,
+          score: model.contextLength * 0.5 + recencyScore,
+        };
+      })
+      .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
+      .slice(0, 2)
+      .map((m: GeminiModelInfo & { score: number }) => ({
+        id: m.id,
+        name: m.name,
+        slug: m.slug,
+        contextLength: m.contextLength,
+        createdAt: m.createdAt,
+      }));
   } catch {
     return [];
   }
 }
 
 /**
- * 检查并更新 Groq provider 的 model slug 为最新可用的模型。
- * 在 refreshProviderStatuses 之前调用，确保 provider 用的是当前可用的模型。
- * 如果当前 model slug 仍然可用则不更新，不可用则按用途匹配替换。
+ * 动态刷新 OpenRouter 免费模型：获取前5个评分最高的模型，直接替换所有 OpenRouter provider。
+ * 同时测试每个 provider 的可用性。
+ */
+export async function refreshOpenRouterModels(): Promise<{
+  updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+  availableModels: string[];
+  testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+}> {
+  const freeModels = await fetchOpenRouterFreeModels();
+  if (freeModels.length === 0) return { updated: [], availableModels: [], testResults: [] };
+
+  const availableSlugs = freeModels.map((m) => m.slug);
+  const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
+
+  for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
+    const providerId = OPENROUTER_PROVIDER_IDS[i];
+    const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+    const model = freeModels[i];
+    if (!provider || !model) continue;
+
+    const oldModel = provider.model;
+    const newModelSlug = `${model.slug}:free`;
+    if (oldModel !== newModelSlug) {
+      provider.model = newModelSlug;
+      provider.name = `OpenRouter · ${model.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
+      updated.push({ providerId, oldModel, newModel: newModelSlug });
+    }
+  }
+
+  const config = await readConfig();
+  config.dynamicOpenRouterModels = freeModels.map((m) => ({
+    id: m.id,
+    name: m.name,
+    slug: m.slug,
+  }));
+  await writeConfig(config);
+
+  const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
+  let openrouterKey = "";
+  for (const id of OPENROUTER_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      openrouterKey = s.apiKey.trim();
+      break;
+    }
+  }
+
+  if (openrouterKey) {
+    for (const providerId of OPENROUTER_PROVIDER_IDS) {
+      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+      if (!provider || !provider.model) continue;
+      try {
+        const result = await testProvider(providerId);
+        testResults.push({ providerId, working: result.ok, error: result.error });
+      } catch (err) {
+        testResults.push({ providerId, working: false, error: String(err) });
+      }
+    }
+  }
+
+  return { updated, availableModels: availableSlugs, testResults };
+}
+
+/**
+ * 动态刷新 Groq 模型：获取前3个评分最高的模型，直接替换所有 Groq provider。
+ * 同时测试每个 provider 的可用性。
  */
 export async function refreshGroqModels(): Promise<{
   updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
   availableModels: string[];
+  testResults: Array<{ providerId: string; working: boolean; error?: string }>;
 }> {
-  // Groq 系列共享同一 API Key，从任一已配置 Key 的 provider 读取
   const config = await readConfig();
   let groqKey = "";
   for (const id of GROQ_PROVIDER_IDS) {
@@ -701,33 +793,124 @@ export async function refreshGroqModels(): Promise<{
       break;
     }
   }
-  if (!groqKey) return { updated: [], availableModels: [] };
+  if (!groqKey) return { updated: [], availableModels: [], testResults: [] };
 
   const models = await fetchGroqModels(groqKey);
-  if (models.length === 0) return { updated: [], availableModels: [] };
+  if (models.length === 0) return { updated: [], availableModels: [], testResults: [] };
 
-  const availableIds = models.map((m) => m.id);
+  const availableSlugs = models.map((m) => m.slug);
   const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
 
-  for (const provider of LLM_PROVIDERS) {
-    if (!GROQ_PROVIDER_IDS.includes(provider.id as typeof GROQ_PROVIDER_IDS[number])) continue;
-    // 检查当前 model 是否仍在可用列表中
-    if (availableIds.includes(provider.model)) continue;
-    // 当前 model 不可用，按 provider 用途匹配最接近的模型
-    const preferredMatch = (() => {
-      if (provider.id.includes("qwen")) return models.find((m) => m.id.includes("qwen"));
-      if (provider.id.includes("gpt-oss")) return models.find((m) => m.id.includes("gpt-oss"));
-      if (provider.id.includes("llama")) return models.find((m) => m.id.includes("llama"));
-      return null;
-    })();
-    const replacement = preferredMatch ?? models[0];
-    if (replacement && replacement.id !== provider.model) {
-      const oldModel = provider.model;
-      provider.model = replacement.id;
-      provider.name = `Groq · ${replacement.id}`;
-      updated.push({ providerId: provider.id, oldModel, newModel: replacement.id });
+  for (let i = 0; i < GROQ_PROVIDER_IDS.length; i++) {
+    const providerId = GROQ_PROVIDER_IDS[i];
+    const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+    const model = models[i];
+    if (!provider || !model) continue;
+
+    const oldModel = provider.model;
+    const newModelSlug = model.slug;
+    if (oldModel !== newModelSlug) {
+      const readableName = model.name
+        .replace(/^openai\//, "")
+        .replace(/^qwen\//, "")
+        .replace(/^meta-llama\//, "")
+        .replace(/-instruct$/, "")
+        .replace(/-versatile$/, "")
+        .replace(/-turbo$/, "")
+        .replace(/-/g, " ")
+        .replace(/\b(\w)/g, (c) => c.toUpperCase())
+        .trim();
+      provider.model = newModelSlug;
+      provider.name = `Groq · ${readableName || model.id}`;
+      updated.push({ providerId, oldModel, newModel: newModelSlug });
     }
   }
 
-  return { updated, availableModels: availableIds };
+  config.dynamicGroqModels = models.map((m) => ({
+    id: m.id,
+    name: m.name,
+    slug: m.slug,
+  }));
+  await writeConfig(config);
+
+  const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
+  if (groqKey) {
+    for (const providerId of GROQ_PROVIDER_IDS) {
+      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+      if (!provider || !provider.model) continue;
+      try {
+        const result = await testProvider(providerId);
+        testResults.push({ providerId, working: result.ok, error: result.error });
+      } catch (err) {
+        testResults.push({ providerId, working: false, error: String(err) });
+      }
+    }
+  }
+
+  return { updated, availableModels: availableSlugs, testResults };
+}
+
+/**
+ * 动态刷新 Gemini 模型：获取前2个评分最高的模型，直接替换所有 Gemini provider。
+ * 同时测试每个 provider 的可用性。
+ */
+export async function refreshGeminiModels(): Promise<{
+  updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+  availableModels: string[];
+  testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+}> {
+  const config = await readConfig();
+  let geminiKey = "";
+  for (const id of GEMINI_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      geminiKey = s.apiKey.trim();
+      break;
+    }
+  }
+  if (!geminiKey) return { updated: [], availableModels: [], testResults: [] };
+
+  const models = await fetchGeminiModels(geminiKey);
+  if (models.length === 0) return { updated: [], availableModels: [], testResults: [] };
+
+  const availableSlugs = models.map((m) => m.slug);
+  const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
+
+  for (let i = 0; i < GEMINI_PROVIDER_IDS.length; i++) {
+    const providerId = GEMINI_PROVIDER_IDS[i];
+    const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+    const model = models[i];
+    if (!provider || !model) continue;
+
+    const oldModel = provider.model;
+    const newModelSlug = model.slug;
+    if (oldModel !== newModelSlug) {
+      provider.model = newModelSlug;
+      provider.name = `Google Gemini · ${model.name.trim()}`;
+      updated.push({ providerId, oldModel, newModel: newModelSlug });
+    }
+  }
+
+  config.dynamicGeminiModels = models.map((m) => ({
+    id: m.id,
+    name: m.name,
+    slug: m.slug,
+  }));
+  await writeConfig(config);
+
+  const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
+  if (geminiKey) {
+    for (const providerId of GEMINI_PROVIDER_IDS) {
+      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+      if (!provider || !provider.model) continue;
+      try {
+        const result = await testProvider(providerId);
+        testResults.push({ providerId, working: result.ok, error: result.error });
+      } catch (err) {
+        testResults.push({ providerId, working: false, error: String(err) });
+      }
+    }
+  }
+
+  return { updated, availableModels: availableSlugs, testResults };
 }

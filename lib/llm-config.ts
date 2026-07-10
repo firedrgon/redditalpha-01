@@ -41,8 +41,11 @@ export interface ProviderStatus {
 
 export interface LLMConfig {
   providers: Record<string, ProviderStatus>;
-  activeProvider: string | null; // 当前活跃提供商 id
+  activeProvider: string | null;
   updatedAt: number;
+  dynamicOpenRouterModels?: Array<{ id: string; name: string; slug: string }>;
+  dynamicGeminiModels?: Array<{ id: string; name: string; slug: string }>;
+  dynamicGroqModels?: Array<{ id: string; name: string; slug: string }>;
 }
 
 const DEFAULT_CONFIG: LLMConfig = {
@@ -53,7 +56,7 @@ const DEFAULT_CONFIG: LLMConfig = {
         id: p.id,
         apiKey: "",
         keySource: "none" as const,
-        enabled: p.needsKey ? false : true, // 不需要 Key 的默认启用
+        enabled: true,
         lastTested: null,
         working: null,
         lastError: null,
@@ -77,9 +80,9 @@ function readEnvKeys(): Record<string, string> {
   }
   // 兼容常用变量名
   const aliases: Array<[string, string]> = [
-    ["GROQ_API_KEY", "groq"],
-    ["GEMINI_API_KEY", "gemini"],
-    ["GOOGLE_API_KEY", "gemini"],
+    ["GROQ_API_KEY", "groq-1"],
+    ["GEMINI_API_KEY", "gemini-1"],
+    ["GOOGLE_API_KEY", "gemini-1"],
   ];
   for (const [alias, providerId] of aliases) {
     const v = process.env[alias];
@@ -202,15 +205,80 @@ function applyEnvKeys(config: LLMConfig, isFreshConfig = false): LLMConfig {
   return config;
 }
 
+function migrateOldProviderIds(providers: Record<string, ProviderStatus>): Record<string, ProviderStatus> {
+  const migrations: Record<string, string> = {
+    "gemini": "gemini-1",
+    "gemini-2.0": "gemini-2",
+    "groq": "groq-1",
+    "groq-qwen3-32b": "groq-2",
+    "groq-gpt-oss-120b": "groq-3",
+  };
+  const result = { ...providers };
+  for (const [oldId, newId] of Object.entries(migrations)) {
+    if (result[oldId] && !result[newId]) {
+      result[newId] = { ...result[oldId], id: newId };
+      delete result[oldId];
+    }
+  }
+  return result;
+}
+
 function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
+  const migratedProviders = migrateOldProviderIds(parsed.providers || {});
   return {
-    providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers || {}) },
+    providers: { ...DEFAULT_CONFIG.providers, ...migratedProviders },
     activeProvider: parsed.activeProvider ?? null,
     updatedAt: parsed.updatedAt ?? 0,
+    dynamicOpenRouterModels: parsed.dynamicOpenRouterModels,
+    dynamicGeminiModels: parsed.dynamicGeminiModels,
+    dynamicGroqModels: parsed.dynamicGroqModels,
   };
 }
 
 function applyPersistedModels(config: LLMConfig): void {
+  if (config.dynamicOpenRouterModels) {
+    for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
+      const providerId = OPENROUTER_PROVIDER_IDS[i];
+      const modelInfo = config.dynamicOpenRouterModels[i];
+      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+      if (provider && modelInfo) {
+        provider.model = `${modelInfo.slug}:free`;
+        provider.name = `OpenRouter · ${modelInfo.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
+      }
+    }
+  }
+  if (config.dynamicGeminiModels) {
+    for (let i = 0; i < GEMINI_PROVIDER_IDS.length; i++) {
+      const providerId = GEMINI_PROVIDER_IDS[i];
+      const modelInfo = config.dynamicGeminiModels[i];
+      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+      if (provider && modelInfo) {
+        provider.model = modelInfo.slug;
+        provider.name = `Google Gemini · ${modelInfo.name.trim()}`;
+      }
+    }
+  }
+  if (config.dynamicGroqModels) {
+    for (let i = 0; i < GROQ_PROVIDER_IDS.length; i++) {
+      const providerId = GROQ_PROVIDER_IDS[i];
+      const modelInfo = config.dynamicGroqModels[i];
+      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+      if (provider && modelInfo) {
+        provider.model = modelInfo.slug;
+        const readableName = modelInfo.name
+          .replace(/^openai\//, "")
+          .replace(/^qwen\//, "")
+          .replace(/^meta-llama\//, "")
+          .replace(/-instruct$/, "")
+          .replace(/-versatile$/, "")
+          .replace(/-turbo$/, "")
+          .replace(/-/g, " ")
+          .replace(/\b(\w)/g, (c) => c.toUpperCase())
+          .trim();
+        provider.name = `Groq · ${readableName || modelInfo.id}`;
+      }
+    }
+  }
   for (const [id, status] of Object.entries(config.providers)) {
     if (status.model) {
       const provider = LLM_PROVIDERS.find((p) => p.id === id);

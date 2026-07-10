@@ -1,15 +1,16 @@
 /**
- * 定时刷新 OpenRouter / Groq 可用的免费大模型
+ * 定时刷新 OpenRouter / Groq / Gemini 可用的免费大模型
  *
  * 调用各平台的 /models 接口获取最新模型列表，
- * 自动替换已下架的 provider 的 model slug，保持 provider 可用。
+ * 按评分排序取前 N 个，自动替换 provider 的 model slug，
+ * 并测试每个 provider 的可用性。
  *
  * 触发方式：
  *   1. Vercel Cron（vercel.json 配置，每天 03:00 北京时间自动调用）
  *   2. 手动 POST /api/llm-providers/refresh-models
  */
 import { NextResponse } from "next/server";
-import { refreshOpenRouterModels, refreshGroqModels } from "@/lib/llm";
+import { refreshOpenRouterModels, refreshGroqModels, refreshGeminiModels } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,12 +32,20 @@ async function runRefresh() {
   let openrouter: {
     updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
     availableModels: string[];
-  } = { updated: [], availableModels: [] };
+    testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+  } = { updated: [], availableModels: [], testResults: [] };
 
   let groq: {
     updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
     availableModels: string[];
-  } = { updated: [], availableModels: [] };
+    testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+  } = { updated: [], availableModels: [], testResults: [] };
+
+  let gemini: {
+    updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+    availableModels: string[];
+    testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+  } = { updated: [], availableModels: [], testResults: [] };
 
   try {
     openrouter = await refreshOpenRouterModels();
@@ -52,6 +61,12 @@ async function runRefresh() {
     errors.push(`Groq: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  try {
+    gemini = await refreshGeminiModels();
+  } catch (err) {
+    errors.push(`Gemini: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return NextResponse.json({
     ok: errors.length === 0,
     updatedAt: now,
@@ -60,13 +75,24 @@ async function runRefresh() {
       openrouter: {
         availableCount: openrouter.availableModels.length,
         updatedCount: openrouter.updated.length,
+        testedCount: openrouter.testResults.length,
+        workingCount: openrouter.testResults.filter((r) => r.working).length,
       },
       groq: {
         availableCount: groq.availableModels.length,
         updatedCount: groq.updated.length,
+        testedCount: groq.testResults.length,
+        workingCount: groq.testResults.filter((r) => r.working).length,
+      },
+      gemini: {
+        availableCount: gemini.availableModels.length,
+        updatedCount: gemini.updated.length,
+        testedCount: gemini.testResults.length,
+        workingCount: gemini.testResults.filter((r) => r.working).length,
       },
     },
     openrouter,
     groq,
+    gemini,
   });
 }
