@@ -377,9 +377,26 @@ async function callGemini(
   }
 
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(`${provider.name} 返回内容为空`);
-  return text as string;
+  // Gemini 2.5 等推理模型会先输出思考过程（parts 中带 thought:true），
+  // 最终答案在后续 parts 中，需遍历拼接并跳过思考部分。
+  const parts = data?.candidates?.[0]?.content?.parts;
+  let text = "";
+  if (Array.isArray(parts)) {
+    for (const part of parts) {
+      if (part.thought === true) continue;
+      if (typeof part.text === "string") text += part.text;
+    }
+  }
+  if (!text) {
+    const finishReason = data?.candidates?.[0]?.finishReason;
+    if (finishReason === "MAX_TOKENS") {
+      throw new Error(
+        `${provider.name} 返回内容为空（token 上限不足，推理模型需要更大 maxTokens）`
+      );
+    }
+    throw new Error(`${provider.name} 返回内容为空`);
+  }
+  return text;
 }
 
 /** DuckDuckGo AI Chat（非官方，无需 Key） */
@@ -467,11 +484,19 @@ export async function testProvider(
   }
 
   try {
+    // 推理模型（Gemini 2.5 / DeepSeek R1 / Nemotron / GPT-OSS）会先思考再回答，
+    // 测试时需要更大 maxTokens，否则思考阶段就耗尽 token 导致无最终输出。
+    const modelLower = provider.model.toLowerCase();
+    const isReasoningModel =
+      modelLower.includes("gemini-2.5") ||
+      modelLower.includes("deepseek-r1") ||
+      modelLower.includes("nemotron") ||
+      modelLower.includes("gpt-oss");
     const text = await callProvider(
       provider,
       status.apiKey,
       [{ role: "user", content: "请回复 OK。" }],
-      { maxTokens: 16 }
+      { maxTokens: isReasoningModel ? 512 : 16 }
     );
     return { ok: text.length > 0, error: undefined };
   } catch (err) {
