@@ -1423,6 +1423,14 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                       >
                         设为活跃
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTestOne(p.id)}
+                        disabled={testing === p.id || !p.enabled || (p.needsKey && !p.hasKey && !keyInputs[p.id])}
+                        className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-30"
+                      >
+                        {testing === p.id ? "测试中..." : "测试"}
+                      </button>
                     </div>
                   </div>
 
@@ -1453,27 +1461,6 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                         className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
                       >
                         保存
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestOne(p.id)}
-                        disabled={testing === p.id || !p.enabled || (!p.hasKey && !keyInputs[p.id])}
-                        className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-30"
-                      >
-                        {testing === p.id ? "测试中..." : "测试"}
-                      </button>
-                    </div>
-                  )}
-
-                  {!p.needsKey && (
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => handleTestOne(p.id)}
-                        disabled={testing === p.id || !p.enabled}
-                        className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-30"
-                      >
-                        {testing === p.id ? "测试中..." : "测试"}
                       </button>
                     </div>
                   )}
