@@ -11,7 +11,7 @@ import { refreshProviderStatuses, testProvider } from "@/lib/llm";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** GET /api/llm-providers：列出所有 provider 及状态 */
+/** GET /api/llm-providers：列出所有 provider 及状态，按 激活→可用→不可用 排序 */
 export async function GET() {
   const config = await readConfig();
   const list = LLM_PROVIDERS.map((p) => {
@@ -47,6 +47,16 @@ export async function GET() {
       lastError: status.lastError,
     };
   });
+
+  // 排序：激活的 → 可用的(working=true) → 不可用的(working=false/null)
+  // 同组内保持 LLM_PROVIDERS 声明顺序
+  const rank = (p: (typeof list)[number]) => {
+    if (config.activeProvider === p.id) return 0;
+    if (p.working === true) return 1;
+    return 2;
+  };
+  list.sort((a, b) => rank(a) - rank(b));
+
   return NextResponse.json({
     providers: list,
     activeProvider: config.activeProvider,
