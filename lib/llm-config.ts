@@ -88,7 +88,7 @@ function readEnvKeys(): Record<string, string> {
     const v = process.env[alias];
     if (v && v.trim() && !out[providerId]) out[providerId] = v.trim();
   }
-  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() || process.env.LLM_API_KEY_OPENROUTER_FREE?.trim();
   if (openRouterKey) {
     for (const id of OPENROUTER_PROVIDER_IDS) {
       if (!out[id]) out[id] = openRouterKey;
