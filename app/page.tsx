@@ -1301,7 +1301,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 {testingAll ? "测试中..." : "测试所有已启用提供商"}
               </button>
               <span className="text-xs text-zinc-500">
-                服务端每 6 小时自动检查一次（结果持久化到数据库或本地）
+                服务端每 24 小时自动检查一次（结果持久化到数据库或本地）
               </span>
             </div>
 
