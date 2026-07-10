@@ -415,17 +415,20 @@ export async function testProvider(
   if (provider.needsKey && !status.apiKey) {
     return { ok: false, error: "未配置 API Key" };
   }
+  if (!provider.model) {
+    return { ok: false, error: "模型未初始化，请先刷新模型列表" };
+  }
 
+  let result: { ok: boolean; error?: string };
   try {
-    // 推理模型（Gemini 2.5 / DeepSeek R1 / Nemotron / GPT-OSS）会先思考再回答，
-    // 测试时需要更大 maxTokens，否则思考阶段就耗尽 token 导致无最终输出。
-    // openrouter/free 会自动路由到未知模型，按推理模型处理以防 token 不足。
     const modelLower = provider.model.toLowerCase();
     const isReasoningModel =
       modelLower.includes("gemini-2.5") ||
+      modelLower.includes("gemini-3") ||
       modelLower.includes("deepseek-r1") ||
       modelLower.includes("nemotron") ||
       modelLower.includes("gpt-oss") ||
+      modelLower.includes("hy3") ||
       modelLower === "openrouter/free";
     const text = await callProvider(
       provider,
@@ -433,13 +436,22 @@ export async function testProvider(
       [{ role: "user", content: "请回复 OK。" }],
       { maxTokens: isReasoningModel ? 1024 : 64 }
     );
-    return { ok: text.length > 0, error: undefined };
+    result = { ok: text.length > 0, error: undefined };
   } catch (err) {
-    return {
+    result = {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     };
   }
+
+  // 写回测试结果到配置
+  status.working = result.ok;
+  status.lastTested = Date.now();
+  status.lastError = result.error ?? null;
+  status.cooldownUntil = null;
+  await writeConfig(config);
+
+  return result;
 }
 
 /**
@@ -457,11 +469,15 @@ export async function refreshProviderStatuses(): Promise<{
     await refreshGroqModels();
   } catch {
   }
+  try {
+    await refreshGeminiModels();
+  } catch {
+  }
 
-  const config = await readConfig();
   const results: Array<{ id: string; name: string; ok: boolean; error?: string }> = [];
 
   for (const provider of LLM_PROVIDERS) {
+    const config = await readConfig();
     const status = config.providers[provider.id];
     if (!status || !status.enabled) continue;
     if (provider.needsKey && !status.apiKey) {
@@ -474,13 +490,7 @@ export async function refreshProviderStatuses(): Promise<{
       continue;
     }
 
-    status.model = provider.model;
-
     const result = await testProvider(provider.id);
-    status.working = result.ok;
-    status.lastTested = Date.now();
-    status.lastError = result.error ?? null;
-    status.cooldownUntil = null;
     results.push({
       id: provider.id,
       name: provider.name,
@@ -489,7 +499,6 @@ export async function refreshProviderStatuses(): Promise<{
     });
   }
 
-  await writeConfig(config);
   return { results };
 }
 
