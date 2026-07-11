@@ -680,7 +680,7 @@ async function fetchSectorStocksFromSA(
     sectorRankCache = {
       sector,
       data: rows,
-      expires: Date.now() + 2 * 60 * 60 * 1000, // 2 小时
+      expires: Date.now() + 6 * 60 * 60 * 1000, // 6 小时
     };
     return rows;
   } catch {
@@ -1736,9 +1736,10 @@ async function fetchStockAnalysisMetrics(
 
   const warnings: string[] = [];
 
-  const [incomeHtml, ratiosHtml] = await Promise.all([
+  const [incomeHtml, ratiosHtml, overviewHtml] = await Promise.all([
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/`),
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/ratios/`),
+    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/`),
   ]);
 
   if (!incomeHtml && !ratiosHtml) {
@@ -1882,6 +1883,50 @@ async function fetchStockAnalysisMetrics(
       result.dataSource = "yahoo"; // 复用现有枚举值，避免修改接口
     } else {
       warnings.push("stockanalysis.com Ratios 数据解析失败。");
+    }
+  }
+
+  // ============================================================
+  // Overview 主页：当前价格 + 公司名 + 行业
+  // ============================================================
+  if (overviewHtml) {
+    // 当前价格：从 priceData JSON 提取
+    const priceMatch = overviewHtml.match(/priceData:\{([^}]+)\}/);
+    if (priceMatch) {
+      const m = priceMatch[1];
+      const price = m.match(/price:(\d+(?:\.\d+)?)/)?.[1];
+      if (price) result.currentPrice = parseFloat(price);
+    }
+    // 备选：从 HTML 中提取价格 "$123.45"
+    if (result.currentPrice == null) {
+      const priceTagMatch = overviewHtml.match(/"price">\$([\d.]+)</);
+      if (priceTagMatch) result.currentPrice = parseFloat(priceTagMatch[1]);
+    }
+
+    // 公司名
+    const nameMatch = overviewHtml.match(/<h1[^>]*>([^<]+)<\/h1>/);
+    if (nameMatch) {
+      const name = nameMatch[1].trim();
+      if (name && !name.toUpperCase().includes(upper)) {
+        result.name = name;
+      }
+    }
+
+    // 行业：从 sveltekit:data 或页面元数据提取
+    const industryMatch = overviewHtml.match(/"industry":"([^"]+)"/);
+    if (industryMatch) {
+      result.industry = industryMatch[1];
+    }
+    if (result.industry == null) {
+      const sectorMatch = overviewHtml.match(/"sector":"([^"]+)"/);
+      if (sectorMatch) {
+        result.industry = sectorMatch[1];
+      }
+    }
+    // 备选：从页面描述中提取
+    if (result.industry == null) {
+      const indMatch = overviewHtml.match(/Industry:<\/[^>]*>\s*<[^>]*>([^<]+)</);
+      if (indMatch) result.industry = indMatch[1].trim();
     }
   }
 
@@ -2797,6 +2842,26 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // v7 兜底失败不影响主结果
+    }
+  }
+
+  // 补充当前价格（若缺失）：用 Yahoo v7/quote（无需 crumb，稳定性好）
+  if (result.currentPrice == null) {
+    try {
+      const v7 = await fetchV7Quote(upper);
+      if (v7) {
+        const price = num(v7.regularMarketPrice);
+        if (price != null && price > 0) {
+          result.currentPrice = price;
+          result.warnings.push("当前价格由 Yahoo v7/quote 补充。");
+          // 价格补全后重新计算目标价上涨空间
+          if (result.targetMeanPrice != null) {
+            result.targetUpside = result.targetMeanPrice / price - 1;
+          }
+        }
+      }
+    } catch {
+      // 补充失败不影响主结果
     }
   }
 
