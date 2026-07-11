@@ -219,6 +219,50 @@ function computeOne(
         : pe != null
           ? `${peLabel} ${pe.toFixed(2)} / 行业 —`
           : "—";
+  } else if (strategy.metricField === "roe") {
+    // ROE：同时显示当前值和近5年平均值
+    const current = metrics.roe;
+    const avg5y = metrics.returnOnEquity5yAvg;
+    if (current != null && avg5y != null) {
+      displayValue = `当前 ${(current * 100).toFixed(2)}% / 5年均值 ${(avg5y * 100).toFixed(2)}%`;
+    } else if (current != null) {
+      displayValue = `当前 ${(current * 100).toFixed(2)}%`;
+    } else if (avg5y != null) {
+      displayValue = `5年均值 ${(avg5y * 100).toFixed(2)}%`;
+    }
+  } else if (strategy.metricField === "returnOnEquity5yAvg") {
+    // 5年平均 ROE：同时显示均值和当前值
+    const avg5y = metrics.returnOnEquity5yAvg;
+    const current = metrics.roe;
+    if (avg5y != null && current != null) {
+      displayValue = `5年均值 ${(avg5y * 100).toFixed(2)}% / 当前 ${(current * 100).toFixed(2)}%`;
+    } else if (avg5y != null) {
+      displayValue = `5年均值 ${(avg5y * 100).toFixed(2)}%`;
+    } else if (current != null) {
+      displayValue = `当前 ${(current * 100).toFixed(2)}%`;
+    }
+  } else if (strategy.metricField === "revenueGrowthYoY") {
+    // 营收增长：同时显示 TTM 和上财年
+    const ttm = metrics.quarterlyRevenueGrowth;
+    const fy = metrics.revenueGrowthYoY;
+    if (ttm != null && fy != null) {
+      displayValue = `TTM ${(ttm * 100).toFixed(2)}% / 上财年 ${(fy * 100).toFixed(2)}%`;
+    } else if (ttm != null) {
+      displayValue = `TTM ${(ttm * 100).toFixed(2)}%`;
+    } else if (fy != null) {
+      displayValue = `上财年 ${(fy * 100).toFixed(2)}%`;
+    }
+  } else if (strategy.metricField === "quarterlyRevenueGrowth") {
+    // 季度营收增长：同时显示 TTM 和上财年
+    const ttm = metrics.quarterlyRevenueGrowth;
+    const fy = metrics.revenueGrowthYoY;
+    if (ttm != null && fy != null) {
+      displayValue = `TTM ${(ttm * 100).toFixed(2)}% / 上财年 ${(fy * 100).toFixed(2)}%`;
+    } else if (ttm != null) {
+      displayValue = `TTM ${(ttm * 100).toFixed(2)}%`;
+    } else if (fy != null) {
+      displayValue = `上财年 ${(fy * 100).toFixed(2)}%`;
+    }
   } else if (strategy.metricField === "targetUpside") {
     const currentPrice = metrics.currentPrice;
     const targetMean = metrics.targetMeanPrice;

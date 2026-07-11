@@ -1443,6 +1443,299 @@ async function fetchStockAnalysisTargets(
   }
 }
 
+// ============================================================
+// stockanalysis.com 财务指标爬取（核心数据源）
+//
+// 从 SvelteKit 内嵌的 financialData JSON 对象中提取 5 项核心指标：
+//   1. 营收年增长 (revenueGrowthYoY)  — /financials/ 页面
+//   2. PE (trailingPE)                 — /financials/ratios/ 页面
+//   3. PEG (pegRatio)                  — /financials/ratios/ 页面
+//   4. ROE + 近5年平均 ROE             — /financials/ratios/ 页面
+//   5. 速动比率 (quickRatio)           — /financials/ratios/ 页面
+//
+// 数据结构：每个字段是数组，[0]=TTM/Current，[1..5]=最近5个完整财年
+// 百分比类指标已为小数（0.463 = 46.3%），无需额外换算
+// ============================================================
+
+/**
+ * 从 HTML 中提取 SvelteKit 内嵌的 financialData JS 对象字面量。
+ *
+ * 注意：这不是标准 JSON（key 无引号，支持 void/undefined），
+ * 必须用 new Function() 解析，不能用 JSON.parse()。
+ */
+function extractFinancialData(html: string): Record<string, unknown> | null {
+  const marker = "financialData:{";
+  const idx = html.indexOf(marker);
+  if (idx < 0) return null;
+
+  // 括号匹配找到完整对象
+  let depth = 0;
+  const start = idx + "financialData:".length; // 指向 '{'
+  let end = -1;
+  for (let i = start; i < html.length; i++) {
+    if (html[i] === "{") depth++;
+    else if (html[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+  if (end < 0) return null;
+
+  const jsLiteral = html.substring(start, end);
+  try {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(`return (${jsLiteral})`);
+    return fn() as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** 安全取数组指定位置的数值 */
+function arrNum(arr: unknown, idx: number): number | null {
+  if (!Array.isArray(arr)) return null;
+  const v = arr[idx];
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 安全取数组指定位置的数值数组（用于多年度均值计算） */
+function arrNumList(arr: unknown): number[] {
+  if (!Array.isArray(arr)) return [];
+  const out: number[] = [];
+  for (const v of arr) {
+    if (v == null) continue;
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n)) out.push(n);
+  }
+  return out;
+}
+
+/**
+ * stockanalysis.com 财务指标缓存（按 ticker 缓存，1 小时有效）
+ *
+ * 财务指标（PE/PEG/ROE/速动比率等）季度才更新一次，
+ * 1 小时缓存既能避免频繁爬取，又能保证数据相对新鲜。
+ */
+interface SACacheEntry {
+  ticker: string;
+  result: { metrics: Partial<FinancialMetrics>; warnings: string[] };
+  expires: number;
+}
+const SA_CACHE_TTL = 60 * 60 * 1000; // 1 小时
+let saMetricsCache: Map<string, SACacheEntry> = new Map();
+
+/**
+ * 从 stockanalysis.com 爬取 5 项核心财务指标
+ *
+ * 页面：
+ *   - /stocks/{ticker}/financials/         (营收 + 增长)
+ *   - /stocks/{ticker}/financials/ratios/   (PE/PEG/ROE/速动比率)
+ *
+ * 返回 Partial<FinancialMetrics>，仅包含成功爬取的字段，调用方负责合并。
+ * 结果按 ticker 缓存 1 小时，避免频繁爬取。
+ */
+async function fetchStockAnalysisMetrics(
+  ticker: string
+): Promise<{
+  metrics: Partial<FinancialMetrics>;
+  warnings: string[];
+} | null> {
+  const upper = ticker.toUpperCase();
+  const lower = ticker.toLowerCase();
+
+  // 缓存命中检查
+  const cached = saMetricsCache.get(upper);
+  if (cached && cached.expires > Date.now()) {
+    return cached.result;
+  }
+
+  const warnings: string[] = [];
+
+  const [incomeHtml, ratiosHtml] = await Promise.all([
+    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/`),
+    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/ratios/`),
+  ]);
+
+  if (!incomeHtml && !ratiosHtml) {
+    return null;
+  }
+
+  const result: Partial<FinancialMetrics> = {
+    ticker: upper,
+    dataSource: "fallback",
+    fetchedAt: new Date().toISOString(),
+  };
+
+  // ============================================================
+  // Income Statement 页面：营收 + 增长
+  // ============================================================
+  if (incomeHtml) {
+    const data = extractFinancialData(incomeHtml);
+    if (data) {
+      const revenue = data.revenue as unknown;
+      const revenueGrowth = data.revenueGrowth as unknown;
+      const fiscalYear = data.fiscalYear as unknown;
+      const grossMargin = data.grossMargin as unknown;
+      const profitMargin = data.profitMargin as unknown;
+
+      // revenueGrowthYoY：优先用最近完整财年 [1]，没有则用 TTM [0]
+      const yoy = arrNum(revenueGrowth, 1) ?? arrNum(revenueGrowth, 0);
+      if (yoy != null) {
+        result.revenueGrowthYoY = yoy;
+      }
+      result.quarterlyRevenueGrowth = arrNum(revenueGrowth, 0);
+
+      // 历史营收（stockanalysis.com 数据是降序：TTM, FY2025, FY2024...
+      // 后处理口径统一逻辑假设升序，这里反转为升序：最旧在前，最新在后）
+      const revList = arrNumList(revenue);
+      const yearList = Array.isArray(fiscalYear)
+        ? fiscalYear.map((y) => parseInt(String(y), 10))
+        : [];
+      if (revList.length > 0) {
+        const history = revList
+          .map((rev, i) => ({
+            year: Number.isFinite(yearList[i]) ? yearList[i] : NaN,
+            revenue: rev,
+          }))
+          // 跳过 TTM（year=NaN 或第一个），只保留完整财年
+          .filter((h) => Number.isFinite(h.year))
+          .sort((a, b) => a.year - b.year);
+        result.revenueHistory = history;
+        result.totalRevenue = arrNum(revenue, 1) ?? arrNum(revenue, 0);
+      }
+
+      // 利润率（小数形式）
+      const gm = arrNum(grossMargin, 1) ?? arrNum(grossMargin, 0);
+      if (gm != null) result.grossMargin = gm;
+      const pm = arrNum(profitMargin, 1) ?? arrNum(profitMargin, 0);
+      if (pm != null) result.profitMargin = pm;
+    } else {
+      warnings.push("stockanalysis.com Income Statement 数据解析失败。");
+    }
+  }
+
+  // ============================================================
+  // Ratios 页面：PE / PEG / ROE / 速动比率
+  // ============================================================
+  if (ratiosHtml) {
+    const data = extractFinancialData(ratiosHtml);
+    if (data) {
+      const pe = data.pe as unknown;
+      const peForward = data.peForward as unknown;
+      const pegRatio = data.pegRatio as unknown;
+      const quickRatio = data.quickRatio as unknown;
+      const currentRatio = data.currentratio as unknown;
+      const roe = data.roe as unknown;
+      const fiscalYear = data.fiscalYear as unknown;
+      const marketCap = data.marketCap as unknown;
+
+      // PE：优先 TTM [0]，没有用最近财年 [1]
+      result.trailingPE = arrNum(pe, 0) ?? arrNum(pe, 1);
+      result.forwardPE = arrNum(peForward, 0) ?? arrNum(peForward, 1);
+
+      // PEG
+      result.pegRatio = arrNum(pegRatio, 0) ?? arrNum(pegRatio, 1);
+
+      // 速动比率
+      result.quickRatio = arrNum(quickRatio, 0) ?? arrNum(quickRatio, 1);
+      result.currentRatio = arrNum(currentRatio, 0) ?? arrNum(currentRatio, 1);
+
+      // ROE：当前 [0]，5年平均 [1..5]
+      const currentRoe = arrNum(roe, 0) ?? arrNum(roe, 1);
+      if (currentRoe != null) {
+        result.roe = currentRoe;
+      }
+
+      // 近 5 年平均 ROE：取财年 [1..5]（跳过 TTM [0]）
+      const roeList: number[] = [];
+      if (Array.isArray(roe)) {
+        for (let i = 1; i < Math.min(roe.length, 6); i++) {
+          const v = arrNum(roe, i);
+          if (v != null) roeList.push(v);
+        }
+      }
+      if (roeList.length >= 5) {
+        const last5 = roeList.slice(-5);
+        result.returnOnEquity5yAvg =
+          last5.reduce((a, b) => a + b, 0) / last5.length;
+      } else if (roeList.length > 0) {
+        result.returnOnEquity5yAvg =
+          roeList.reduce((a, b) => a + b, 0) / roeList.length;
+        warnings.push(
+          `stockanalysis.com 仅提供 ${roeList.length} 年 ROE 数据，平均值仅供参考。`
+        );
+      } else if (currentRoe != null) {
+        result.returnOnEquity5yAvg = currentRoe;
+        warnings.push("无法获取历史 ROE，使用当前 ROE 作为近似。");
+      }
+
+      // 构建 roeHistory
+      if (Array.isArray(roe) && Array.isArray(fiscalYear)) {
+        const roeHistory: Array<{ year: number; roe: number | null }> = [];
+        for (let i = 0; i < roe.length; i++) {
+          const year = parseInt(String(fiscalYear[i]), 10);
+          if (!Number.isFinite(year)) continue;
+          // 跳过 TTM [0]，只保留完整财年
+          if (i === 0) continue;
+          roeHistory.push({ year, roe: arrNum(roe, i) });
+        }
+        roeHistory.sort((a, b) => a.year - b.year);
+        if (roeHistory.length > 0) {
+          result.roeHistory = roeHistory;
+        }
+      }
+
+      // 市值
+      result.marketCap = arrNum(marketCap, 0) ?? arrNum(marketCap, 1);
+
+      // 标记数据源
+      result.dataSource = "yahoo"; // 复用现有枚举值，避免修改接口
+    } else {
+      warnings.push("stockanalysis.com Ratios 数据解析失败。");
+    }
+  }
+
+  // 至少有一个核心指标才算成功
+  const hasCore =
+    result.trailingPE != null ||
+    result.revenueGrowthYoY != null ||
+    result.roe != null ||
+    result.quickRatio != null ||
+    result.pegRatio != null;
+  if (!hasCore) {
+    return null;
+  }
+
+  const finalResult = { metrics: result, warnings };
+  // 写入缓存（1 小时有效）
+  saMetricsCache.set(upper, {
+    ticker: upper,
+    result: finalResult,
+    expires: Date.now() + SA_CACHE_TTL,
+  });
+  return finalResult;
+}
+
+/** 通用：获取 stockanalysis.com 页面 HTML */
+async function fetchSAPage(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 从 Yahoo Finance RSS 获取公司新闻（无需 API Key / crumb 认证）
  * 端点：https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}
@@ -2483,6 +2776,60 @@ async function fetchFinancialMetricsInternal(
 ): Promise<FinancialMetrics> {
   const upper = ticker.trim().toUpperCase();
   const warnings: string[] = [];
+
+  // ============================================================
+  // 0. 优先 stockanalysis.com（核心 5 项指标数据源）
+  // 从 SvelteKit 内嵌 JSON 爬取，数据来自 Fiscal.ai（SEC 文件）
+  // 成功则直接返回，跳过 Tiingo/Finnhub/FMP/AV 多源降级链
+  // ============================================================
+  try {
+    const saResult = await fetchStockAnalysisMetrics(upper);
+    if (saResult) {
+      const m = saResult.metrics;
+      // stockanalysis.com 不提供：currentPrice, targetPrice, name, industry 等
+      // 这些由 fetchFinancialMetrics 后处理阶段补充
+      const result: FinancialMetrics = {
+        ticker: upper,
+        name: (m.name as string | null) ?? null,
+        trailingPE: m.trailingPE ?? null,
+        forwardPE: m.forwardPE ?? null,
+        pegRatio: m.pegRatio ?? null,
+        industry: m.industry ?? null,
+        industryPE: m.industryPE ?? null,
+        currentPrice: m.currentPrice ?? null,
+        targetMeanPrice: null,
+        targetHighPrice: null,
+        targetLowPrice: null,
+        targetMedianPrice: null,
+        numberOfAnalysts: null,
+        recommendationMean: null,
+        targetUpside: null,
+        revenueGrowthYoY: m.revenueGrowthYoY ?? null,
+        quarterlyRevenueGrowth: m.quarterlyRevenueGrowth ?? null,
+        roe: m.roe ?? null,
+        returnOnEquity5yAvg: m.returnOnEquity5yAvg ?? null,
+        roeHistory: m.roeHistory ?? [],
+        quickRatio: m.quickRatio ?? null,
+        currentRatio: m.currentRatio ?? null,
+        grossMargin: m.grossMargin ?? null,
+        profitMargin: m.profitMargin ?? null,
+        totalRevenue: m.totalRevenue ?? null,
+        revenueHistory: m.revenueHistory ?? [],
+        marketCap: m.marketCap ?? null,
+        currency: m.currency ?? null,
+        fetchedAt: new Date().toISOString(),
+        dataSource: "yahoo",
+        warnings: [
+          "核心财务指标（PE/PEG/ROE/速动比率/营收增长）由 stockanalysis.com (Fiscal.ai) 提供。",
+          ...saResult.warnings,
+        ],
+      };
+      return result;
+    }
+  } catch {
+    // stockanalysis.com 爬取失败，降级到原有数据源链
+  }
+  warnings.push("stockanalysis.com 爬取失败，降级到多数据源模式。");
 
   const [fmpKey, finnhubKey, tiingoKey, avKey] = await Promise.all([
     getFmpApiKey(),
