@@ -1313,21 +1313,33 @@ async function fetchStockAnalysisTargets(
     }
 
     // ============================================================
-    // 策略 2：从内嵌 JSON targets:{...} 提取（备选，可能是缓存数据）
-    // 格式：targets:{low:40,high:47,count:5,median:45,average:44.2,updated:"..."}
+    // 策略 2：从 SvelteKit 内嵌 JSON 提取（新格式）
+    // priceTargets:{source:"spg",avg:113.15,median:115,low:80,high:151.4,numPriceTargets:44}
+    // currentRatings:{source:"spg",consensus:"Buy",score:6.6,count:50,strongBuy:29,...}
     // ============================================================
-    const targetsMatch = html.match(/targets:\{([^}]+)\}/);
-    if (targetsMatch) {
-      const low = targetsMatch[1].match(/low:(\d+(?:\.\d+)?)/)?.[1];
-      const high = targetsMatch[1].match(/high:(\d+(?:\.\d+)?)/)?.[1];
-      const median = targetsMatch[1].match(/median:(\d+(?:\.\d+)?)/)?.[1];
-      const average = targetsMatch[1].match(/average:(\d+(?:\.\d+)?)/)?.[1];
-      const count = targetsMatch[1].match(/count:(\d+)/)?.[1];
+    const priceTargetsMatch = html.match(/priceTargets:\{([^}]+)\}/);
+    if (priceTargetsMatch) {
+      const m = priceTargetsMatch[1];
+      const low = m.match(/low:(\d+(?:\.\d+)?)/)?.[1];
+      const high = m.match(/high:(\d+(?:\.\d+)?)/)?.[1];
+      const median = m.match(/median:(\d+(?:\.\d+)?)/)?.[1];
+      const avg = m.match(/avg:(\d+(?:\.\d+)?)/)?.[1];
+      const numTargets = m.match(/numPriceTargets:(\d+)/)?.[1];
       if (targetLow == null && low) targetLow = parseFloat(low);
       if (targetHigh == null && high) targetHigh = parseFloat(high);
       if (targetMedian == null && median) targetMedian = parseFloat(median);
-      if (targetAverage == null && average) targetAverage = parseFloat(average);
-      if (count) numberOfAnalysts = parseInt(count, 10);
+      if (targetAverage == null && avg) targetAverage = parseFloat(avg);
+      if (numberOfAnalysts == null && numTargets) numberOfAnalysts = parseInt(numTargets, 10);
+    }
+
+    // currentRatings 提取 consensus 和分析师数量
+    const currentRatingsMatch = html.match(/currentRatings:\{([^}]+)\}/);
+    if (currentRatingsMatch) {
+      const m = currentRatingsMatch[1];
+      const cons = m.match(/consensus:"([^"]+)"/)?.[1];
+      const count = m.match(/count:(\d+)/)?.[1];
+      if (cons) consensus = cons;
+      if (numberOfAnalysts == null && count) numberOfAnalysts = parseInt(count, 10);
     }
 
     // ============================================================
@@ -1580,6 +1592,7 @@ async function fetchStockAnalysisMetrics(
       const revenue = data.revenue as unknown;
       const revenueGrowth = data.revenueGrowth as unknown;
       const fiscalYear = data.fiscalYear as unknown;
+      const datekey = data.datekey as unknown;
       const grossMargin = data.grossMargin as unknown;
       const profitMargin = data.profitMargin as unknown;
 
@@ -1591,19 +1604,23 @@ async function fetchStockAnalysisMetrics(
       result.quarterlyRevenueGrowth = arrNum(revenueGrowth, 0);
 
       // 历史营收（stockanalysis.com 数据是降序：TTM, FY2025, FY2024...
+      // 用 datekey 过滤 TTM 行（datekey="TTM"），只保留完整财年
       // 后处理口径统一逻辑假设升序，这里反转为升序：最旧在前，最新在后）
       const revList = arrNumList(revenue);
       const yearList = Array.isArray(fiscalYear)
         ? fiscalYear.map((y) => parseInt(String(y), 10))
         : [];
+      const dkList = Array.isArray(datekey) ? datekey : [];
       if (revList.length > 0) {
         const history = revList
           .map((rev, i) => ({
             year: Number.isFinite(yearList[i]) ? yearList[i] : NaN,
             revenue: rev,
+            isTTM: String(dkList[i] ?? "").toUpperCase() === "TTM",
           }))
-          // 跳过 TTM（year=NaN 或第一个），只保留完整财年
-          .filter((h) => Number.isFinite(h.year))
+          // 跳过 TTM 行，只保留完整财年
+          .filter((h) => !h.isTTM && Number.isFinite(h.year))
+          .map(({ year, revenue }) => ({ year, revenue }))
           .sort((a, b) => a.year - b.year);
         result.revenueHistory = history;
         result.totalRevenue = arrNum(revenue, 1) ?? arrNum(revenue, 0);
