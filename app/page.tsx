@@ -517,10 +517,54 @@ function AnalysisModal({
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [forceCount, setForceCount] = useState(0); // 变化时触发重新分析
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
+  const fetchCounterRef = useRef(0);
+
+  const fetchAnalysis = useCallback(async (force = false) => {
+    const myId = ++fetchCounterRef.current;
+    const isRefresh = force && analysis != null;
+
+    if (isRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setLoading(true);
+      setAnalysis(null);
+    }
+    setError(null);
+
+    try {
+      const url = `/api/analyze?ticker=${encodeURIComponent(item.ticker)}${force ? "&force=true" : ""}`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      }
+      const json: StockAnalysis = await res.json();
+      if (myId === fetchCounterRef.current) {
+        setAnalysis(json);
+      }
+    } catch (err) {
+      if (myId === fetchCounterRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (myId === fetchCounterRef.current) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
+    }
+  }, [item.ticker, analysis]);
+
+  useEffect(() => {
+    fetchAnalysis(false);
+  }, [item.ticker]);
+
+  const handleReanalyze = () => {
+    if (isRefreshing || loading) return;
+    fetchAnalysis(true);
+  };
 
   const handleShare = async () => {
     if (!shareRef.current || !analysis) return;
@@ -566,49 +610,6 @@ function AnalysisModal({
     } finally {
       setSharing(false);
     }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    const isFirstLoad = forceCount === 0 && !analysis;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isFirstLoad) {
-      setLoading(true);
-      setError(null);
-      setAnalysis(null);
-    } else {
-      setIsRefreshing(true);
-      setError(null);
-    }
-    (async () => {
-      try {
-        const force = forceCount > 0;
-        const url = `/api/analyze?ticker=${encodeURIComponent(item.ticker)}${force ? "&force=true" : ""}`;
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) {
-          const errText = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
-        }
-        const json: StockAnalysis = await res.json();
-        if (!cancelled) setAnalysis(json);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setIsRefreshing(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [item.ticker, forceCount]);
-
-  const handleReanalyze = () => {
-    setForceCount((n) => n + 1);
   };
 
   return (
