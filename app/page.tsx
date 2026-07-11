@@ -363,7 +363,7 @@ function FavoriteCard({
   const isStarred = !!item.starred;
   return (
     <div
-      className={`group relative flex w-full flex-col gap-3 rounded-xl border px-4 py-3 text-left transition-all hover:bg-zinc-900 md:flex-row md:items-center ${
+      className={`group relative flex w-full flex-col gap-3 rounded-xl border p-4 text-left transition-all hover:bg-zinc-900 md:flex-row md:items-center md:gap-4 ${
         isPinned
           ? "border-orange-500/60 bg-orange-500/5 shadow-[0_0_0_1px_rgba(249,115,22,0.15)]"
           : isStarred
@@ -371,54 +371,59 @@ function FavoriteCard({
           : "border-zinc-800 bg-zinc-900/60 hover:border-orange-500/50"
       }`}
     >
-      <div className="flex items-center gap-3 min-w-0 md:flex-1">
+      {/* 左侧：星标 + 股票信息 */}
+      <div className="flex items-start gap-3 min-w-0 md:flex-1">
         <button
           type="button"
           onClick={() => onToggleStar(item.ticker, !isStarred)}
-          className={`inline-flex shrink-0 items-center justify-center w-7 h-7 rounded-full text-xs font-bold transition-all ${
+          className={`inline-flex shrink-0 items-center justify-center w-9 h-9 rounded-full text-sm font-bold transition-all ${
             isStarred
               ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
               : "bg-zinc-800 text-zinc-500 hover:text-yellow-400"
           }`}
           title={isStarred ? "取消重点关注" : "设为重点关注"}
         >
-          <StarIcon filled={isStarred} className="h-4 w-4" />
+          <StarIcon filled={isStarred} className="h-5 w-5" />
         </button>
-        <a
-          href={redditUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex-1 min-w-0 focus:outline-none"
-        >
-          <div className="flex items-baseline gap-2">
-            <span className="text-lg font-bold text-white tracking-wide">
-              {item.ticker}
-            </span>
-            {isPinned && (
-              <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
-                置顶
+        <div className="flex-1 min-w-0">
+          <a
+            href={redditUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block focus:outline-none"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-lg font-bold text-white tracking-wide">
+                {item.ticker}
               </span>
-            )}
-            {isStarred && (
-              <span className="inline-flex items-center rounded bg-yellow-500/20 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
-                重点关注
-              </span>
-            )}
+              {isPinned && (
+                <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
+                  置顶
+                </span>
+              )}
+              {isStarred && (
+                <span className="inline-flex items-center rounded bg-yellow-500/20 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
+                  重点关注
+                </span>
+              )}
+            </div>
             {item.name && (
-              <span className="text-xs text-zinc-400">{item.name}</span>
+              <div className="mt-0.5 text-sm text-zinc-400 truncate">{item.name}</div>
             )}
-          </div>
-          <div className="mt-1 text-xs text-zinc-500">
-            收藏于 {new Date(item.addedAt).toLocaleString("zh-CN")}
-          </div>
-        </a>
+            <div className="mt-1 text-xs text-zinc-500">
+              收藏于 {new Date(item.addedAt).toLocaleDateString("zh-CN")}
+            </div>
+          </a>
+        </div>
       </div>
-      <div className="flex items-center gap-1 flex-wrap justify-end">
+
+      {/* 右侧：操作按钮 */}
+      <div className="flex flex-wrap gap-1.5 md:justify-end md:flex-nowrap">
         <a
           href={futuUrl(item.ticker)}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+          className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
           title="在富途牛牛查看"
         >
           富途
@@ -427,7 +432,7 @@ function FavoriteCard({
           href={tradingViewUrl(item.ticker)}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+          className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
           title="在 TradingView 查看"
         >
           TradingView
@@ -435,7 +440,7 @@ function FavoriteCard({
         <button
           type="button"
           onClick={() => onTogglePin(item.ticker, !isPinned)}
-          className={`rounded-md border px-2 py-1 text-xs transition-all ${
+          className={`shrink-0 rounded-md border px-3 py-1.5 text-xs transition-all ${
             isPinned
               ? "border-orange-500/50 text-orange-400 hover:bg-orange-500/10"
               : "border-zinc-700 text-zinc-400 hover:border-orange-500/50 hover:text-orange-400"
@@ -447,7 +452,7 @@ function FavoriteCard({
         <button
           type="button"
           onClick={() => onAnalyze(item)}
-          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+          className="shrink-0 rounded-md border border-orange-500/40 bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/20"
           title="调用大模型分析（5项指标）"
         >
           分析
@@ -455,7 +460,7 @@ function FavoriteCard({
         <button
           type="button"
           onClick={() => onRemove(item.ticker)}
-          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-all hover:border-red-500/50 hover:text-red-400"
+          className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 transition-all hover:border-red-500/50 hover:text-red-400"
           title="移除收藏"
         >
           移除
@@ -3366,7 +3371,7 @@ export default function Home() {
             </div>
 
             {favorites.length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
                 {favorites
                   .filter((item) =>
                     favFilter === "all" ? true :
