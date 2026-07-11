@@ -48,12 +48,13 @@ export async function GET() {
     };
   });
 
-  // 排序：激活的 → 可用的(working=true) → 不可用的(working=false/null)
+  // 排序：激活的 → 启用且可用(working=true) → 启用但未测试/不可用 → 禁用的
   // 同组内保持 LLM_PROVIDERS 声明顺序
   const rank = (p: (typeof list)[number]) => {
     if (config.activeProvider === p.id) return 0;
-    if (p.working === true) return 1;
-    return 2;
+    if (p.enabled && p.working === true) return 1;
+    if (p.enabled) return 2;
+    return 3;
   };
   list.sort((a, b) => rank(a) - rank(b));
 
