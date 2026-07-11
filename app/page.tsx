@@ -518,6 +518,7 @@ function AnalysisModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forceCount, setForceCount] = useState(0); // 变化时触发重新分析
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
 
@@ -569,10 +570,16 @@ function AnalysisModal({
 
   useEffect(() => {
     let cancelled = false;
+    const isFirstLoad = forceCount === 0 && !analysis;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    setError(null);
-    setAnalysis(null);
+    if (isFirstLoad) {
+      setLoading(true);
+      setError(null);
+      setAnalysis(null);
+    } else {
+      setIsRefreshing(true);
+      setError(null);
+    }
     (async () => {
       try {
         const force = forceCount > 0;
@@ -589,7 +596,10 @@ function AnalysisModal({
           setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setIsRefreshing(false);
+        }
       }
     })();
     return () => {
@@ -631,20 +641,20 @@ function AnalysisModal({
                 <span className="ml-2 text-sm text-zinc-400">{item.name}</span>
               )}
             </h3>
-            {analysis && !loading && analysis.llmNarrative && (
+            {analysis && !loading && (
               <button
                 type="button"
                 onClick={handleReanalyze}
-                disabled={loading}
+                disabled={isRefreshing}
                 data-share-ignore
                 className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-40"
-                title="重新调用大模型生成 AI 分析（财务数据已自动刷新）"
+                title={analysis.llmNarrative ? "重新调用大模型生成 AI 分析（财务数据已自动刷新）" : "调用大模型生成 AI 分析"}
               >
                 <span className="flex items-center gap-1">
-                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <svg viewBox="0 0 24 24" className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
                   </svg>
-                  重新生成 AI 分析
+                  {analysis.llmNarrative ? "重新生成 AI 分析" : "生成 AI 分析"}
                 </span>
               </button>
             )}
@@ -905,22 +915,27 @@ function AnalysisModal({
             </div>
 
             {/* LLM 叙述（完整内容：公司概览/指标判定/消息面分析/行业前景/总评） */}
-            {analysis.llmNarrative && (
+            {(analysis.llmNarrative || (isRefreshing && analysis)) && (
               <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
                 <div className="mb-2 flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-orange-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <svg viewBox="0 0 24 24" className={`h-4 w-4 text-orange-400 ${isRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={1.8}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
                   </svg>
                   <span className="text-xs font-medium text-orange-400">
                     大模型点评
                   </span>
-                  {analysis.llmProvider && (
+                  {isRefreshing ? (
+                    <span className="text-[10px] text-zinc-500">
+                      · 正在重新生成...
+                    </span>
+                  ) : analysis.llmProvider ? (
                     <span className="text-[10px] text-zinc-500">
                       · {analysis.llmProvider}
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <div className="llm-narrative text-sm leading-relaxed text-zinc-200">
+                {analysis.llmNarrative ? (
+                  <div className={`llm-narrative text-sm leading-relaxed text-zinc-200 ${isRefreshing ? "opacity-50" : ""}`}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -999,7 +1014,15 @@ function AnalysisModal({
                   >
                     {analysis.llmNarrative}
                   </ReactMarkdown>
-                </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 py-4 text-sm text-zinc-400">
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                    正在调用大模型生成分析，请稍候...
+                  </div>
+                )}
               </div>
             )}
 
