@@ -31,6 +31,8 @@ model AnalysisCache {
   industryRank String?  // JSON 字符串：行业百分位排名
   industry     String?
   sector       String?
+  news         String?  // JSON 字符串：新闻列表
+  fetchedAt    DateTime? // 实际数据抓取时间
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
