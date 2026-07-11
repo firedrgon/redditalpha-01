@@ -6,6 +6,7 @@ import {
   isFavorite,
   updateFavorite,
   setPinned,
+  setStarred,
   clearCachedAnalysisDB as clearCachedAnalysis,
 } from "@/lib/db";
 
@@ -54,6 +55,7 @@ interface PatchBody {
   note?: string;
   tags?: string[];
   pinned?: boolean; // 置顶 / 取消置顶
+  starred?: boolean; // 关注 / 取消关注
 }
 
 export async function PATCH(request: NextRequest) {
@@ -68,6 +70,19 @@ export async function PATCH(request: NextRequest) {
   if (typeof body.pinned === "boolean") {
     try {
       const fav = await setPinned(ticker, body.pinned);
+      return NextResponse.json({ favorite: fav });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 404 }
+      );
+    }
+  }
+
+  // 关注 / 取消关注走独立逻辑
+  if (typeof body.starred === "boolean") {
+    try {
+      const fav = await setStarred(ticker, body.starred);
       return NextResponse.json({ favorite: fav });
     } catch (err) {
       return NextResponse.json(

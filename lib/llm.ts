@@ -17,7 +17,6 @@ import {
   OPENROUTER_PROVIDER_IDS,
   GROQ_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
-  PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
 import { saveCachedModels, getCachedModels } from "./db/llm-model-cache";
 
@@ -122,149 +121,113 @@ export async function chatCompletion(
 ): Promise<LLMResponse> {
   const config = await readConfig();
 
-  // 候选 provider 顺序：
-  //   1. 用户指定的 activeProvider 最优先
-  //   2. 其余按 PREFERRED_ACTIVE_ORDER（配额+质量综合优先）排序
-  //   3. 不在 PREFERRED_ACTIVE_ORDER 中的（理论不应有）按声明顺序补在最后
-  const candidates: LLMProvider[] = [];
-  const active = config.activeProvider
+  // 只使用活跃模型，失败直接报错，不遍历其他模型
+  const provider = config.activeProvider
     ? LLM_PROVIDERS.find((p) => p.id === config.activeProvider)
     : null;
-  if (active) candidates.push(active);
-  for (const id of PREFERRED_ACTIVE_ORDER) {
-    if (candidates.find((c) => c.id === id)) continue;
-    const p = LLM_PROVIDERS.find((x) => x.id === id);
-    if (p) candidates.push(p);
+
+  if (!provider) {
+    throw new Error("未设置活跃 LLM 模型，请在 ⚙ 设置中选择一个模型。");
   }
-  for (const p of LLM_PROVIDERS) {
-    if (candidates.find((c) => c.id === p.id)) continue;
-    candidates.push(p);
+
+  const status = config.providers[provider.id];
+  if (!status) {
+    throw new Error(`活跃模型 ${provider.name} 配置缺失。`);
+  }
+  if (!status.enabled) {
+    throw new Error(`活跃模型 ${provider.name} 已禁用，请在 ⚙ 设置中启用。`);
+  }
+  if (provider.needsKey && !status.apiKey) {
+    throw new Error(`活跃模型 ${provider.name} 未配置 API Key。`);
+  }
+  if (!provider.model) {
+    throw new Error(`活跃模型 ${provider.name} 模型未初始化，请先刷新模型列表。`);
   }
 
   const now = Date.now();
-  let lastErr: Error | null = null;
-  let skippedCooldown = 0; // 因冷却跳过的 provider 数
-  let skippedNoKey = 0; // 因缺 Key 跳过的 provider 数
-  let skippedDisabled = 0; // 因 disabled / working=false 跳过的 provider 数
 
-  for (const provider of candidates) {
-    const status = config.providers[provider.id];
-    if (!status || !status.enabled) {
-      skippedDisabled++;
-      continue;
-    }
-    if (provider.needsKey && !status.apiKey) {
-      skippedNoKey++;
-      continue;
-    }
-    // 永久失败（401/403/404 等）：跳过
-    if (status.working === false) {
-      skippedDisabled++;
-      continue;
-    }
-    // 瞬时失败冷却中：跳过
-    if (status.cooldownUntil && status.cooldownUntil > now) {
-      skippedCooldown++;
-      continue;
-    }
-
-    try {
-      const text = await callProviderWithTimeout(provider, status.apiKey, messages, options);
-      status.working = true;
-      status.lastTested = now;
-      status.lastError = null;
-      status.cooldownUntil = null;
-      await writeConfig(config);
-
-      return {
-        text,
-        providerId: provider.id,
-        providerName: provider.name,
-        model: provider.model,
-      };
-    } catch (err) {
-      lastErr = err instanceof Error ? err : new Error(String(err));
-      status.lastTested = now;
-      status.lastError = lastErr.message;
-      const msg = lastErr.message;
-
-      if (isPermanentError(msg)) {
-        // 永久错误（Key 无效 / 模型不存在）：标记为不可用
-        status.working = false;
-        status.cooldownUntil = null;
-      } else if (isTransientError(msg)) {
-        // 瞬时错误（429 / 5xx / 超时 / 网络）：设置冷却，到期自动重试
-        status.working = null;
-        status.cooldownUntil = now + getCooldownMs(msg);
-        // OpenRouter 免费层共享每日配额：任一模型 429 时，给所有 OpenRouter
-        // 模型设置冷却，避免短时间内逐个尝试都 429 浪费时间。
-        if (
-          /429|rate.?limit/i.test(msg) &&
-          OPENROUTER_PROVIDER_IDS.includes(
-            provider.id as (typeof OPENROUTER_PROVIDER_IDS)[number]
-          )
-        ) {
-          for (const id of OPENROUTER_PROVIDER_IDS) {
-            if (id === provider.id) continue;
-            const s = config.providers[id];
-            if (s && s.enabled && s.apiKey) {
-              s.cooldownUntil = now + getCooldownMs(msg);
-              s.working = null;
-            }
-          }
-        }
-        // Groq 系列共享同一 API Key 的速率配额（30 req/min, 14400/天）：
-        // 任一 Groq 模型 429 时，联动冷却其他 Groq 模型，避免逐个尝试。
-        if (
-          /429|rate.?limit/i.test(msg) &&
-          GROQ_PROVIDER_IDS.includes(
-            provider.id as (typeof GROQ_PROVIDER_IDS)[number]
-          )
-        ) {
-          for (const id of GROQ_PROVIDER_IDS) {
-            if (id === provider.id) continue;
-            const s = config.providers[id];
-            if (s && s.enabled && s.apiKey) {
-              s.cooldownUntil = now + getCooldownMs(msg);
-              s.working = null;
-            }
-          }
-        }
-      } else {
-        // 未知错误：保守起见也走冷却（2 分钟），不永久标记
-        status.working = null;
-        status.cooldownUntil = now + 2 * 60 * 1000;
-      }
-      await writeConfig(config);
-    }
-  }
-
-  // 根据跳过原因生成更有帮助的错误消息
-  const parts: string[] = [];
-  if (lastErr) parts.push(`最后错误：${lastErr.message}`);
-  if (skippedCooldown > 0) {
-    parts.push(
-      `${skippedCooldown} 个 provider 因瞬时错误冷却中（429/超时等，将自动恢复）`
+  // 冷却中：直接报错，告知用户等待或切换
+  if (status.cooldownUntil && status.cooldownUntil > now) {
+    const remainSec = Math.ceil((status.cooldownUntil - now) / 1000);
+    throw new Error(
+      `活跃模型 ${provider.name} 冷却中（剩余 ${remainSec} 秒），请等待冷却结束后重试，或在 ⚙ 设置中切换其他模型。`
     );
   }
-  if (skippedNoKey > 0) {
-    parts.push(`${skippedNoKey} 个 provider 未配置 API Key`);
-  }
-  if (skippedDisabled > 0) {
-    parts.push(`${skippedDisabled} 个 provider 已禁用或永久不可用`);
+
+  // 永久失败：直接报错
+  if (status.working === false) {
+    throw new Error(
+      `活跃模型 ${provider.name} 不可用（${status.lastError ?? "未知错误"}），请在 ⚙ 设置中切换其他模型或重新测试。`
+    );
   }
 
-  // 给出针对性建议
-  let hint = "请在 LLM 设置中配置 API Key。";
-  if (lastErr && /429|rate.?limit/i.test(lastErr.message)) {
-    hint =
-      "免费层限流（OpenRouter 共享每日 50 次配额）。请在 ⚙ 设置中配置 Gemini 或 Groq 的免费 Key 作为主用，或等待冷却后重试。";
-  } else if (skippedCooldown > 0 && skippedNoKey > 0) {
-    hint =
-      "部分 provider 限流冷却中且未配置 Key。建议在 ⚙ 设置中配置 Gemini 或 Groq Key 作为备用。";
-  }
+  try {
+    const text = await callProviderWithTimeout(provider, status.apiKey, messages, options);
+    status.working = true;
+    status.lastTested = now;
+    status.lastError = null;
+    status.cooldownUntil = null;
+    await writeConfig(config);
 
-  throw new Error(`所有 LLM 提供商均不可用（${parts.join("；")}）。${hint}`);
+    return {
+      text,
+      providerId: provider.id,
+      providerName: provider.name,
+      model: provider.model,
+    };
+  } catch (err) {
+    const lastErr = err instanceof Error ? err : new Error(String(err));
+    status.lastTested = now;
+    status.lastError = lastErr.message;
+    const msg = lastErr.message;
+
+    if (isPermanentError(msg)) {
+      status.working = false;
+      status.cooldownUntil = null;
+    } else if (isTransientError(msg)) {
+      status.working = null;
+      status.cooldownUntil = now + getCooldownMs(msg);
+      // OpenRouter / Groq 系列共享配额：联动冷却同系列模型
+      if (
+        /429|rate.?limit/i.test(msg) &&
+        OPENROUTER_PROVIDER_IDS.includes(
+          provider.id as (typeof OPENROUTER_PROVIDER_IDS)[number]
+        )
+      ) {
+        for (const id of OPENROUTER_PROVIDER_IDS) {
+          if (id === provider.id) continue;
+          const s = config.providers[id];
+          if (s && s.enabled && s.apiKey) {
+            s.cooldownUntil = now + getCooldownMs(msg);
+            s.working = null;
+          }
+        }
+      }
+      if (
+        /429|rate.?limit/i.test(msg) &&
+        GROQ_PROVIDER_IDS.includes(
+          provider.id as (typeof GROQ_PROVIDER_IDS)[number]
+        )
+      ) {
+        for (const id of GROQ_PROVIDER_IDS) {
+          if (id === provider.id) continue;
+          const s = config.providers[id];
+          if (s && s.enabled && s.apiKey) {
+            s.cooldownUntil = now + getCooldownMs(msg);
+            s.working = null;
+          }
+        }
+      }
+    } else {
+      status.working = null;
+      status.cooldownUntil = now + 2 * 60 * 1000;
+    }
+    await writeConfig(config);
+
+    throw new Error(
+      `活跃模型 ${provider.name} 调用失败：${lastErr.message}。请在 ⚙ 设置中切换其他模型后重试。`
+    );
+  }
 }
 
 /** 单 provider 调用：根据协议分发 */

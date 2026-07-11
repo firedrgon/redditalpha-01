@@ -9,6 +9,7 @@ export interface Favorite {
   tags: string[];
   pinned: boolean;
   pinnedAt: number | null;
+  starred: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -24,6 +25,7 @@ function mapFavorite(r: PrismaFavorite): Favorite {
     tags: r.tags ? JSON.parse(r.tags) : [],
     pinned: r.pinned,
     pinnedAt: r.pinnedAt ? r.pinnedAt.getTime() : null,
+    starred: r.starred,
     createdAt: r.createdAt.getTime(),
     updatedAt: r.updatedAt.getTime(),
   };
@@ -81,6 +83,7 @@ export async function addFavorite(
           tags: data?.tags ?? [],
           pinned: false,
           pinnedAt: null,
+          starred: false,
           createdAt: now,
           updatedAt: now,
         };
@@ -117,6 +120,7 @@ export async function addFavorite(
           tags: data?.tags ?? [],
           pinned: false,
           pinnedAt: null,
+          starred: false,
           createdAt: now,
           updatedAt: now,
         };
@@ -167,6 +171,46 @@ export async function setPinned(
       pinned,
       pinnedAt: pinned ? now : null,
       updatedAt: now,
+    };
+    memoryFavorites.set(upper, updated);
+    return updated;
+  }
+}
+
+/**
+ * 设置收藏项的关注状态
+ */
+export async function setStarred(
+  ticker: string,
+  starred: boolean
+): Promise<Favorite> {
+  const upper = ticker.toUpperCase();
+  const prisma = getPrisma();
+  if (!prisma) {
+    const existing = memoryFavorites.get(upper);
+    if (!existing) throw new Error("收藏不存在");
+    const updated: Favorite = {
+      ...existing,
+      starred,
+      updatedAt: Date.now(),
+    };
+    memoryFavorites.set(upper, updated);
+    return updated;
+  }
+
+  try {
+    const row = await prisma.favorite.update({
+      where: { ticker: upper },
+      data: { starred },
+    });
+    return mapFavorite(row);
+  } catch {
+    const existing = memoryFavorites.get(upper);
+    if (!existing) throw new Error("收藏不存在");
+    const updated: Favorite = {
+      ...existing,
+      starred,
+      updatedAt: Date.now(),
     };
     memoryFavorites.set(upper, updated);
     return updated;

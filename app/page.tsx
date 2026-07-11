@@ -47,6 +47,7 @@ interface FavoriteItem {
   name?: string | null;
   addedAt: number;
   pinned?: boolean;
+  starred?: boolean;
 }
 
 // ============================================================
@@ -349,30 +350,40 @@ function FavoriteCard({
   onRemove,
   onAnalyze,
   onTogglePin,
+  onToggleStar,
 }: {
   item: FavoriteItem;
   onRemove: (ticker: string) => void;
   onAnalyze: (item: FavoriteItem) => void;
   onTogglePin: (ticker: string, pinned: boolean) => void;
+  onToggleStar: (ticker: string, starred: boolean) => void;
 }) {
   const redditUrl = `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
+  const isStarred = !!item.starred;
   return (
     <div
       className={`group relative flex w-full flex-col gap-3 rounded-xl border px-4 py-3 text-left transition-all hover:bg-zinc-900 md:flex-row md:items-center ${
         isPinned
           ? "border-orange-500/60 bg-orange-500/5 shadow-[0_0_0_1px_rgba(249,115,22,0.15)]"
+          : isStarred
+          ? "border-yellow-500/40 bg-yellow-500/5"
           : "border-zinc-800 bg-zinc-900/60 hover:border-orange-500/50"
       }`}
     >
       <div className="flex items-center gap-3 min-w-0 md:flex-1">
-        <span
-          className={`inline-flex shrink-0 items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-            isPinned ? "bg-orange-500/20 text-orange-400" : "bg-zinc-800 text-yellow-400"
+        <button
+          type="button"
+          onClick={() => onToggleStar(item.ticker, !isStarred)}
+          className={`inline-flex shrink-0 items-center justify-center w-7 h-7 rounded-full text-xs font-bold transition-all ${
+            isStarred
+              ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+              : "bg-zinc-800 text-zinc-500 hover:text-yellow-400"
           }`}
+          title={isStarred ? "取消重点关注" : "设为重点关注"}
         >
-          <StarIcon filled className="h-4 w-4" />
-        </span>
+          <StarIcon filled={isStarred} className="h-4 w-4" />
+        </button>
         <a
           href={redditUrl}
           target="_blank"
@@ -386,6 +397,11 @@ function FavoriteCard({
             {isPinned && (
               <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
                 置顶
+              </span>
+            )}
+            {isStarred && (
+              <span className="inline-flex items-center rounded bg-yellow-500/20 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400">
+                重点关注
               </span>
             )}
             {item.name && (
@@ -1010,6 +1026,12 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const [testing, setTesting] = useState<string | null>(null);
   const [testingAll, setTestingAll] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
+
+  const showToast = (msg: string, type: "ok" | "err" = "ok") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   // 财务数据源相关状态
   const [fmpKeyMasked, setFmpKeyMasked] = useState("");
@@ -1089,8 +1111,13 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         throw new Error(txt);
       }
       await reloadLLM();
+      const p = providers.find((x) => x.id === providerId);
+      if (action === "setActive") showToast(`已设为活跃：${p?.name ?? providerId}`);
+      else if (action === "setEnabled") showToast(`${p?.name ?? providerId} 已${payload.enabled ? "启用" : "禁用"}`);
     } catch (err) {
-      setLlmError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setLlmError(msg);
+      showToast(msg, "err");
     }
   };
 
@@ -1099,6 +1126,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!key) return;
     await updateProvider(providerId, "setKey", { apiKey: key });
     setKeyInputs((prev) => ({ ...prev, [providerId]: "" }));
+    showToast("API Key 已保存");
   };
 
   const handleTestOne = async (providerId: string) => {
@@ -1114,9 +1142,18 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         const txt = await res.text();
         throw new Error(txt);
       }
+      const json = await res.json();
       await reloadLLM();
+      const p = providers.find((x) => x.id === providerId);
+      if (json.ok) {
+        showToast(`✓ ${p?.name ?? providerId} 测试通过`);
+      } else {
+        showToast(`✗ ${p?.name ?? providerId} 测试失败：${json.error ?? "未知错误"}`, "err");
+      }
     } catch (err) {
-      setLlmError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setLlmError(msg);
+      showToast(msg, "err");
     } finally {
       setTesting(null);
     }
@@ -1136,8 +1173,11 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         throw new Error(txt);
       }
       await reloadLLM();
+      showToast("批量测试完成");
     } catch (err) {
-      setLlmError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setLlmError(msg);
+      showToast(msg, "err");
     } finally {
       setTestingAll(false);
     }
@@ -1318,6 +1358,8 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 {providers.map((p) => {
                   const isActive = activeProvider === p.id;
                   const working = p.working;
+                  const isTesting = testing === p.id;
+                  const canTest = p.enabled && (!p.needsKey || p.hasKey || !!keyInputs[p.id]);
               return (
                 <div
                   key={p.id}
@@ -1327,119 +1369,65 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                       : "border-zinc-800 bg-zinc-900/60"
                   }`}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-zinc-100">{p.name}</span>
-                        {p.free && (
-                          <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
-                            免费
-                          </span>
-                        )}
-                        {p.needsKey ? (
-                          <span className="text-[10px] text-zinc-600">需要 Key</span>
-                        ) : (
-                          <span className="text-[10px] text-zinc-600">无需 Key</span>
-                        )}
-                        {isActive && (
-                          <span className="rounded border border-orange-500/40 bg-orange-500/15 px-1.5 py-0.5 text-[10px] text-orange-400">
-                            活跃
-                          </span>
-                        )}
-                        {working === true && (
-                          <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
-                            可用
-                          </span>
-                        )}
-                        {working === false && (
-                          <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-400">
-                            不可用
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-xs text-zinc-400">{p.description}</p>
-                      <div className="mt-1 text-[11px] text-zinc-500">
-                        模型：<span className="font-mono text-zinc-400">{p.model}</span>
-                        {" · "}
-                        免费额度：{p.freeQuota}
-                      </div>
-                      {p.hasKey && (
-                        <div className="mt-1 text-[11px] text-zinc-600">
-                          {p.keySource === "env" ? (
-                            <span className="inline-flex items-center gap-1">
-                              <span className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 text-blue-400">
-                                环境变量
-                              </span>
-                              <span className="font-mono">{p.envVarName}</span>
-                              <span>·</span>
-                              <span>{p.apiKeyMasked}</span>
-                            </span>
-                          ) : (
-                            <>已配置 Key：{p.apiKeyMasked}</>
-                          )}
-                        </div>
-                      )}
-                      {!p.hasKey && p.needsKey && (
-                        <div className="mt-1 text-[11px] text-zinc-600">
-                        环境变量名：
-                        <span className="font-mono text-zinc-500">{p.envVarName}</span>
-                      </div>
-                      )}
-                      {p.lastError && (
-                        <div className="mt-1 text-[11px] text-red-400/80">
-                          错误：{p.lastError}
-                        </div>
-                      )}
-                      <div className="mt-1">
-                        <a
-                          href={p.signupUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[11px] text-orange-400/80 hover:text-orange-300"
-                        >
-                          注册 / 获取 API Key →
-                        </a>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-1">
-                      <label className="flex items-center gap-1 text-[11px] text-zinc-400">
-                        <input
-                          type="checkbox"
-                          checked={p.enabled}
-                          onChange={(e) =>
-                            updateProvider(p.id, "setEnabled", {
-                              enabled: e.target.checked,
-                            })
-                          }
-                        />
-                        启用
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => updateProvider(p.id, "setActive", {})}
-                        disabled={!p.enabled}
-                        className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-30"
-                      >
-                        设为活跃
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestOne(p.id)}
-                        disabled={testing === p.id || !p.enabled || (p.needsKey && !p.hasKey && !keyInputs[p.id])}
-                        className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-30"
-                      >
-                        {testing === p.id ? "测试中..." : "测试"}
-                      </button>
-                    </div>
+                  {/* 标题行 */}
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">{p.name}</span>
+                    {isActive && (
+                      <span className="rounded border border-orange-500/40 bg-orange-500/15 px-1.5 py-0.5 text-[10px] text-orange-400">
+                        活跃
+                      </span>
+                    )}
+                    {working === true && (
+                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                        可用
+                      </span>
+                    )}
+                    {working === false && (
+                      <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-400">
+                        不可用
+                      </span>
+                    )}
+                    {p.free && (
+                      <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                        免费
+                      </span>
+                    )}
                   </div>
 
-                  {p.needsKey && p.keySource === "env" && (
-                    <div className="mt-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300/80">
-                      Key 由环境变量 <span className="font-mono">{p.envVarName}</span> 提供，无法在此处修改。
+                  {/* 信息行 */}
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    模型：<span className="font-mono text-zinc-400">{p.model}</span>
+                    {" · "}
+                    {p.freeQuota}
+                  </div>
+                  {p.hasKey ? (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      {p.keySource === "env" ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 text-blue-400">
+                            环境变量
+                          </span>
+                          <span className="font-mono">{p.envVarName}</span>
+                          <span>·</span>
+                          <span>{p.apiKeyMasked}</span>
+                        </span>
+                      ) : (
+                        <>已配置 Key：{p.apiKeyMasked}</>
+                      )}
+                    </div>
+                  ) : p.needsKey ? (
+                    <div className="mt-1 text-[11px] text-zinc-600">
+                      环境变量名：
+                      <span className="font-mono text-zinc-500">{p.envVarName}</span>
+                    </div>
+                  ) : null}
+                  {p.lastError && (
+                    <div className="mt-1 text-[11px] text-red-400/80">
+                      错误：{p.lastError}
                     </div>
                   )}
 
+                  {/* Key 输入（仅 local/none 且需要 Key） */}
                   {p.needsKey && p.keySource !== "env" && (
                     <div className="mt-3 flex gap-2">
                       <input
@@ -1464,9 +1452,92 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                       </button>
                     </div>
                   )}
+                  {p.needsKey && p.keySource === "env" && (
+                    <div className="mt-2 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300/80">
+                      Key 由环境变量 <span className="font-mono">{p.envVarName}</span> 提供，无法在此处修改。
+                    </div>
+                  )}
+
+                  {/* 操作栏 */}
+                  <div className="mt-3 flex items-center gap-3 border-t border-zinc-800 pt-3">
+                    {/* 启用开关 */}
+                    <button
+                      type="button"
+                      onClick={() => updateProvider(p.id, "setEnabled", { enabled: !p.enabled })}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
+                        p.enabled ? "bg-orange-500" : "bg-zinc-700"
+                      }`}
+                      title={p.enabled ? "已启用" : "已禁用"}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          p.enabled ? "translate-x-5" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                    <span className="text-[11px] text-zinc-400">{p.enabled ? "已启用" : "已禁用"}</span>
+
+                    <div className="flex-1" />
+
+                    {/* 设为活跃 */}
+                    {!isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => updateProvider(p.id, "setActive", {})}
+                        disabled={!p.enabled}
+                        className="rounded-lg border border-zinc-700 px-3 py-1 text-[11px] font-medium text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-30"
+                      >
+                        设为活跃
+                      </button>
+                    ) : (
+                      <span className="rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-[11px] font-medium text-orange-400">
+                        当前活跃
+                      </span>
+                    )}
+
+                    {/* 测试 */}
+                    <button
+                      type="button"
+                      onClick={() => handleTestOne(p.id)}
+                      disabled={isTesting || !canTest}
+                      className="rounded-lg border border-zinc-700 px-3 py-1 text-[11px] font-medium text-zinc-300 transition-all hover:border-blue-500/50 hover:text-blue-400 disabled:opacity-30"
+                    >
+                      {isTesting ? (
+                        <span className="flex items-center gap-1">
+                          <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-zinc-500 border-t-transparent" />
+                          测试中
+                        </span>
+                      ) : (
+                        "测试"
+                      )}
+                    </button>
+
+                    {/* 注册链接 */}
+                    <a
+                      href={p.signupUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-orange-400/80 hover:text-orange-300"
+                    >
+                      获取 Key →
+                    </a>
+                  </div>
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Toast 提示 */}
+        {toast && (
+          <div
+            className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border px-4 py-2 text-sm shadow-lg ${
+              toast.type === "ok"
+                ? "border-green-500/40 bg-green-500/15 text-green-400"
+                : "border-red-500/40 bg-red-500/15 text-red-400"
+            }`}
+          >
+            {toast.msg}
           </div>
         )}
 
@@ -2692,6 +2763,8 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   // 策略管理弹窗
   const [showStrategies, setShowStrategies] = useState(false);
+  // 收藏筛选
+  const [favFilter, setFavFilter] = useState<"all" | "starred" | "pinned">("all");
 
   // 初始化：从后端 API 读取收藏
   useEffect(() => {
@@ -2703,11 +2776,12 @@ export default function Home() {
         if (cancelled) return;
         if (json.favorites && Array.isArray(json.favorites)) {
           setFavorites(
-            json.favorites.map((f: { ticker: string; name?: string | null; createdAt: number; pinned?: boolean }) => ({
+            json.favorites.map((f: { ticker: string; name?: string | null; createdAt: number; pinned?: boolean; starred?: boolean }) => ({
               ticker: f.ticker,
               name: f.name ?? null,
               addedAt: f.createdAt,
               pinned: !!f.pinned,
+              starred: !!f.starred,
             }))
           );
         }
@@ -2796,6 +2870,35 @@ export default function Home() {
           prev.map((f) =>
             f.ticker.toUpperCase() === upper
               ? { ...f, pinned: !pinned }
+              : f
+          )
+        );
+      }
+    },
+    []
+  );
+
+  // 重点关注 / 取消关注：前端更新状态，异步同步后端
+  const toggleStarFavorite = useCallback(
+    async (ticker: string, starred: boolean) => {
+      const upper = ticker.trim().toUpperCase();
+      setFavorites((prev) =>
+        prev.map((f) =>
+          f.ticker.toUpperCase() === upper ? { ...f, starred } : f
+        )
+      );
+      try {
+        await fetch("/api/favorites", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticker: upper, starred }),
+        });
+      } catch (err) {
+        console.error("Failed to toggle star:", err);
+        setFavorites((prev) =>
+          prev.map((f) =>
+            f.ticker.toUpperCase() === upper
+              ? { ...f, starred: !starred }
               : f
           )
         );
@@ -3175,6 +3278,32 @@ export default function Home() {
                   已收藏 {favorites.length} 个标的 · 数据保存在服务端
                 </p>
               </div>
+              {favorites.length > 0 && (
+                <div className="flex gap-1.5">
+                  {(["all", "starred", "pinned"] as const).map((f) => {
+                    const labels = { all: "全部", starred: "重点关注", pinned: "置顶" };
+                    const counts = {
+                      all: favorites.length,
+                      starred: favorites.filter((x) => x.starred).length,
+                      pinned: favorites.filter((x) => x.pinned).length,
+                    };
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setFavFilter(f)}
+                        className={`rounded-lg border px-3 py-1 text-xs font-medium transition-all ${
+                          favFilter === f
+                            ? "border-orange-500/50 bg-orange-500/15 text-orange-400"
+                            : "border-zinc-700 text-zinc-400 hover:border-orange-500/30 hover:text-zinc-300"
+                        }`}
+                      >
+                        {labels[f]} ({counts[f]})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* 手动添加收藏（带校验） */}
@@ -3238,13 +3367,20 @@ export default function Home() {
 
             {favorites.length > 0 ? (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {favorites.map((item) => (
+                {favorites
+                  .filter((item) =>
+                    favFilter === "all" ? true :
+                    favFilter === "starred" ? !!item.starred :
+                    favFilter === "pinned" ? !!item.pinned : true
+                  )
+                  .map((item) => (
                   <FavoriteCard
                     key={item.ticker}
                     item={item}
                     onRemove={removeFavorite}
                     onAnalyze={handleAnalyze}
                     onTogglePin={togglePinFavorite}
+                    onToggleStar={toggleStarFavorite}
                   />
                 ))}
               </div>
