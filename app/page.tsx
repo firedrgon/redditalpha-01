@@ -363,7 +363,7 @@ function FavoriteCard({
   const isStarred = !!item.starred;
   return (
     <div
-      className={`group relative flex w-full flex-col gap-3 rounded-xl border p-4 text-left transition-all hover:bg-zinc-900 md:flex-row md:items-center md:gap-4 ${
+      className={`group relative flex w-full flex-col gap-3 rounded-xl border p-4 text-left transition-all hover:bg-zinc-900 md:items-stretch ${
         isPinned
           ? "border-orange-500/60 bg-orange-500/5 shadow-[0_0_0_1px_rgba(249,115,22,0.15)]"
           : isStarred
@@ -371,8 +371,8 @@ function FavoriteCard({
           : "border-zinc-800 bg-zinc-900/60 hover:border-orange-500/50"
       }`}
     >
-      {/* 左侧：星标 + 股票信息 */}
-      <div className="flex items-start gap-3 min-w-0 md:flex-1">
+      {/* 上半部分：星标 + 股票信息 */}
+      <div className="flex items-start gap-3 min-w-0">
         <button
           type="button"
           onClick={() => onToggleStar(item.ticker, !isStarred)}
@@ -417,8 +417,8 @@ function FavoriteCard({
         </div>
       </div>
 
-      {/* 右侧：操作按钮 */}
-      <div className="flex flex-wrap gap-1.5 md:justify-end md:flex-nowrap">
+      {/* 下半部分：操作按钮 */}
+      <div className="flex flex-wrap gap-1.5">
         <a
           href={futuUrl(item.ticker)}
           target="_blank"
@@ -3371,7 +3371,7 @@ export default function Home() {
             </div>
 
             {favorites.length > 0 ? (
-              <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {favorites
                   .filter((item) =>
                     favFilter === "all" ? true :
