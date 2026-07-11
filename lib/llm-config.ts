@@ -213,22 +213,43 @@ function migrateOldProviderIds(providers: Record<string, ProviderStatus>): Recor
     "groq": "groq-1",
     "groq-qwen3-32b": "groq-2",
     "groq-gpt-oss-120b": "groq-3",
+    "duckduckgo": "groq-1", // DuckDuckGo 已移除，映射到 groq-1 作为兜底
   };
   const result = { ...providers };
   for (const [oldId, newId] of Object.entries(migrations)) {
     if (result[oldId] && !result[newId]) {
       result[newId] = { ...result[oldId], id: newId };
-      delete result[oldId];
     }
+    delete result[oldId];
   }
   return result;
 }
 
+/** 迁移旧的 activeProvider ID 到新的 ID */
+function migrateActiveProvider(activeProvider: string | null | undefined): string | null {
+  if (!activeProvider) return null;
+  const migrations: Record<string, string | null> = {
+    "gemini": "gemini-1",
+    "gemini-2.0": "gemini-2",
+    "groq": "groq-1",
+    "groq-qwen3-32b": "groq-2",
+    "groq-gpt-oss-120b": "groq-3",
+    "duckduckgo": null, // DuckDuckGo 已移除
+  };
+  if (activeProvider in migrations) return migrations[activeProvider];
+  return activeProvider;
+}
+
 function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
   const migratedProviders = migrateOldProviderIds(parsed.providers || {});
+  const migratedActive = migrateActiveProvider(parsed.activeProvider);
+  // 如果迁移后的 activeProvider 不存在于 LLM_PROVIDERS 中，置为 null
+  const validActive = migratedActive && LLM_PROVIDERS.find((p) => p.id === migratedActive)
+    ? migratedActive
+    : null;
   return {
     providers: { ...DEFAULT_CONFIG.providers, ...migratedProviders },
-    activeProvider: parsed.activeProvider ?? null,
+    activeProvider: validActive,
     updatedAt: parsed.updatedAt ?? 0,
     dynamicOpenRouterModels: parsed.dynamicOpenRouterModels,
     dynamicGeminiModels: parsed.dynamicGeminiModels,
@@ -314,6 +335,10 @@ export async function readConfig(): Promise<LLMConfig> {
 
   if (memoryConfig) {
     config = JSON.parse(JSON.stringify(memoryConfig)) as LLMConfig;
+    // 验证 memoryConfig 中的 activeProvider 是否有效（可能引用了已移除的 provider）
+    if (config.activeProvider && !LLM_PROVIDERS.find((p) => p.id === config.activeProvider)) {
+      config.activeProvider = null;
+    }
   } else {
     const fromDb = await getLLMConfigFromDB<Partial<LLMConfig>>();
     if (fromDb) {
