@@ -48,9 +48,13 @@ export async function getCachedAnalysisDB(
     const row = await prisma.analysisCache.findUnique({
       where: { ticker: ticker.toUpperCase() },
     });
-    if (!row) return null;
+    if (!row) {
+      // 数据库中没有记录，降级到文件缓存
+      return getCachedAnalysisFile(ticker);
+    }
     return mapAnalysis(row);
   } catch {
+    // 数据库查询失败，降级到文件缓存
     return getCachedAnalysisFile(ticker);
   }
 }

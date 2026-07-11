@@ -605,77 +605,92 @@ async function fetchSectorStocksFromSA(
     const res = await fetch(url, {
       headers: { "User-Agent": UA },
       cache: "no-store",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return null;
     const html = await res.text();
 
-    // 提取 SvelteKit 内嵌的表格数据
-    // 数据在 window.__INITIAL_STATE__ 或类似的地方，或者直接解析 HTML 表格
-    // 尝试从 HTML <table> 中解析
-    const tableMatch = html.match(/<table[^>]*id="main-table"[^>]*>[\s\S]*?<\/table>/i);
-    if (!tableMatch) return null;
-
-    const tableHtml = tableMatch[0];
     const rows: Array<{ ticker: string; pe: number | null; roe: number | null; revenueGrowth: number | null }> = [];
 
-    // 解析所有 <tr> 行
-    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    let trMatch;
-    let isHeader = true;
-    let peColIndex = -1;
-    let roeColIndex = -1;
-    let revGrowthColIndex = -1;
-
-    while ((trMatch = trRegex.exec(tableHtml)) !== null) {
-      const trHtml = trMatch[1];
-
-      if (isHeader) {
-        // 解析表头，找到 PE、ROE、Revenue Growth 列的索引
-        const thRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
-        let thMatch;
-        let colIndex = 0;
-        while ((thMatch = thRegex.exec(trHtml)) !== null) {
-          const cellText = thMatch[1].replace(/<[^>]*>/g, "").trim();
-          if (/^PE/i.test(cellText) || /^P\/E/i.test(cellText)) peColIndex = colIndex;
-          if (/^ROE/i.test(cellText)) roeColIndex = colIndex;
-          if (/Revenue Growth/i.test(cellText)) revGrowthColIndex = colIndex;
-          colIndex++;
+    // ============================================================
+    // 方案 1：从 SvelteKit 内嵌的 JSON 数据提取（最可靠）
+    // ============================================================
+    const jsonData = extractSectorTableData(html);
+    if (jsonData && jsonData.length > 0) {
+      for (const item of jsonData) {
+        const ticker = String(item.s || item.symbol || "").toUpperCase();
+        if (!ticker || ticker.length > 8) continue;
+        const pe = num(item.pe || item.peRatio || item["pe-ratio"]);
+        const roe = num(item.roe || item.returnOnEquity);
+        const revenueGrowth = num(item.revenueGrowth || item["revenue-growth"] || item.revGrowth);
+        if (pe != null || roe != null || revenueGrowth != null) {
+          rows.push({ ticker, pe, roe, revenueGrowth });
         }
-        isHeader = false;
-        continue;
       }
-
-      // 解析数据行
-      const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      const cells: string[] = [];
-      let tdMatch;
-      while ((tdMatch = tdRegex.exec(trHtml)) !== null) {
-        const cellText = tdMatch[1].replace(/<[^>]*>/g, "").trim();
-        cells.push(cellText);
-      }
-
-      if (cells.length < 3) continue;
-
-      const ticker = cells[0].toUpperCase();
-      if (!ticker || ticker.length > 8) continue;
-
-      const parseNum = (str: string): number | null => {
-        if (!str || str === "-" || str === "N/A") return null;
-        // 处理百分号、千分位、负号
-        const cleaned = str.replace(/,/g, "").replace(/%/g, "");
-        const num = parseFloat(cleaned);
-        return Number.isFinite(num) ? num : null;
-      };
-
-      const pe = peColIndex >= 0 ? parseNum(cells[peColIndex]) : null;
-      const roe = roeColIndex >= 0 ? parseNum(cells[roeColIndex]) : null;
-      const revenueGrowth = revGrowthColIndex >= 0 ? parseNum(cells[revGrowthColIndex]) : null;
-
-      rows.push({ ticker, pe, roe, revenueGrowth });
     }
 
-    if (rows.length === 0) return null;
+    // ============================================================
+    // 方案 2：从 HTML <table> 解析（兜底）
+    // ============================================================
+    if (rows.length === 0) {
+      const tableMatch = html.match(/<table[^>]*id="main-table"[^>]*>[\s\S]*?<\/table>/i);
+      if (tableMatch) {
+        const tableHtml = tableMatch[0];
+        const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        let trMatch;
+        let isHeader = true;
+        let peColIndex = -1;
+        let roeColIndex = -1;
+        let revGrowthColIndex = -1;
+
+        while ((trMatch = trRegex.exec(tableHtml)) !== null) {
+          const trHtml = trMatch[1];
+          if (isHeader) {
+            const thRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
+            let thMatch;
+            let colIndex = 0;
+            while ((thMatch = thRegex.exec(trHtml)) !== null) {
+              const cellText = thMatch[1].replace(/<[^>]*>/g, "").trim();
+              if (/^PE/i.test(cellText) || /^P\/E/i.test(cellText)) peColIndex = colIndex;
+              if (/^ROE/i.test(cellText)) roeColIndex = colIndex;
+              if (/Revenue Growth/i.test(cellText)) revGrowthColIndex = colIndex;
+              colIndex++;
+            }
+            isHeader = false;
+            continue;
+          }
+
+          const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+          const cells: string[] = [];
+          let tdMatch;
+          while ((tdMatch = tdRegex.exec(trHtml)) !== null) {
+            const cellText = tdMatch[1].replace(/<[^>]*>/g, "").trim();
+            cells.push(cellText);
+          }
+          if (cells.length < 3) continue;
+
+          const ticker = cells[0].toUpperCase();
+          if (!ticker || ticker.length > 8) continue;
+
+          const parseNum = (str: string): number | null => {
+            if (!str || str === "-" || str === "N/A") return null;
+            const cleaned = str.replace(/,/g, "").replace(/%/g, "");
+            const n = parseFloat(cleaned);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          const pe = peColIndex >= 0 ? parseNum(cells[peColIndex]) : null;
+          const roe = roeColIndex >= 0 ? parseNum(cells[roeColIndex]) : null;
+          const revenueGrowth = revGrowthColIndex >= 0 ? parseNum(cells[revGrowthColIndex]) : null;
+
+          if (pe != null || roe != null || revenueGrowth != null) {
+            rows.push({ ticker, pe, roe, revenueGrowth });
+          }
+        }
+      }
+    }
+
+    if (rows.length < 3) return null;
 
     sectorRankCache = {
       sector,
@@ -686,6 +701,53 @@ async function fetchSectorStocksFromSA(
   } catch {
     return null;
   }
+}
+
+/**
+ * 从 stockanalysis.com sector 页面的 SvelteKit 内嵌 JSON 中提取股票列表数据。
+ * 查找类似 tableData: [...] 或 data: [...] 的数组结构。
+ */
+function extractSectorTableData(html: string): Array<Record<string, unknown>> | null {
+  // 尝试多种可能的数据键名
+  const markers = ["tableData:", "data:", "stocks:"];
+  for (const marker of markers) {
+    const idx = html.indexOf(marker);
+    if (idx < 0) continue;
+
+    const start = idx + marker.length;
+    // 跳过空白字符
+    let i = start;
+    while (i < html.length && /\s/.test(html[i])) i++;
+    if (html[i] !== "[") continue;
+
+    // 括号匹配找到完整数组
+    let depth = 0;
+    let end = -1;
+    for (; i < html.length; i++) {
+      if (html[i] === "[") depth++;
+      else if (html[i] === "]") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+
+    const jsLiteral = html.substring(start, end);
+    try {
+      // eslint-disable-next-line no-new-func
+      const fn = new Function(`return (${jsLiteral})`);
+      const arr = fn();
+      if (Array.isArray(arr) && arr.length > 0) {
+        return arr as Array<Record<string, unknown>>;
+      }
+    } catch {
+      // 解析失败，尝试下一个 marker
+    }
+  }
+  return null;
 }
 
 /**
@@ -1913,20 +1975,41 @@ async function fetchStockAnalysisMetrics(
     }
 
     // 行业：从 sveltekit:data 或页面元数据提取
-    const industryMatch = overviewHtml.match(/"industry":"([^"]+)"/);
-    if (industryMatch) {
-      result.industry = industryMatch[1];
+    // 方式1：从 financialData 或类似的 JSON 对象中提取
+    const finData = extractFinancialData(overviewHtml);
+    if (finData) {
+      const ind = finData.industry || finData.sector || finData.gicsSector || finData.gicsIndustry;
+      if (ind && typeof ind === "string") {
+        result.industry = ind;
+      }
+    }
+    // 方式2：从页面 JSON 中提取
+    if (result.industry == null) {
+      const industryMatch = overviewHtml.match(/"industry"\s*:\s*"([^"]+)"/);
+      if (industryMatch) {
+        result.industry = industryMatch[1];
+      }
     }
     if (result.industry == null) {
-      const sectorMatch = overviewHtml.match(/"sector":"([^"]+)"/);
+      const sectorMatch = overviewHtml.match(/"sector"\s*:\s*"([^"]+)"/);
       if (sectorMatch) {
         result.industry = sectorMatch[1];
       }
     }
-    // 备选：从页面描述中提取
+    // 方式3：从 HTML 标签/元数据中提取
     if (result.industry == null) {
-      const indMatch = overviewHtml.match(/Industry:<\/[^>]*>\s*<[^>]*>([^<]+)</);
+      const ogMatch = overviewHtml.match(/<meta[^>]*name="description"[^>]*content="([^"]*)"/i);
+      if (ogMatch) {
+        // 从描述中尝试提取行业信息（不太可靠，作为兜底）
+      }
+    }
+    if (result.industry == null) {
+      const indMatch = overviewHtml.match(/Industry[:<][^<]*<[^>]*>([^<]+)</i);
       if (indMatch) result.industry = indMatch[1].trim();
+    }
+    if (result.industry == null) {
+      const secMatch = overviewHtml.match(/Sector[:<][^<]*<[^>]*>([^<]+)</i);
+      if (secMatch) result.industry = secMatch[1].trim();
     }
   }
 
