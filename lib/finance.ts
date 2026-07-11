@@ -799,11 +799,46 @@ async function getIndustryRank(
 
 /**
  * 根据行业名获取对应的 broad sector 名（用于显示）。
+ * 支持精确匹配和模糊关键词匹配。
  */
 function getBroadSector(industry: string | null | undefined): string | null {
   if (!industry) return null;
+
+  // 1. 精确匹配
   if (SECTOR_DEFAULT_PE[industry] != null) return industry;
-  return INDUSTRY_TO_SECTOR[industry] ?? null;
+  if (INDUSTRY_TO_SECTOR[industry]) return INDUSTRY_TO_SECTOR[industry];
+
+  // 2. 大小写不敏感精确匹配
+  const lower = industry.toLowerCase().trim();
+  for (const key of Object.keys(SECTOR_DEFAULT_PE)) {
+    if (key.toLowerCase() === lower) return key;
+  }
+  for (const [key, sector] of Object.entries(INDUSTRY_TO_SECTOR)) {
+    if (key.toLowerCase() === lower) return sector;
+  }
+
+  // 3. 模糊关键词匹配
+  const keywordSectorMap: Array<{ keywords: string[]; sector: string }> = [
+    { keywords: ["software", "saas", "cloud", "ai", "artificial", "semiconductor", "chip", "hardware", "electronics", "it service", "information technolog", "internet", "computer", "technology"], sector: "Technology" },
+    { keywords: ["media", "entertainment", "game", "video", "telecom", "communication", "broadcast", "publish", "movie"], sector: "Communication Services" },
+    { keywords: ["retail", "auto", "car", "restaurant", "hotel", "travel", "leisure", "casino", "gamble", "apparel", "cloth", "fashion", "furniture", "home improvement", "e-commerce", "ecommerce", "consumer cyclical", "discretionary"], sector: "Consumer Cyclical" },
+    { keywords: ["food", "beverage", "drink", "grocery", "household", "tobacco", "drug", "consumer defensive", "staple"], sector: "Consumer Defensive" },
+    { keywords: ["health", "pharma", "biotech", "biotechnology", "medical", "hospital", "healthcare"], sector: "Healthcare" },
+    { keywords: ["bank", "financ", "insurance", "asset management", "capital market", "investment", "mortgage", "fintech", "stock exchange"], sector: "Financials" },
+    { keywords: ["industrial", "aerospace", "defense", "airline", "railroad", "truck", "logistics", "freight", "machinery", "conglomerate", "consulting", "construction", "engineer"], sector: "Industrials" },
+    { keywords: ["oil", "gas", "energy", "coal", "uranium"], sector: "Energy" },
+    { keywords: ["utilit", "power", "water", "electric", "renewable", "solar", "wind"], sector: "Utilities" },
+    { keywords: ["material", "chemical", "metal", "mining", "gold", "silver", "copper", "steel", "aluminum", "paper", "agricultur"], sector: "Materials" },
+    { keywords: ["real estate", "reit", "property", "housing"], sector: "Real Estate" },
+  ];
+
+  for (const { keywords, sector } of keywordSectorMap) {
+    if (keywords.some((k) => lower.includes(k))) {
+      return sector;
+    }
+  }
+
+  return null;
 }
 
 const FMP_BASE = "https://financialmodelingprep.com";
