@@ -61,6 +61,15 @@ export interface StockAnalysis {
     summary?: string;
     url?: string;
   }>;
+  // 同行业对比（百分位排名）
+  industryRank?: {
+    pePercentile: number | null;
+    roePercentile: number | null;
+    revenueGrowthPercentile: number | null;
+    peerCount: number;
+  } | null;
+  industry?: string | null;
+  sector?: string | null;
 }
 
 function fmtPct(v: number | null): string {

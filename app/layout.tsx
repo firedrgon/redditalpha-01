@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,25 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Reddit Alpha - Real-time Reddit Stock Tracker",
   description: "Track trending stocks mentioned on Reddit in real-time",
+  manifest: "/manifest.json",
+  applicationName: "Reddit Alpha",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Reddit Alpha",
+  },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#f97316",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({

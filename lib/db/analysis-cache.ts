@@ -30,6 +30,9 @@ function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
     strategyIdsUsed: JSON.parse(row.strategyIdsUsed),
     dataSource: row.dataSource ?? undefined,
     warnings: row.warnings ? JSON.parse(row.warnings) : undefined,
+    industryRank: row.industryRank ? JSON.parse(row.industryRank) : null,
+    industry: row.industry ?? null,
+    sector: row.sector ?? null,
     fetchedAt: row.updatedAt.toISOString(),
     cached: true,
   };
@@ -82,6 +85,9 @@ export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
         strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
         dataSource: analysis.dataSource,
         warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+        industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
+        industry: analysis.industry ?? null,
+        sector: analysis.sector ?? null,
       },
       create: {
         ticker,
@@ -103,6 +109,9 @@ export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
         strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
         dataSource: analysis.dataSource,
         warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+        industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
+        industry: analysis.industry ?? null,
+        sector: analysis.sector ?? null,
       },
     });
   } catch {

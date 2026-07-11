@@ -104,6 +104,9 @@ async function doRefresh(
     numberOfAnalysts: metrics.numberOfAnalysts,
     recommendationMean: metrics.recommendationMean,
     news: metrics.news,
+    industryRank: metrics.industryRank,
+    industry: metrics.industry,
+    sector: metrics.sector,
   };
 
   if (useLLM) {

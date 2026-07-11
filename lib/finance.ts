@@ -37,6 +37,14 @@ export interface FinancialMetrics {
   pegRatio: number | null;
   industry?: string | null;
   industryPE?: number | null; // 行业 PE（近似值）
+  sector?: string | null; // 所属 broad sector
+  // 同行业对比（百分位，0-100，数值越大越好）
+  industryRank?: {
+    pePercentile: number | null; // PE 百分位（越低越好，所以百分位越低排名越前，这里统一成"值越高质量越好"的百分位：低 PE → 高百分位）
+    roePercentile: number | null; // ROE 百分位
+    revenueGrowthPercentile: number | null; // 营收增长百分位
+    peerCount: number; // 同行业公司数量
+  } | null;
   // 当前价格
   currentPrice?: number | null;
   // 分析师目标价与评级
@@ -512,6 +520,13 @@ const SECTOR_TO_SA_SLUG: Record<string, string> = {
 /** sector PE 缓存（1 小时有效，避免频繁爬取） */
 let sectorPECache: { sector: string; pe: number; expires: number } | null = null;
 
+/** sector 同行业对比数据缓存（2 小时有效） */
+let sectorRankCache: {
+  sector: string;
+  data: Array<{ ticker: string; pe: number | null; roe: number | null; revenueGrowth: number | null }>;
+  expires: number;
+} | null = null;
+
 /**
  * 从 stockanalysis.com 爬取 sector 加权平均 PE（实时数据，无需 API Key）
  * 页面包含 "weighted average PE ratio of XX.XX"
@@ -565,6 +580,159 @@ async function getSectorPEResolved(industry: string | null | undefined): Promise
   if (saPE != null) return saPE;
   // 降级到经验值
   return SECTOR_DEFAULT_PE[sector] ?? null;
+}
+
+/**
+ * 从 stockanalysis.com 爬取 sector 页面，提取该行业所有股票的 PE、ROE、营收增长数据。
+ * 缓存 2 小时避免频繁请求。
+ * 页面表格列：Symbol, Company Name, Market Cap, Price, Change%, Volume, PE Ratio, EPS,
+ *            Dividend Yield, Revenue Growth, ROE, Gross Margin, ...
+ */
+async function fetchSectorStocksFromSA(
+  sector: string
+): Promise<Array<{ ticker: string; pe: number | null; roe: number | null; revenueGrowth: number | null }> | null> {
+  if (!sector) return null;
+  // 缓存命中
+  if (sectorRankCache && sectorRankCache.sector === sector && sectorRankCache.expires > Date.now()) {
+    return sectorRankCache.data;
+  }
+
+  const slug = SECTOR_TO_SA_SLUG[sector];
+  if (!slug) return null;
+
+  const url = `https://stockanalysis.com/stocks/sector/${slug}/`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // 提取 SvelteKit 内嵌的表格数据
+    // 数据在 window.__INITIAL_STATE__ 或类似的地方，或者直接解析 HTML 表格
+    // 尝试从 HTML <table> 中解析
+    const tableMatch = html.match(/<table[^>]*id="main-table"[^>]*>[\s\S]*?<\/table>/i);
+    if (!tableMatch) return null;
+
+    const tableHtml = tableMatch[0];
+    const rows: Array<{ ticker: string; pe: number | null; roe: number | null; revenueGrowth: number | null }> = [];
+
+    // 解析所有 <tr> 行
+    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch;
+    let isHeader = true;
+    let peColIndex = -1;
+    let roeColIndex = -1;
+    let revGrowthColIndex = -1;
+
+    while ((trMatch = trRegex.exec(tableHtml)) !== null) {
+      const trHtml = trMatch[1];
+
+      if (isHeader) {
+        // 解析表头，找到 PE、ROE、Revenue Growth 列的索引
+        const thRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
+        let thMatch;
+        let colIndex = 0;
+        while ((thMatch = thRegex.exec(trHtml)) !== null) {
+          const cellText = thMatch[1].replace(/<[^>]*>/g, "").trim();
+          if (/^PE/i.test(cellText) || /^P\/E/i.test(cellText)) peColIndex = colIndex;
+          if (/^ROE/i.test(cellText)) roeColIndex = colIndex;
+          if (/Revenue Growth/i.test(cellText)) revGrowthColIndex = colIndex;
+          colIndex++;
+        }
+        isHeader = false;
+        continue;
+      }
+
+      // 解析数据行
+      const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      const cells: string[] = [];
+      let tdMatch;
+      while ((tdMatch = tdRegex.exec(trHtml)) !== null) {
+        const cellText = tdMatch[1].replace(/<[^>]*>/g, "").trim();
+        cells.push(cellText);
+      }
+
+      if (cells.length < 3) continue;
+
+      const ticker = cells[0].toUpperCase();
+      if (!ticker || ticker.length > 8) continue;
+
+      const parseNum = (str: string): number | null => {
+        if (!str || str === "-" || str === "N/A") return null;
+        // 处理百分号、千分位、负号
+        const cleaned = str.replace(/,/g, "").replace(/%/g, "");
+        const num = parseFloat(cleaned);
+        return Number.isFinite(num) ? num : null;
+      };
+
+      const pe = peColIndex >= 0 ? parseNum(cells[peColIndex]) : null;
+      const roe = roeColIndex >= 0 ? parseNum(cells[roeColIndex]) : null;
+      const revenueGrowth = revGrowthColIndex >= 0 ? parseNum(cells[revGrowthColIndex]) : null;
+
+      rows.push({ ticker, pe, roe, revenueGrowth });
+    }
+
+    if (rows.length === 0) return null;
+
+    sectorRankCache = {
+      sector,
+      data: rows,
+      expires: Date.now() + 2 * 60 * 60 * 1000, // 2 小时
+    };
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 计算某股票在同行业中的百分位排名。
+ * 百分位：0-100，值越高表示在行业中排名越靠前（质量越好）。
+ * 对于 PE：PE 越低越好 → 低 PE 对应高百分位（反向排序）
+ * 对于 ROE：越高越好 → 高 ROE 对应高百分位（正向排序）
+ * 对于 营收增长：越高越好 → 正向排序
+ */
+async function getIndustryRank(
+  ticker: string,
+  industry: string | null | undefined,
+  own: { pe: number | null; roe: number | null; revenueGrowth: number | null }
+): Promise<FinancialMetrics["industryRank"] | null> {
+  if (!industry) return null;
+  const sector = getBroadSector(industry);
+  if (!sector) return null;
+
+  const sectorData = await fetchSectorStocksFromSA(sector);
+  if (!sectorData || sectorData.length < 5) return null;
+
+  const calcPercentile = (values: Array<number | null>, ownValue: number | null, isHigherBetter: boolean): number | null => {
+    if (ownValue == null) return null;
+    const valid = values.filter((v): v is number => v != null);
+    if (valid.length < 3) return null;
+    // 计算有多少公司的值比当前差（排名越前百分位越高）
+    let countWorse = 0;
+    for (const v of valid) {
+      if (isHigherBetter) {
+        if (v < ownValue) countWorse++;
+      } else {
+        if (v > ownValue) countWorse++; // 低 PE 更好，所以 PE 更高的是更差的
+      }
+    }
+    return Math.round((countWorse / valid.length) * 100);
+  };
+
+  const allPes = sectorData.map((s) => s.pe);
+  const allRoes = sectorData.map((s) => s.roe);
+  const allRevG = sectorData.map((s) => s.revenueGrowth);
+
+  return {
+    pePercentile: calcPercentile(allPes, own.pe, false), // PE 越低越好
+    roePercentile: calcPercentile(allRoes, own.roe, true),
+    revenueGrowthPercentile: calcPercentile(allRevG, own.revenueGrowth, true),
+    peerCount: sectorData.length,
+  };
 }
 
 /**
@@ -2679,6 +2847,29 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // 爬取失败保留经验值
+    }
+  }
+
+  // 设置 sector 字段
+  if (result.industry) {
+    result.sector = getBroadSector(result.industry) ?? null;
+  }
+
+  // ============================================================
+  // 同行业对比：百分位排名
+  // ============================================================
+  if (result.industry) {
+    try {
+      const rank = await getIndustryRank(upper, result.industry, {
+        pe: result.trailingPE,
+        roe: result.roe,
+        revenueGrowth: result.revenueGrowthYoY,
+      });
+      if (rank) {
+        result.industryRank = rank;
+      }
+    } catch {
+      // 失败不影响主结果
     }
   }
 

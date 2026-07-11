@@ -96,6 +96,14 @@ interface StockAnalysis {
     summary?: string;
     url?: string;
   }>;
+  industryRank?: {
+    pePercentile: number | null;
+    roePercentile: number | null;
+    revenueGrowthPercentile: number | null;
+    peerCount: number;
+  } | null;
+  industry?: string | null;
+  sector?: string | null;
 }
 
 // ============================================================
@@ -787,6 +795,79 @@ function AnalysisModal({
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* 同行业对比 */}
+            {analysis.industryRank && (
+              <div className="rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-500/5 to-transparent p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-purple-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  </svg>
+                  <span className="text-xs font-medium text-purple-400">同行业对比</span>
+                  <span className="text-[10px] text-zinc-500">
+                    · {analysis.industry || analysis.sector || "所属行业"} · {analysis.industryRank.peerCount} 家公司
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    {
+                      label: "PE 估值",
+                      value: analysis.industryRank.pePercentile,
+                      desc: "越低越好 → 百分位越高越优",
+                    },
+                    {
+                      label: "ROE",
+                      value: analysis.industryRank.roePercentile,
+                      desc: "越高越好 → 百分位越高越优",
+                    },
+                    {
+                      label: "营收增长",
+                      value: analysis.industryRank.revenueGrowthPercentile,
+                      desc: "越高越好 → 百分位越高越优",
+                    },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-lg bg-zinc-900/50 p-3">
+                      <div className="text-[10px] text-zinc-500">{item.label}</div>
+                      <div className="mt-1 flex items-baseline gap-1">
+                        <span
+                          className={`text-xl font-mono font-bold ${
+                            item.value == null
+                              ? "text-zinc-600"
+                              : item.value >= 70
+                                ? "text-green-400"
+                                : item.value >= 40
+                                  ? "text-yellow-400"
+                                  : "text-red-400"
+                          }`}
+                        >
+                          {item.value != null ? `${item.value}` : "—"}
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          {item.value != null ? "百分位" : ""}
+                        </span>
+                      </div>
+                      {/* 进度条 */}
+                      {item.value != null && (
+                        <div className="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              item.value >= 70
+                                ? "bg-green-500"
+                                : item.value >= 40
+                                  ? "bg-yellow-500"
+                                  : "bg-red-500"
+                            }`}
+                            style={{ width: `${item.value}%` }}
+                          />
+                        </div>
+                      )}
+                      <div className="mt-1.5 text-[10px] text-zinc-600">{item.desc}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -2798,6 +2879,23 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // 注册 Service Worker (PWA)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator)) return;
+    const registerSW = () => {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .catch((err) => console.warn("SW registration failed:", err));
+    };
+    if (document.readyState === "complete") {
+      registerSW();
+    } else {
+      window.addEventListener("load", registerSW);
+      return () => window.removeEventListener("load", registerSW);
+    }
   }, []);
 
   const favoriteTickers = useMemo(

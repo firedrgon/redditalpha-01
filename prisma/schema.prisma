@@ -28,6 +28,9 @@ model AnalysisCache {
   strategyIdsUsed String // JSON 字符串：string[]
   dataSource   String?
   warnings     String?  // JSON 字符串：string[]
+  industryRank String?  // JSON 字符串：行业百分位排名
+  industry     String?
+  sector       String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }

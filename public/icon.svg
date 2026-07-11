@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#18181b"/>
+      <stop offset="100%" style="stop-color:#09090b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <g transform="translate(128, 128)">
+    <path d="M128 20C70.144 20 24 62.212 24 116c0 31.948 16.568 60.316 42.348 78.82-2.832 11.932-8.844 37.32-10.14 42.356-1.54 5.956.304 12.184 4.784 15.74 4.488 3.56 10.672 4.344 15.888 2.08 5.34-2.288 11.584-6.528 14.84-9.02 27.724 17.144 60.264 27.064 95.28 27.064s67.556-9.92 95.28-27.064c3.256 2.492 9.5 6.732 14.84 9.02 5.216 2.264 11.4 1.48 15.888-2.08 4.48-3.556 6.324-9.784 4.784-15.74-1.296-5.036-7.308-30.424-10.14-42.356C231.432 176.316 248 147.948 248 116c0-53.788-46.144-96-104-96h-16z" fill="#f97316" opacity="0.95"/>
+    <circle cx="88" cy="128" r="16" fill="#09090b"/>
+    <circle cx="168" cy="128" r="16" fill="#09090b"/>
+    <path d="M96 180c0 8.837 14.328 16 32 16s32-7.163 32-16" fill="none" stroke="#09090b" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <text x="256" y="440" font-family="system-ui, -apple-system, sans-serif" font-size="56" font-weight="bold" fill="#f4f4f5" text-anchor="middle">Alpha</text>
+</svg>
