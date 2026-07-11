@@ -521,10 +521,15 @@ function AnalysisModal({
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
   const fetchCounterRef = useRef(0);
+  const analysisRef = useRef<StockAnalysis | null>(null);
+
+  useEffect(() => {
+    analysisRef.current = analysis;
+  }, [analysis]);
 
   const fetchAnalysis = useCallback(async (force = false) => {
     const myId = ++fetchCounterRef.current;
-    const isRefresh = force && analysis != null;
+    const isRefresh = force && analysisRef.current != null;
 
     if (isRefresh) {
       setIsRefreshing(true);
@@ -555,7 +560,7 @@ function AnalysisModal({
         setIsRefreshing(false);
       }
     }
-  }, [item.ticker, analysis]);
+  }, [item.ticker]);
 
   useEffect(() => {
     fetchAnalysis(false);
