@@ -1987,11 +1987,15 @@ async function fetchStockAnalysisMetrics(
   // Overview 主页：当前价格 + 公司名 + 行业 + 分析师目标价
   // ============================================================
   if (overviewHtml) {
-    // 当前价格：从 priceData JSON 提取
-    const priceMatch = overviewHtml.match(/priceData:\{([^}]+)\}/);
-    if (priceMatch) {
-      const m = priceMatch[1];
-      const price = m.match(/price:(\d+(?:\.\d+)?)/)?.[1];
+    // 当前价格：从 quote JSON 提取（新格式）
+    // 格式：quote:{c:.16,h:19.74,l:18.62,o:19.11,p:18.78,ep:18.785,...}
+    // ep = after-hours price, p = previous close
+    const quoteMatch = overviewHtml.match(/quote:\{([^}]+)\}/);
+    if (quoteMatch) {
+      const m = quoteMatch[1];
+      const epMatch = m.match(/ep:(\d+(?:\.\d+)?)/);
+      const pMatch = m.match(/p:(\d+(?:\.\d+)?)/);
+      const price = epMatch?.[1] || pMatch?.[1];
       if (price) result.currentPrice = parseFloat(price);
     }
     // 备选：从 HTML 中提取价格 "$123.45"
@@ -2000,10 +2004,53 @@ async function fetchStockAnalysisMetrics(
       if (priceTagMatch) result.currentPrice = parseFloat(priceTagMatch[1]);
     }
 
-    // 分析师目标价：从 priceTargets JSON 提取
+    // 分析师目标价：从 analystTarget JSON 提取（新格式）
+    // 格式：analystTarget:{target:"$21.1",change:"12.35%",changeWord:"upside"}
+    const analystTargetMatch = overviewHtml.match(/analystTarget:\{([^}]+)\}/);
+    if (analystTargetMatch) {
+      const m = analystTargetMatch[1];
+      const targetMatch = m.match(/target:"?\$?([\d.]+)"?/);
+      if (targetMatch) result.targetMeanPrice = parseFloat(targetMatch[1]);
+    }
+
+    // 分析师评级分布：从 analystChart JSON 提取（新格式）
+    // 格式：analystChart:{strongBuy:5,buy:3,hold:12,sell:2,strongSell:2}
+    const analystChartMatch = overviewHtml.match(/analystChart:\{([^}]+)\}/);
+    if (analystChartMatch) {
+      const m = analystChartMatch[1];
+      const sb = parseInt(m.match(/strongBuy:(\d+)/)?.[1] || "0", 10);
+      const b = parseInt(m.match(/buy:(\d+)/)?.[1] || "0", 10);
+      const h = parseInt(m.match(/hold:(\d+)/)?.[1] || "0", 10);
+      const s = parseInt(m.match(/sell:(\d+)/)?.[1] || "0", 10);
+      const ss = parseInt(m.match(/strongSell:(\d+)/)?.[1] || "0", 10);
+      const total = sb + b + h + s + ss;
+      if (total > 0) {
+        result.numberOfAnalysts = total;
+      }
+    }
+
+    // 分析师推荐共识：从 analysts 字段提取（新格式）
+    // 格式：analysts:"Hold"
+    const analystsMatch = overviewHtml.match(/analysts:"([^"]+)"/);
+    if (analystsMatch) {
+      const consensus = analystsMatch[1];
+      const consensusMap: Record<string, number> = {
+        "Strong Buy": 1,
+        Buy: 2,
+        Overweight: 2,
+        Hold: 3,
+        Neutral: 3,
+        Underweight: 4,
+        Sell: 4,
+        "Strong Sell": 5,
+      };
+      result.recommendationMean = consensusMap[consensus] ?? null;
+    }
+
+    // 旧格式备选：从 priceTargets JSON 提取
     // 格式：priceTargets:{source:"spg",avg:113.15,median:115,low:80,high:151.4,numPriceTargets:44}
     const priceTargetsMatch = overviewHtml.match(/priceTargets:\{([^}]+)\}/);
-    if (priceTargetsMatch) {
+    if (priceTargetsMatch && result.targetMeanPrice == null) {
       const m = priceTargetsMatch[1];
       const avgMatch = m.match(/avg:(\d+(?:\.\d+)?)/);
       const medianMatch = m.match(/median:(\d+(?:\.\d+)?)/);
@@ -2014,13 +2061,13 @@ async function fetchStockAnalysisMetrics(
       if (medianMatch) result.targetMedianPrice = parseFloat(medianMatch[1]);
       if (lowMatch) result.targetLowPrice = parseFloat(lowMatch[1]);
       if (highMatch) result.targetHighPrice = parseFloat(highMatch[1]);
-      if (numMatch) result.numberOfAnalysts = parseInt(numMatch[1], 10);
+      if (numMatch && result.numberOfAnalysts == null) result.numberOfAnalysts = parseInt(numMatch[1], 10);
     }
 
-    // 分析师推荐均值：从 currentRatings 提取
+    // 旧格式备选：从 currentRatings 提取推荐均值
     // 格式：currentRatings:{buys:15,holds:20,sells:5,strongBuys:3,strongSells:1,avg:2.3}
     const ratingsMatch = overviewHtml.match(/currentRatings:\{([^}]+)\}/);
-    if (ratingsMatch) {
+    if (ratingsMatch && result.recommendationMean == null) {
       const m = ratingsMatch[1];
       const avgMatch = m.match(/avg:(\d+(?:\.\d+)?)/);
       if (avgMatch) result.recommendationMean = parseFloat(avgMatch[1]);
