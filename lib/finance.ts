@@ -3146,6 +3146,14 @@ export async function fetchFinancialMetrics(
     }
   }
 
+  // ============================================================
+  // 最终计算：目标价上涨空间
+  // 在所有数据源补充完成后，确保 targetUpside 被正确计算
+  // ============================================================
+  if (result.targetMeanPrice != null && result.currentPrice != null && result.currentPrice > 0) {
+    result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+  }
+
   return result;
 }
 
@@ -3203,8 +3211,8 @@ async function fetchFinancialMetricsInternal(
     const saResult = await fetchStockAnalysisMetrics(upper);
     if (saResult) {
       const m = saResult.metrics;
-      // stockanalysis.com 不提供：currentPrice, targetPrice, name, industry 等
-      // 这些由 fetchFinancialMetrics 后处理阶段补充
+      // stockanalysis.com 从 overview 页面提取：currentPrice, targetPrice, name, industry 等
+      // 缺失的数据由 fetchFinancialMetrics 后处理阶段补充
       const result: FinancialMetrics = {
         ticker: upper,
         name: (m.name as string | null) ?? null,
@@ -3214,12 +3222,12 @@ async function fetchFinancialMetricsInternal(
         industry: m.industry ?? null,
         industryPE: m.industryPE ?? null,
         currentPrice: m.currentPrice ?? null,
-        targetMeanPrice: null,
-        targetHighPrice: null,
-        targetLowPrice: null,
-        targetMedianPrice: null,
-        numberOfAnalysts: null,
-        recommendationMean: null,
+        targetMeanPrice: m.targetMeanPrice ?? null,
+        targetHighPrice: m.targetHighPrice ?? null,
+        targetLowPrice: m.targetLowPrice ?? null,
+        targetMedianPrice: m.targetMedianPrice ?? null,
+        numberOfAnalysts: m.numberOfAnalysts ?? null,
+        recommendationMean: m.recommendationMean ?? null,
         targetUpside: null,
         revenueGrowthYoY: m.revenueGrowthYoY ?? null,
         quarterlyRevenueGrowth: m.quarterlyRevenueGrowth ?? null,
