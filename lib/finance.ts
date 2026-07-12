@@ -1984,7 +1984,7 @@ async function fetchStockAnalysisMetrics(
   }
 
   // ============================================================
-  // Overview 主页：当前价格 + 公司名 + 行业
+  // Overview 主页：当前价格 + 公司名 + 行业 + 分析师目标价
   // ============================================================
   if (overviewHtml) {
     // 当前价格：从 priceData JSON 提取
@@ -1998,6 +1998,32 @@ async function fetchStockAnalysisMetrics(
     if (result.currentPrice == null) {
       const priceTagMatch = overviewHtml.match(/"price">\$([\d.]+)</);
       if (priceTagMatch) result.currentPrice = parseFloat(priceTagMatch[1]);
+    }
+
+    // 分析师目标价：从 priceTargets JSON 提取
+    // 格式：priceTargets:{source:"spg",avg:113.15,median:115,low:80,high:151.4,numPriceTargets:44}
+    const priceTargetsMatch = overviewHtml.match(/priceTargets:\{([^}]+)\}/);
+    if (priceTargetsMatch) {
+      const m = priceTargetsMatch[1];
+      const avgMatch = m.match(/avg:(\d+(?:\.\d+)?)/);
+      const medianMatch = m.match(/median:(\d+(?:\.\d+)?)/);
+      const lowMatch = m.match(/low:(\d+(?:\.\d+)?)/);
+      const highMatch = m.match(/high:(\d+(?:\.\d+)?)/);
+      const numMatch = m.match(/numPriceTargets:(\d+)/);
+      if (avgMatch) result.targetMeanPrice = parseFloat(avgMatch[1]);
+      if (medianMatch) result.targetMedianPrice = parseFloat(medianMatch[1]);
+      if (lowMatch) result.targetLowPrice = parseFloat(lowMatch[1]);
+      if (highMatch) result.targetHighPrice = parseFloat(highMatch[1]);
+      if (numMatch) result.numberOfAnalysts = parseInt(numMatch[1], 10);
+    }
+
+    // 分析师推荐均值：从 currentRatings 提取
+    // 格式：currentRatings:{buys:15,holds:20,sells:5,strongBuys:3,strongSells:1,avg:2.3}
+    const ratingsMatch = overviewHtml.match(/currentRatings:\{([^}]+)\}/);
+    if (ratingsMatch) {
+      const m = ratingsMatch[1];
+      const avgMatch = m.match(/avg:(\d+(?:\.\d+)?)/);
+      if (avgMatch) result.recommendationMean = parseFloat(avgMatch[1]);
     }
 
     // 公司名
