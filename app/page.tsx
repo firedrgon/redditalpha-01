@@ -18,8 +18,12 @@ const SUBREDDITS = [
 // 刷新间隔：10 分钟
 const REFRESH_INTERVAL = 10 * 60; // 秒
 
-// 外部跳转链接生成
-const futuUrl = (ticker: string) => `https://www.futunn.com/stock/${ticker}-US`;
+// 外部跳转链接生成（A 股用 .SH/.SZ 后缀，美股用 -US）
+const isCNTicker = (t: string) => /^\d{6}\.(SH|SZ)$/.test(t);
+const futuUrl = (ticker: string) =>
+  isCNTicker(ticker)
+    ? `https://www.futunn.com/stock/${ticker.replace(".", "")}`
+    : `https://www.futunn.com/stock/${ticker}-US`;
 const tradingViewUrl = (ticker: string) =>
   `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
 
@@ -402,6 +406,11 @@ function FavoriteCard({
               <span className="text-lg font-bold text-white tracking-wide">
                 {item.ticker}
               </span>
+              {isCNTicker(item.ticker) && (
+                <span className="inline-flex items-center rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
+                  A股
+                </span>
+              )}
               {isPinned && (
                 <span className="inline-flex items-center rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
                   置顶
@@ -2906,6 +2915,8 @@ export default function Home() {
   const [showStrategies, setShowStrategies] = useState(false);
   // 收藏筛选
   const [favFilter, setFavFilter] = useState<"all" | "starred" | "pinned">("all");
+  // 市场筛选：全部 / 美股 / A股
+  const [marketFilter, setMarketFilter] = useState<"all" | "us" | "cn">("all");
 
   // 初始化：从后端 API 读取收藏
   useEffect(() => {
@@ -3112,7 +3123,7 @@ export default function Home() {
 
   // 手动添加：实时校验
   useEffect(() => {
-    const sym = manualTicker.trim().toUpperCase();
+    const sym = manualTicker.trim();
     if (!sym) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setValidateError(null);
@@ -3132,10 +3143,14 @@ export default function Home() {
         const json = await res.json();
         if (json.valid) {
           setValidateHint(
-            `✓ 有效${json.name ? ` · ${json.name}` : ""}${json.quoteType ? ` · ${json.quoteType}` : ""}`
+            `✓ 有效${json.name ? ` · ${json.name}` : ""}${json.quoteType ? ` · ${json.quoteType}` : ""}${json.market === "CN" ? " · A股" : ""}`
           );
           if (json.name && !manualName) {
             setManualName(json.name);
+          }
+          // A 股规范化后的 ticker（600519.SH）回填，保证后续添加/分析使用正确格式
+          if (json.ticker && json.ticker !== sym.toUpperCase()) {
+            setManualTicker(json.ticker);
           }
         } else {
           setValidateError(json.error || "未找到该股票代码");
@@ -3464,6 +3479,36 @@ export default function Home() {
               )}
             </div>
 
+            {/* 市场筛选：全部 / 美股 / A股 */}
+            {favorites.length > 0 && (
+              <div className="mb-4 flex gap-1.5">
+                {(["all", "us", "cn"] as const).map((m) => {
+                  const marketLabels = { all: "全部市场", us: "美股", cn: "A股" };
+                  const marketCounts = {
+                    all: favorites.length,
+                    us: favorites.filter((x) => !isCNTicker(x.ticker)).length,
+                    cn: favorites.filter((x) => isCNTicker(x.ticker)).length,
+                  };
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMarketFilter(m)}
+                      className={`rounded-lg border px-3 py-1 text-xs font-medium transition-all ${
+                        marketFilter === m
+                          ? m === "cn"
+                            ? "border-red-500/50 bg-red-500/15 text-red-400"
+                            : "border-orange-500/50 bg-orange-500/15 text-orange-400"
+                          : "border-zinc-700 text-zinc-400 hover:border-orange-500/30 hover:text-zinc-300"
+                      }`}
+                    >
+                      {marketLabels[m]} ({marketCounts[m]})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* 手动添加收藏（带校验） */}
             <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
               <div className="mb-2 flex items-center justify-between">
@@ -3471,7 +3516,7 @@ export default function Home() {
                   手动添加收藏
                 </span>
                 <span className="text-[11px] text-zinc-600">
-                  输入后会自动通过 Yahoo Finance 校验
+                  支持美股(如 AAPL)与 A 股(如 600519 / 000001)，自动校验
                 </span>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -3485,7 +3530,7 @@ export default function Home() {
                         handleManualAdd();
                       }
                     }}
-                    placeholder="股票/代币代码 (如 AAPL)"
+                    placeholder="股票代码 (美股 AAPL / A股 600519)"
                     className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none focus:ring-1 focus:ring-orange-500/40"
                   />
                 </div>
@@ -3530,6 +3575,11 @@ export default function Home() {
                     favFilter === "all" ? true :
                     favFilter === "starred" ? !!item.starred :
                     favFilter === "pinned" ? !!item.pinned : true
+                  )
+                  .filter((item) =>
+                    marketFilter === "all" ? true :
+                    marketFilter === "cn" ? isCNTicker(item.ticker) :
+                    marketFilter === "us" ? !isCNTicker(item.ticker) : true
                   )
                   .map((item) => (
                   <FavoriteCard

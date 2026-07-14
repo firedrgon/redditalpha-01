@@ -86,6 +86,19 @@ const STATIC_NAMES: Record<string, string> = {
   ZOM: "Zomedica", CEI: "Camber Energy", PROG: "Progenity",
   ATER: "Aterian", SAVA: "Cassava Sciences", BBBY: "Bed Bath & Beyond",
   MULN: "Mullen Automotive", INDO: "Indonesia Energy",
+  // A 股（沪深主板/创业板/科创板，代码.交易所 格式）
+  "600519.SH": "贵州茅台", "601398.SH": "工商银行", "601318.SH": "中国平安",
+  "600036.SH": "招商银行", "601166.SH": "兴业银行", "000858.SZ": "五粮液",
+  "000333.SZ": "美的集团", "000001.SZ": "平安银行", "002594.SZ": "比亚迪",
+  "300750.SZ": "宁德时代", "600276.SH": "恒瑞医药", "603259.SH": "药明康德",
+  "600030.SH": "中信证券", "601628.SH": "中国人寿", "600887.SH": "伊利股份",
+  "000651.SZ": "格力电器", "600031.SH": "三一重工", "601012.SH": "隆基绿能",
+  "002475.SZ": "立讯精密", "300059.SZ": "东方财富", "600900.SH": "长江电力",
+  "688981.SH": "中芯国际", "688111.SH": "金山办公", "300760.SZ": "迈瑞医疗",
+  "002415.SZ": "海康威视", "000725.SZ": "京东方A", "601899.SH": "紫金矿业",
+  "600585.SH": "海螺水泥", "601888.SH": "中国中免", "002714.SZ": "牧原股份",
+  "600438.SH": "通威股份", "601633.SH": "长城汽车", "601238.SH": "广汽集团",
+  "600009.SH": "上海机场", "000002.SZ": "万科A", "600048.SH": "保利发展",
 };
 
 // ============================================================
@@ -149,19 +162,65 @@ async function fetchNameFromYahoo(ticker: string): Promise<string | null> {
 }
 
 // ============================================================
+// A 股名称解析（雪球搜索接口）
+// ============================================================
+async function fetchCNNameFromXueqiu(ticker: string): Promise<string | null> {
+  try {
+    const { toXueqiuSymbol } = await import("./market");
+    const symbol = toXueqiuSymbol(ticker);
+    // 雪球 quote 接口返回股票名称
+    const res = await fetch(
+      `https://stock.xueqiu.com/v5/stock/quote.json?symbol=${symbol}&extend=detail`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+          Accept: "application/json",
+          Referer: "https://xueqiu.com/",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.data?.quote?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
 // 单个 ticker 名称解析
 // ============================================================
 export async function resolveTickerName(ticker: string): Promise<string | null> {
   const upper = ticker.toUpperCase();
 
-  // 1. 静态字典
-  if (STATIC_NAMES[upper]) return STATIC_NAMES[upper];
-
   // 2. 内存缓存
   const cached = getCached(upper);
   if (cached !== undefined) return cached;
 
-  // 3. 动态查询 Yahoo Finance
+  // A 股走雪球解析
+  const { detectMarket, normalizeCNTicker } = await import("./market");
+  if (detectMarket(upper) === "CN") {
+    const cnTicker = normalizeCNTicker(upper) ?? upper;
+    // 静态 A 股字典命中优先
+    if (STATIC_NAMES[cnTicker]) {
+      setCached(upper, STATIC_NAMES[cnTicker]);
+      return STATIC_NAMES[cnTicker];
+    }
+    const name = await fetchCNNameFromXueqiu(cnTicker);
+    setCached(upper, name);
+    return name;
+  }
+
+  // 1. 美股静态字典
+  if (STATIC_NAMES[upper]) {
+    setCached(upper, STATIC_NAMES[upper]);
+    return STATIC_NAMES[upper];
+  }
+
+  // 3. 动态查询 Yahoo Finance（美股）
   const name = await fetchNameFromYahoo(upper);
   setCached(upper, name);
   return name;

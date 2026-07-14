@@ -13,6 +13,7 @@ import { getEnabledStrategiesDB as getEnabledStrategies } from "@/lib/db";
 import { getAnalysis, saveAnalysis } from "@/lib/db";
 import { recordFinanceSnapshot } from "@/lib/db";
 import { getDbInitError } from "@/lib/db/prisma";
+import { detectMarket, normalizeCNTicker } from "@/lib/market";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -161,7 +162,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const upper = ticker.toUpperCase();
+  // 规范化：A 股补全 .SH/.SZ 后缀，美股统一大写
+  const upper =
+    detectMarket(ticker) === "CN"
+      ? (normalizeCNTicker(ticker) ?? ticker.toUpperCase())
+      : ticker.toUpperCase();
 
   // 数据库未配置时直接报错，不走内存降级——否则用户会以为数据来自 DB，
   // 实际是内存里的旧数据，删除 DB 记录后页面仍显示，造成困惑。

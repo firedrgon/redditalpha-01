@@ -9,16 +9,29 @@ import {
   setStarred,
   clearAnalysis,
 } from "@/lib/db";
+import { detectMarket, normalizeCNTicker } from "@/lib/market";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+/** 规范化 ticker：A 股补全 .SH/.SZ 后缀，美股统一大写 */
+function normalizeTicker(raw: string): string {
+  const t = raw.trim();
+  if (detectMarket(t) === "CN") {
+    return normalizeCNTicker(t) ?? t.toUpperCase();
+  }
+  return t.toUpperCase();
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const ticker = searchParams.get("ticker");
 
   if (ticker) {
-    const fav = await isFavorite(ticker);
-    return NextResponse.json({ ticker: ticker.toUpperCase(), isFavorite: fav });
+    const normalized = normalizeTicker(ticker);
+    const fav = await isFavorite(normalized);
+    return NextResponse.json({ ticker: normalized, isFavorite: fav });
   }
 
   const favorites = await listFavorites();
@@ -34,7 +47,7 @@ interface AddBody {
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as AddBody;
-  const ticker = body.ticker?.trim().toUpperCase();
+  const ticker = normalizeTicker(body.ticker ?? "");
 
   if (!ticker) {
     return NextResponse.json({ error: "缺少 ticker" }, { status: 400 });
@@ -60,7 +73,7 @@ interface PatchBody {
 
 export async function PATCH(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as PatchBody;
-  const ticker = body.ticker?.trim().toUpperCase();
+  const ticker = normalizeTicker(body.ticker ?? "");
 
   if (!ticker) {
     return NextResponse.json({ error: "缺少 ticker" }, { status: 400 });
@@ -109,11 +122,13 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const ticker = searchParams.get("ticker");
+  const rawTicker = searchParams.get("ticker");
 
-  if (!ticker) {
+  if (!rawTicker) {
     return NextResponse.json({ error: "缺少 ticker 参数" }, { status: 400 });
   }
+
+  const ticker = normalizeTicker(rawTicker);
 
   try {
     await removeFavorite(ticker);

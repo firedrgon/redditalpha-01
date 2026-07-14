@@ -24,6 +24,8 @@ import {
   getTiingoApiKey as getConfigTiingoKey,
   getFinnhubApiKey as getConfigFinnhubKey,
 } from "./finance-config";
+import { detectMarket, normalizeCNTicker } from "./market";
+import { fetchCNFinancialMetrics } from "./finance-cn";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -118,7 +120,9 @@ export interface FinancialMetrics {
     | "av+tiingo"
     | "yahoo"
     | "yahoo-v7"
-    | "fallback";
+    | "fallback"
+    | "xueqiu"
+    | "eastmoney";
   warnings: string[];
 }
 
@@ -3248,6 +3252,15 @@ async function fetchFinancialMetricsInternal(
 ): Promise<FinancialMetrics> {
   const upper = ticker.trim().toUpperCase();
   const warnings: string[] = [];
+
+  // ============================================================
+  // A 股分流：识别为 A 股（6 位数字 / .SH / .SZ / SH/SZ 前缀）时
+  // 走雪球 + 东方财富数据源，不进入美股数据源链
+  // ============================================================
+  if (detectMarket(upper) === "CN") {
+    const cnTicker = normalizeCNTicker(upper) ?? upper;
+    return fetchCNFinancialMetrics(cnTicker);
+  }
 
   // ============================================================
   // 0. 优先 stockanalysis.com（核心 5 项指标数据源）

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { detectMarket, normalizeCNTicker, toXueqiuSymbol } from "@/lib/market";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 interface YahooSearchQuote {
   symbol?: string;
@@ -17,24 +20,102 @@ interface YahooSearchResponse {
 /**
  * GET /api/validate-ticker?ticker=AAPL
  *
- * 用 Yahoo Finance Search API 校验 ticker 是否为有效股票/ETF 标的。
+ * A 股（6 位数字 / .SH / .SZ / SH/SZ 前缀）走雪球接口校验；
+ * 其他（美股/ETF/加密）走 Yahoo Finance Search API。
+ *
  * 返回：
  *   - valid: boolean
- *   - symbol: 标准化后的 symbol
- *   - name: 公司名（如果命中）
- *   - quoteType: EQUITY / ETF / MUTUALFUND / CRYPTOCURRENCY 等
+ *   - ticker: 标准化后的 ticker（A 股为 600519.SH 格式）
+ *   - name: 公司名
+ *   - quoteType: EQUITY / ETF / ...
+ *   - market: "CN" | "US" | ...
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const ticker = (searchParams.get("ticker") || "").trim().toUpperCase();
+  const raw = (searchParams.get("ticker") || "").trim();
 
-  if (!ticker) {
+  if (!raw) {
     return NextResponse.json(
       { valid: false, error: "缺少 ticker 参数" },
       { status: 400 }
     );
   }
 
+  const ticker = raw.toUpperCase();
+  const market = detectMarket(raw);
+
+  // ============================================================
+  // A 股校验：雪球 quote 接口
+  // ============================================================
+  if (market === "CN") {
+    const cnTicker = normalizeCNTicker(raw);
+    if (!cnTicker) {
+      return NextResponse.json({
+        valid: false,
+        ticker,
+        market: "CN",
+        error: "A 股代码格式不正确（需为 6 位数字，可带 .SH/.SZ 后缀）",
+      });
+    }
+
+    try {
+      const symbol = toXueqiuSymbol(cnTicker);
+      const res = await fetch(
+        `https://stock.xueqiu.com/v5/stock/quote.json?symbol=${symbol}&extend=detail`,
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            Accept: "application/json",
+            Referer: "https://xueqiu.com/",
+          },
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+
+      if (!res.ok) {
+        return NextResponse.json({
+          valid: false,
+          ticker: cnTicker,
+          market: "CN",
+          error: `雪球接口返回 ${res.status}，A 股代码可能无效`,
+        });
+      }
+
+      const data = await res.json();
+      const quote = data?.data?.quote;
+      if (!quote || !quote.name) {
+        return NextResponse.json({
+          valid: false,
+          ticker: cnTicker,
+          market: "CN",
+          error: "未在雪球找到该 A 股代码",
+        });
+      }
+
+      return NextResponse.json({
+        valid: true,
+        ticker: cnTicker,
+        name: quote.name as string,
+        quoteType: "EQUITY",
+        market: "CN",
+        exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
+        exactMatch: true,
+      });
+    } catch (err) {
+      return NextResponse.json({
+        valid: false,
+        ticker: cnTicker,
+        market: "CN",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // ============================================================
+  // 美股 / 其他：Yahoo Finance Search API
+  // ============================================================
   try {
     const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(
       ticker
@@ -52,6 +133,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         valid: false,
         ticker,
+        market,
         error: `Yahoo Search HTTP ${res.status}`,
       });
     }
@@ -75,6 +157,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         valid: false,
         ticker,
+        market,
         error: "未在 Yahoo Finance 中找到该 ticker",
       });
     }
@@ -97,6 +180,7 @@ export async function GET(request: NextRequest) {
       name: hit.longname || hit.shortname || null,
       quoteType: hit.quoteType || null,
       exchange: hit.exchange || null,
+      market,
       exactMatch: exact != null,
     });
   } catch (err) {
@@ -104,6 +188,7 @@ export async function GET(request: NextRequest) {
       {
         valid: false,
         ticker,
+        market,
         error: err instanceof Error ? err.message : String(err),
       },
       { status: 500 }
