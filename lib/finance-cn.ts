@@ -761,6 +761,258 @@ async function fetchEastmoneyMetrics(
 }
 
 /* ------------------------------------------------------------------ */
+/* 东方财富 F10 财务补充（速动比率/营收增长/5年ROE/行业PE/PEG 数据）     */
+/* ------------------------------------------------------------------ */
+
+interface EMZyzbRow {
+  REPORT_DATE?: string;
+  REPORT_TYPE?: string; // "年报" | "一季报" | "中报" | "三季报"
+  ROEJQ?: number; // 加权 ROE（百分比，如 4.15 表示 4.15%）
+  XSMLL?: number; // 销售毛利率（百分比）
+  XSJLL?: number; // 销售净利率（百分比）
+  TOTALOPERATEREVE?: number; // 营业总收入
+  TOTALOPERATEREVETZ?: number; // 营收同比增长（百分比）
+  PARENTNETPROFIT?: number; // 归母净利润
+  PARENTNETPROFITTZ?: number; // 净利润同比增长（百分比）
+  LD?: number; // 流动比率
+  SD?: number; // 速动比率
+  BPS?: number; // 每股净资产
+}
+
+interface EMZyzbResp {
+  data?: EMZyzbRow[];
+}
+
+interface EMCpdRow {
+  BOARD_CODE?: string; // 行业板块代码，如 BK0465
+  BOARD_NAME?: string; // 行业名，如 "化学制药"
+  PUBLISHNAME?: string; // 行业别名
+  YSTZ?: number; // 营收同比增长（百分比）
+  SJLTZ?: number; // 净利润同比增长（百分比）
+  WEIGHTAVG_ROE?: number; // 加权 ROE（百分比）
+  XSMLL?: number; // 销售毛利率（百分比）
+  TOTAL_OPERATE_INCOME?: number;
+  PARENT_NETPROFIT?: number;
+  REPORTDATE?: string;
+}
+
+interface EMCpdResp {
+  result?: { data?: EMCpdRow[] };
+}
+
+interface FinanceSupplement {
+  revenueGrowthYoY: number | null;
+  netProfitGrowthPct: number | null; // 净利润同比增长（百分比原值，用于 PEG 计算）
+  roe: number | null;
+  returnOnEquity5yAvg: number | null;
+  roeHistory: { year: number; roe: number | null }[];
+  grossMargin: number | null;
+  profitMargin: number | null;
+  quickRatio: number | null;
+  currentRatio: number | null;
+  totalRevenue: number | null;
+  revenueHistory: { year: number; revenue: number | null }[];
+  industry: string | null;
+  industryPE: number | null;
+}
+
+/**
+ * 从东方财富 F10 获取完整财务指标补充（含速动比率/营收增长/净利率/多期ROE）。
+ *
+ * 数据源：
+ *   1. ZyzbAjaxNew — F10 主要指标，含速动比率(SD)/流动比率(LD)/净利率(XSJLL)/多期ROE
+ *   2. RPT_LICO_FN_CPD — datacenter 财务摘要，含行业板块代码(BOARD_CODE)和营收增长(YSTZ)
+ *   3. push2 clist — 用 BOARD_CODE 取行业成分股 PE 平均值作为行业 PE
+ *
+ * 返回的百分比字段已 /100 转小数（与 FinancialMetrics 约定一致），
+ * 但 netProfitGrowthPct 保留百分比原值供 PEG 计算（PEG = PE / 增长率%）。
+ */
+async function fetchEastmoneyFinanceSupplement(
+  ticker: string
+): Promise<FinanceSupplement | null> {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return null;
+  const [, code, ex] = m;
+  const f10Code = `${ex}${code}`; // SH600276
+  const emCode = `${code}.${ex}`; // 600276.SH
+
+  // 1. ZyzbAjaxNew：
+  //    type=0 — 最新一期完整指标（速动比率/流动比率/净利率/营收增长/当前ROE）
+  //    type=1 — 年报历史（用于近 5 年平均 ROE 和历史营收；type=1 仅返回年报）
+  // 并行请求两个 type，各 8s 超时。
+  let zyzbRows: EMZyzbRow[] = []; // type=0 最新一期
+  let annualRows: EMZyzbRow[] = []; // type=1 年报历史
+  const [zyzbRes, annualRes] = await Promise.allSettled([
+    (async () => {
+      const res = await fetch(
+        `https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZyzbAjaxNew?type=0&code=${f10Code}&pageNumber=1&pageSize=5`,
+        {
+          headers: {
+            "User-Agent": UA,
+            Referer: "https://emweb.securities.eastmoney.com/",
+          },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (!res.ok) return null;
+      return (await res.json()) as EMZyzbResp;
+    })(),
+    (async () => {
+      const res = await fetch(
+        `https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZyzbAjaxNew?type=1&code=${f10Code}&pageNumber=1&pageSize=10`,
+        {
+          headers: {
+            "User-Agent": UA,
+            Referer: "https://emweb.securities.eastmoney.com/",
+          },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+      if (!res.ok) return null;
+      return (await res.json()) as EMZyzbResp;
+    })(),
+  ]);
+  if (zyzbRes.status === "fulfilled" && zyzbRes.value) {
+    zyzbRows = zyzbRes.value.data ?? [];
+  }
+  if (annualRes.status === "fulfilled" && annualRes.value) {
+    annualRows = annualRes.value.data ?? [];
+  }
+
+  // 2. RPT_LICO_FN_CPD 获取行业板块代码 + 营收增长（Zyzb 失败时降级）
+  let cpd: EMCpdRow | null = null;
+  try {
+    const res = await fetch(
+      `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_LICO_FN_CPD&columns=ALL&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=1&sortColumns=REPORTDATE&sortTypes=-1`,
+      {
+        headers: {
+          "User-Agent": UA,
+          Referer: "https://data.eastmoney.com/",
+        },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (res.ok) {
+      const json = (await res.json()) as EMCpdResp;
+      cpd = json.result?.data?.[0] ?? null;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (zyzbRows.length === 0 && annualRows.length === 0 && !cpd) return null;
+
+  const latest = zyzbRows[0] ?? annualRows[0] ?? null;
+
+  // 营收同比增长：优先 Zyzb，降级 CPD
+  const revenueGrowthPct =
+    latest?.TOTALOPERATEREVETZ ?? cpd?.YSTZ ?? null;
+  const revenueGrowthYoY =
+    revenueGrowthPct != null ? revenueGrowthPct / 100 : null;
+
+  // 净利润同比增长（保留百分比原值用于 PEG 计算）
+  const netProfitGrowthPct =
+    latest?.PARENTNETPROFITTZ ?? cpd?.SJLTZ ?? null;
+
+  // 当前 ROE（小数）
+  const roePct = latest?.ROEJQ ?? cpd?.WEIGHTAVG_ROE ?? null;
+  const roe = roePct != null ? roePct / 100 : null;
+
+  // 近 5 年年报平均 ROE（annualRows 来自 type=1，全部为年报，按时间倒序）
+  const annualRoes = annualRows
+    .filter((r) => typeof r.ROEJQ === "number")
+    .slice(0, 5);
+  const returnOnEquity5yAvg =
+    annualRoes.length > 0
+      ? annualRoes.reduce((s, r) => s + (r.ROEJQ ?? 0), 0) /
+        annualRoes.length /
+        100
+      : null;
+
+  const roeHistory = annualRows
+    .map((r) => ({
+      year: r.REPORT_DATE ? new Date(r.REPORT_DATE).getFullYear() : 0,
+      roe: r.ROEJQ != null ? r.ROEJQ / 100 : null,
+    }))
+    .filter((x) => x.year && x.roe != null)
+    .reverse();
+
+  // 毛利率/净利率
+  const grossMarginPct = latest?.XSMLL ?? cpd?.XSMLL ?? null;
+  const grossMargin = grossMarginPct != null ? grossMarginPct / 100 : null;
+  const profitMargin =
+    latest?.XSJLL != null ? latest.XSJLL / 100 : null;
+
+  // 速动比率/流动比率（Zyzb 独有）
+  const quickRatio = latest?.SD ?? null;
+  const currentRatio = latest?.LD ?? null;
+
+  // 营收总额
+  const totalRevenue =
+    latest?.TOTALOPERATEREVE ?? cpd?.TOTAL_OPERATE_INCOME ?? null;
+
+  // 历史营收（annualRows 来自 type=1 年报）
+  const revenueHistory = annualRows
+    .map((r) => ({
+      year: r.REPORT_DATE ? new Date(r.REPORT_DATE).getFullYear() : 0,
+      revenue: r.TOTALOPERATEREVE ?? null,
+    }))
+    .filter((x) => x.year && x.revenue != null)
+    .reverse();
+
+  // 行业
+  const industry = cpd?.BOARD_NAME ?? cpd?.PUBLISHNAME ?? null;
+
+  // 行业 PE：用板块代码取行业成分股 PE 平均值
+  let industryPE: number | null = null;
+  if (cpd?.BOARD_CODE) {
+    try {
+      const res = await fetch(
+        `https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=300&po=1&np=1&fltt=2&invt=2&fs=b:${cpd.BOARD_CODE}&fields=f12,f9`,
+        {
+          headers: {
+            "User-Agent": UA,
+            Referer: "https://quote.eastmoney.com/",
+          },
+          signal: AbortSignal.timeout(6000),
+        }
+      );
+      if (res.ok) {
+        const json = (await res.json()) as {
+          data?: { diff?: Array<{ f9?: number }> };
+        };
+        const pes = (json.data?.diff ?? [])
+          .map((x) => x.f9)
+          .filter(
+            (v): v is number => typeof v === "number" && v > 0 && v < 1000
+          );
+        if (pes.length > 0) {
+          industryPE = pes.reduce((s, v) => s + v, 0) / pes.length;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {
+    revenueGrowthYoY,
+    netProfitGrowthPct,
+    roe,
+    returnOnEquity5yAvg,
+    roeHistory,
+    grossMargin,
+    profitMargin,
+    quickRatio,
+    currentRatio,
+    totalRevenue,
+    revenueHistory,
+    industry,
+    industryPE,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Yahoo Finance A 股降级（海外服务器可访问）                           */
 /* ------------------------------------------------------------------ */
 
@@ -1043,97 +1295,148 @@ async function fetchYahooCNMetrics(
 /* ------------------------------------------------------------------ */
 
 /**
- * 获取 A 股财务数据：并行请求同花顺 + 腾讯，取最优结果。
+ * 获取 A 股财务数据：并行请求同花顺 + 腾讯 + 东方财富 F10 财务补充。
  *
- * 同花顺：行情 + 基本面（ROE/毛利率），数据最全
+ * 同花顺：行情 + 基本面（ROE/毛利率），数据较全但缺速动比率/营收增长/5年ROE/行业PE
  * 腾讯：行情（名称/价格/PE/PB/市值），全球可访问，最稳定
+ * 东方财富 F10：完整财务指标（速动比率/营收增长/净利率/多期ROE/行业PE），用于补充缺失字段
  *
- * 策略：并行请求两个数据源（各 8s 超时），优先用同花顺（数据更全）。
- * 同花顺失败则用腾讯。两者都失败则降级到雪球/东方财富。
+ * 策略：并行三个数据源，以同花顺（或腾讯）为行情基础，
+ *       用东方财富 F10 补充缺失的财务指标，并计算 PEG = PE / 净利润增长率。
+ *       同花顺+腾讯都失败时降级到东方财富完整数据源 / 雪球。
  */
 export async function fetchCNFinancialMetrics(
   ticker: string
 ): Promise<FinancialMetrics> {
-  // 并行请求同花顺和腾讯，各 8s 超时
-  const [thsResult, tencentResult] = await Promise.allSettled([
+  // 并行请求：同花顺（行情+基本面）、腾讯（行情备份）、东方财富 F10 财务补充
+  const [thsResult, tencentResult, emSuppResult] = await Promise.allSettled([
     fetchTonghuashunMetrics(ticker),
     fetchTencentMetrics(ticker),
+    fetchEastmoneyFinanceSupplement(ticker),
   ]);
 
   const thsMetrics = thsResult.status === "fulfilled" ? thsResult.value : null;
-  const tencentMetrics = tencentResult.status === "fulfilled" ? tencentResult.value : null;
+  const tencentMetrics =
+    tencentResult.status === "fulfilled" ? tencentResult.value : null;
+  const emSupp =
+    emSuppResult.status === "fulfilled" ? emSuppResult.value : null;
 
-  // 优先用同花顺（数据更全：含 ROE/毛利率）
-  if (thsMetrics) {
-    return thsMetrics;
+  // 确定行情基础数据源：优先同花顺，其次腾讯
+  let base: FinancialMetrics | null = thsMetrics ?? tencentMetrics ?? null;
+  const warnings: string[] = [];
+
+  if (!thsMetrics && tencentMetrics) {
+    warnings.push("同花顺数据获取失败，降级到腾讯财经");
   }
 
-  // 同花顺失败，用腾讯（至少有名称/价格/PE/PB/市值）
-  if (tencentMetrics) {
-    tencentMetrics.warnings = ["同花顺数据获取失败，降级到腾讯财经"];
-    return tencentMetrics;
-  }
-
-  // 两者都失败，降级到雪球/东方财富
-  const warnings: string[] = ["同花顺+腾讯均获取失败"];
-
-  try {
-    const xq = await fetchXueqiuMetrics(ticker);
-    if (xq) {
-      xq.warnings = [...xq.warnings, ...warnings];
-      return xq;
+  // 同花顺+腾讯都失败，降级到东方财富完整数据源 / 雪球
+  if (!base) {
+    warnings.push("同花顺+腾讯均获取失败");
+    try {
+      const em = await fetchEastmoneyMetrics(ticker);
+      if (em) {
+        base = em;
+      } else {
+        warnings.push("东方财富完整数据源获取失败");
+      }
+    } catch (err) {
+      warnings.push(
+        `东方财富异常: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
-    warnings.push("雪球数据获取失败");
-  } catch (err) {
-    warnings.push(`雪球异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  try {
-    const em = await fetchEastmoneyMetrics(ticker);
-    if (em) {
-      em.warnings = [...em.warnings, ...warnings];
-      return em;
+  if (!base) {
+    try {
+      const xq = await fetchXueqiuMetrics(ticker);
+      if (xq) {
+        base = xq;
+      } else {
+        warnings.push("雪球数据获取失败");
+      }
+    } catch (err) {
+      warnings.push(
+        `雪球异常: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
-    warnings.push("东方财富数据获取失败");
-  } catch (err) {
-    warnings.push(`东方财富异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 全 null fallback
-  return {
-    ticker,
-    name: null,
-    trailingPE: null,
-    forwardPE: null,
-    pegRatio: null,
-    industry: null,
-    industryPE: null,
-    sector: null,
-    industryRank: null,
-    currentPrice: null,
-    targetMeanPrice: null,
-    targetHighPrice: null,
-    targetLowPrice: null,
-    targetMedianPrice: null,
-    numberOfAnalysts: null,
-    recommendationMean: null,
-    targetUpside: null,
-    revenueGrowthYoY: null,
-    quarterlyRevenueGrowth: null,
-    roe: null,
-    returnOnEquity5yAvg: null,
-    roeHistory: [],
-    quickRatio: null,
-    currentRatio: null,
-    grossMargin: null,
-    profitMargin: null,
-    totalRevenue: null,
-    revenueHistory: [],
-    marketCap: null,
-    currency: "CNY",
-    news: [],
-    fetchedAt: new Date().toISOString(),
-    dataSource: "fallback",
-    warnings: ["A 股数据源（同花顺/腾讯/雪球/东方财富）均获取失败", ...warnings],
-  };
+  // 全部失败，返回空 fallback
+  if (!base) {
+    return {
+      ticker,
+      name: null,
+      trailingPE: null,
+      forwardPE: null,
+      pegRatio: null,
+      industry: null,
+      industryPE: null,
+      sector: null,
+      industryRank: null,
+      currentPrice: null,
+      targetMeanPrice: null,
+      targetHighPrice: null,
+      targetLowPrice: null,
+      targetMedianPrice: null,
+      numberOfAnalysts: null,
+      recommendationMean: null,
+      targetUpside: null,
+      revenueGrowthYoY: null,
+      quarterlyRevenueGrowth: null,
+      roe: null,
+      returnOnEquity5yAvg: null,
+      roeHistory: [],
+      quickRatio: null,
+      currentRatio: null,
+      grossMargin: null,
+      profitMargin: null,
+      totalRevenue: null,
+      revenueHistory: [],
+      marketCap: null,
+      currency: "CNY",
+      news: [],
+      fetchedAt: new Date().toISOString(),
+      dataSource: "fallback",
+      warnings: [
+        "A 股数据源（同花顺/腾讯/雪球/东方财富）均获取失败",
+        ...warnings,
+      ],
+    };
+  }
+
+  if (warnings.length > 0) {
+    base.warnings = [...warnings, ...base.warnings];
+  }
+
+  // 合并东方财富 F10 财务补充（覆盖缺失的财务指标字段）
+  if (emSupp) {
+    // 东方财富财务指标更准确（加权ROE/毛利率/速动比率/多期ROE），有值则覆盖
+    if (emSupp.revenueGrowthYoY != null)
+      base.revenueGrowthYoY = emSupp.revenueGrowthYoY;
+    if (emSupp.roe != null) base.roe = emSupp.roe;
+    if (emSupp.returnOnEquity5yAvg != null)
+      base.returnOnEquity5yAvg = emSupp.returnOnEquity5yAvg;
+    if (emSupp.roeHistory.length > 0) base.roeHistory = emSupp.roeHistory;
+    if (emSupp.grossMargin != null) base.grossMargin = emSupp.grossMargin;
+    if (emSupp.profitMargin != null) base.profitMargin = emSupp.profitMargin;
+    if (emSupp.quickRatio != null) base.quickRatio = emSupp.quickRatio;
+    if (emSupp.currentRatio != null) base.currentRatio = emSupp.currentRatio;
+    if (emSupp.totalRevenue != null) base.totalRevenue = emSupp.totalRevenue;
+    if (emSupp.revenueHistory.length > 0)
+      base.revenueHistory = emSupp.revenueHistory;
+    if (emSupp.industry != null) base.industry = emSupp.industry;
+    if (emSupp.industryPE != null) base.industryPE = emSupp.industryPE;
+    // 计算 PEG = PE / 净利润增长率（用百分比原值，如 PE=40 / 增长21.78% = 1.84）
+    if (
+      base.pegRatio == null &&
+      base.trailingPE != null &&
+      base.trailingPE > 0 &&
+      emSupp.netProfitGrowthPct != null &&
+      emSupp.netProfitGrowthPct > 0
+    ) {
+      base.pegRatio = base.trailingPE / emSupp.netProfitGrowthPct;
+    }
+  }
+
+  return base;
 }
