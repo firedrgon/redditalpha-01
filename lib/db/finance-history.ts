@@ -231,3 +231,27 @@ export async function getLatestFinanceSnapshot(
     return history.length > 0 ? history[history.length - 1] : null;
   }
 }
+
+/**
+ * 删除指定 ticker 的财务快照记录。
+ * 移除收藏时调用，避免残留无主数据。
+ * 记录不存在（Prisma P2025）属正常情况，不视为错误。
+ */
+export async function clearFinanceSnapshot(ticker: string): Promise<void> {
+  const upper = ticker.toUpperCase();
+  const prisma = getPrisma();
+  if (!prisma) {
+    memorySnapshots.delete(upper);
+    return;
+  }
+
+  try {
+    await prisma.financeSnapshot.delete({ where: { ticker: upper } });
+  } catch (err: unknown) {
+    // Prisma P2025: 记录不存在，属正常情况，忽略
+    if (err && typeof err === "object" && "code" in err && err.code === "P2025") {
+      return;
+    }
+    throw err;
+  }
+}

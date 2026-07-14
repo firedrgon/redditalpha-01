@@ -8,6 +8,7 @@ import {
   setPinned,
   setStarred,
   clearAnalysis,
+  clearFinanceSnapshot,
 } from "@/lib/db";
 import { detectMarket, normalizeCNTicker } from "@/lib/market";
 
@@ -132,12 +133,17 @@ export async function DELETE(request: NextRequest) {
 
   try {
     await removeFavorite(ticker);
-    // 同步清除该 ticker 的分析记录，避免残留无主数据。
+    // 同步清除该 ticker 的分析记录和财务快照，避免残留无主数据。
     // 删除失败不影响收藏删除的主流程。
     try {
       await clearAnalysis(ticker);
     } catch (cacheErr) {
       console.error("[favorites] clearAnalysis failed:", cacheErr);
+    }
+    try {
+      await clearFinanceSnapshot(ticker);
+    } catch (snapshotErr) {
+      console.error("[favorites] clearFinanceSnapshot failed:", snapshotErr);
     }
     return NextResponse.json({ success: true });
   } catch (err) {
