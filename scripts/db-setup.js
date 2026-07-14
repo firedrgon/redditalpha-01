@@ -27,6 +27,16 @@ function main() {
 
   process.env.DATABASE_URL = dbUrl;
 
+  // 清理 FinanceSnapshot 重复数据：必须在 db push 之前执行，
+  // 否则新增的 ticker @unique 约束会因历史重复行而创建失败。
+  // 脚本通过 AppSetting 标记保证只执行一次，后续部署自动跳过。
+  console.log("🧹 Running FinanceSnapshot cleanup (idempotent, runs once)...");
+  try {
+    execSync("node scripts/finance-snapshot-cleanup.js", { stdio: "inherit" });
+  } catch (err) {
+    console.warn("⚠️  FinanceSnapshot cleanup failed (continuing):", err.message);
+  }
+
   console.log("📊 Pushing database schema...");
   try {
     execSync("npx prisma db push --skip-generate", { stdio: "inherit" });
