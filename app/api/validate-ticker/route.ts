@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { detectMarket, normalizeCNTicker, toXueqiuSymbol, toYahooSymbol, toTonghuashunSymbol } from "@/lib/market";
+import { detectMarket, normalizeCNTicker, toXueqiuSymbol, toYahooSymbol, toTonghuashunSymbol, toTencentSymbol } from "@/lib/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,43 +58,59 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 1. 同花顺校验（海外可访问，主数据源）
-    try {
-      const symbol = toTonghuashunSymbol(cnTicker);
-      const res = await fetch(
-        `https://d.10jqka.com.cn/v6/realhead/${symbol}/last.js`,
-        {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
-            Referer: "https://basic.10jqka.com.cn/",
-          },
-          cache: "no-store",
-          signal: AbortSignal.timeout(8000),
-        }
-      );
-
-      if (res.ok) {
+    // 1. 并行校验：同花顺 + 腾讯（两者全球可访问）
+    const [thsRes, tencentRes] = await Promise.allSettled([
+      (async () => {
+        const symbol = toTonghuashunSymbol(cnTicker);
+        const res = await fetch(
+          `https://d.10jqka.com.cn/v6/realhead/${symbol}/last.js`,
+          {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+              Referer: "https://basic.10jqka.com.cn/",
+            },
+            cache: "no-store",
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!res.ok) return null;
         const body = await res.text();
         const m = body.match(/\((\{[\s\S]*\})\)/);
-        if (m) {
-          const data = JSON.parse(m[1]);
-          // 名称在 items.name，不是顶层 name
-          const stockName = data?.items?.name;
-          if (stockName) {
-            return NextResponse.json({
-              valid: true,
-              ticker: cnTicker,
-              name: stockName as string,
-              quoteType: "EQUITY",
-              market: "CN",
-              exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
-              exactMatch: true,
-            });
-          }
-        }
-      }
-    } catch {
-      /* 同花顺失败，降级雪球 */
+        if (!m) return null;
+        const data = JSON.parse(m[1]);
+        return data?.items?.name ?? null;
+      })(),
+      (async () => {
+        const symbol = toTencentSymbol(cnTicker);
+        const res = await fetch(`https://qt.gtimg.cn/q=${symbol}`, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return null;
+        const buf = Buffer.from(await res.arrayBuffer());
+        const text = new TextDecoder("gbk").decode(buf);
+        const m = text.match(/v_\w+="([^"]+)"/);
+        if (!m) return null;
+        const fields = m[1].split("~");
+        return fields[1] || null;
+      })(),
+    ]);
+
+    const thsName = thsRes.status === "fulfilled" ? thsRes.value : null;
+    const tencentName = tencentRes.status === "fulfilled" ? tencentRes.value : null;
+    const stockName = thsName || tencentName;
+
+    if (stockName) {
+      return NextResponse.json({
+        valid: true,
+        ticker: cnTicker,
+        name: stockName,
+        quoteType: "EQUITY",
+        market: "CN",
+        exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
+        exactMatch: true,
+      });
     }
 
     // 2. 雪球校验

@@ -123,7 +123,8 @@ export interface FinancialMetrics {
     | "fallback"
     | "xueqiu"
     | "eastmoney"
-    | "tonghuashun";
+    | "tonghuashun"
+    | "tencent";
   warnings: string[];
 }
 

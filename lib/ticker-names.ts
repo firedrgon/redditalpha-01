@@ -162,8 +162,30 @@ async function fetchNameFromYahoo(ticker: string): Promise<string | null> {
 }
 
 // ============================================================
-// A 股名称解析（同花顺 → 雪球 → Yahoo Finance 降级）
+// A 股名称解析（同花顺 → 腾讯 → 雪球 → Yahoo Finance 降级）
 // ============================================================
+async function fetchCNNameFromTencent(ticker: string): Promise<string | null> {
+  try {
+    const { toTencentSymbol } = await import("./market");
+    const symbol = toTencentSymbol(ticker);
+    const res = await fetch(`https://qt.gtimg.cn/q=${symbol}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const text = new TextDecoder("gbk").decode(buf);
+    // 解析：v_sh600276="1~恒瑞医药~600276~..."
+    const m = text.match(/v_\w+="([^"]+)"/);
+    if (!m) return null;
+    const fields = m[1].split("~");
+    return fields[1] || null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCNNameFromTonghuashun(ticker: string): Promise<string | null> {
   try {
     const { toTonghuashunSymbol } = await import("./market");
@@ -249,7 +271,7 @@ export async function resolveTickerName(ticker: string): Promise<string | null> 
   const cached = getCached(upper);
   if (cached !== undefined) return cached;
 
-  // A 股走同花顺 → 雪球 → Yahoo 降级
+  // A 股走并行：同花顺 + 腾讯 → 雪球 → Yahoo 降级
   const { detectMarket, normalizeCNTicker } = await import("./market");
   if (detectMarket(upper) === "CN") {
     const cnTicker = normalizeCNTicker(upper) ?? upper;
@@ -258,12 +280,12 @@ export async function resolveTickerName(ticker: string): Promise<string | null> 
       setCached(upper, STATIC_NAMES[cnTicker]);
       return STATIC_NAMES[cnTicker];
     }
-    // 同花顺（海外可访问）
-    let name = await fetchCNNameFromTonghuashun(cnTicker);
-    // 雪球降级
-    if (!name) name = await fetchCNNameFromXueqiu(cnTicker);
-    // Yahoo 降级
-    if (!name) name = await fetchCNNameFromYahoo(cnTicker);
+    // 并行请求同花顺和腾讯
+    const [thsName, tencentName] = await Promise.all([
+      fetchCNNameFromTonghuashun(cnTicker),
+      fetchCNNameFromTencent(cnTicker),
+    ]);
+    const name = thsName || tencentName || (await fetchCNNameFromXueqiu(cnTicker)) || (await fetchCNNameFromYahoo(cnTicker));
     setCached(upper, name);
     return name;
   }

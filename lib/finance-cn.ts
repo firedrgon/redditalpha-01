@@ -13,7 +13,7 @@
  */
 
 import type { FinancialMetrics } from "./finance";
-import { toXueqiuSymbol, toYahooSymbol, toTonghuashunSymbol, toTonghuashunCode } from "./market";
+import { toXueqiuSymbol, toYahooSymbol, toTonghuashunSymbol, toTonghuashunCode, toTencentSymbol } from "./market";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -205,6 +205,100 @@ async function fetchTonghuashunMetrics(
   };
 
   return metrics;
+}
+
+/* ------------------------------------------------------------------ */
+/* 腾讯财经数据源（全球可访问，行情数据）                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 从腾讯财经获取 A 股行情数据（全球可访问，无需认证）。
+ *
+ * 接口：https://qt.gtimg.cn/q=sh600276
+ * 返回 GBK 编码的 JS 变量：v_sh600276="1~恒瑞医药~600276~54.82~..."
+ *
+ * 字段映射（~分隔）：
+ *   [1]=名称 [2]=代码 [3]=当前价 [4]=昨收 [5]=今开
+ *   [33]=最高 [34]=最低 [39]=PE(动) [46]=PB [45]=总市值(亿)
+ */
+async function fetchTencentMetrics(
+  ticker: string
+): Promise<FinancialMetrics | null> {
+  const symbol = toTencentSymbol(ticker);
+
+  try {
+    const res = await fetch(`https://qt.gtimg.cn/q=${symbol}`, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    const text = new TextDecoder("gbk").decode(buf);
+
+    // 解析：v_sh600276="1~恒瑞医药~600276~54.82~...";
+    const m = text.match(/v_\w+="([^"]+)"/);
+    if (!m) return null;
+
+    const fields = m[1].split("~");
+    if (fields.length < 50) return null;
+
+    const name = fields[1] || null;
+    const parseNum = (s: string | undefined): number | null => {
+      if (!s) return null;
+      const n = parseFloat(s);
+      return isNaN(n) ? null : n;
+    };
+
+    const currentPrice = parseNum(fields[3]);
+    // 腾讯总市值单位是"亿"，转换为元
+    const marketCapYi = parseNum(fields[45]);
+    const marketCap = marketCapYi != null ? marketCapYi * 1e8 : null;
+
+    if (!name && currentPrice == null) return null;
+
+    const metrics: FinancialMetrics = {
+      ticker,
+      name,
+      trailingPE: parseNum(fields[39]),
+      forwardPE: null,
+      pegRatio: null,
+      industry: null,
+      industryPE: null,
+      sector: null,
+      industryRank: null,
+      currentPrice,
+      targetMeanPrice: null,
+      targetHighPrice: null,
+      targetLowPrice: null,
+      targetMedianPrice: null,
+      numberOfAnalysts: null,
+      recommendationMean: null,
+      targetUpside: null,
+      revenueGrowthYoY: null,
+      quarterlyRevenueGrowth: null,
+      roe: null,
+      returnOnEquity5yAvg: null,
+      roeHistory: [],
+      quickRatio: null,
+      currentRatio: null,
+      grossMargin: null,
+      profitMargin: null,
+      totalRevenue: null,
+      revenueHistory: [],
+      marketCap,
+      currency: "CNY",
+      news: [],
+      fetchedAt: new Date().toISOString(),
+      dataSource: "tencent",
+      warnings: [],
+    };
+
+    return metrics;
+  } catch {
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -949,31 +1043,44 @@ async function fetchYahooCNMetrics(
 /* ------------------------------------------------------------------ */
 
 /**
- * 获取 A 股财务数据：同花顺优先 → 雪球 → 东方财富 → Yahoo Finance 降级。
+ * 获取 A 股财务数据：并行请求同花顺 + 腾讯，取最优结果。
  *
- * 同花顺在海外可访问（d.10jqka.com.cn / basic.10jqka.com.cn），作为主数据源。
- * 雪球/东方财富在国内环境快，但 Vercel 海外服务器可能无法访问，作为降级。
- * Yahoo Finance 作为最终降级（海外可访问，支持 A 股 .SS/.SZ 格式）。
+ * 同花顺：行情 + 基本面（ROE/毛利率），数据最全
+ * 腾讯：行情（名称/价格/PE/PB/市值），全球可访问，最稳定
+ *
+ * 策略：并行请求两个数据源（各 8s 超时），优先用同花顺（数据更全）。
+ * 同花顺失败则用腾讯。两者都失败则降级到雪球/东方财富。
  */
 export async function fetchCNFinancialMetrics(
   ticker: string
 ): Promise<FinancialMetrics> {
-  const warnings: string[] = [];
+  // 并行请求同花顺和腾讯，各 8s 超时
+  const [thsResult, tencentResult] = await Promise.allSettled([
+    fetchTonghuashunMetrics(ticker),
+    fetchTencentMetrics(ticker),
+  ]);
 
-  // 1. 同花顺（海外可访问，主数据源）
-  try {
-    const ths = await fetchTonghuashunMetrics(ticker);
-    if (ths) return ths;
-    warnings.push("同花顺数据获取失败");
-  } catch (err) {
-    warnings.push(`同花顺异常: ${err instanceof Error ? err.message : String(err)}`);
+  const thsMetrics = thsResult.status === "fulfilled" ? thsResult.value : null;
+  const tencentMetrics = tencentResult.status === "fulfilled" ? tencentResult.value : null;
+
+  // 优先用同花顺（数据更全：含 ROE/毛利率）
+  if (thsMetrics) {
+    return thsMetrics;
   }
 
-  // 2. 雪球降级
+  // 同花顺失败，用腾讯（至少有名称/价格/PE/PB/市值）
+  if (tencentMetrics) {
+    tencentMetrics.warnings = ["同花顺数据获取失败，降级到腾讯财经"];
+    return tencentMetrics;
+  }
+
+  // 两者都失败，降级到雪球/东方财富
+  const warnings: string[] = ["同花顺+腾讯均获取失败"];
+
   try {
     const xq = await fetchXueqiuMetrics(ticker);
     if (xq) {
-      if (warnings.length > 0) xq.warnings = [...xq.warnings, ...warnings];
+      xq.warnings = [...xq.warnings, ...warnings];
       return xq;
     }
     warnings.push("雪球数据获取失败");
@@ -981,11 +1088,10 @@ export async function fetchCNFinancialMetrics(
     warnings.push(`雪球异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 3. 东方财富降级
   try {
     const em = await fetchEastmoneyMetrics(ticker);
     if (em) {
-      if (warnings.length > 0) em.warnings = [...em.warnings, ...warnings];
+      em.warnings = [...em.warnings, ...warnings];
       return em;
     }
     warnings.push("东方财富数据获取失败");
@@ -993,19 +1099,7 @@ export async function fetchCNFinancialMetrics(
     warnings.push(`东方财富异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 4. Yahoo Finance 降级（海外服务器可访问）
-  try {
-    const yh = await fetchYahooCNMetrics(ticker);
-    if (yh) {
-      if (warnings.length > 0) yh.warnings = [...yh.warnings, ...warnings];
-      return yh;
-    }
-    warnings.push("Yahoo Finance 数据获取失败");
-  } catch (err) {
-    warnings.push(`Yahoo异常: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // 5. 全 null fallback
+  // 全 null fallback
   return {
     ticker,
     name: null,
@@ -1040,6 +1134,6 @@ export async function fetchCNFinancialMetrics(
     news: [],
     fetchedAt: new Date().toISOString(),
     dataSource: "fallback",
-    warnings: ["A 股数据源（同花顺/雪球/东方财富/Yahoo）均获取失败", ...warnings],
+    warnings: ["A 股数据源（同花顺/腾讯/雪球/东方财富）均获取失败", ...warnings],
   };
 }

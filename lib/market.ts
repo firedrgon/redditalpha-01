@@ -149,6 +149,24 @@ export function toTonghuashunCode(ticker: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * 转换为腾讯财经 symbol 格式。
+ * A 股：600276.SH → sh600276（沪市小写 sh 前缀，深市小写 sz 前缀）
+ */
+export function toTencentSymbol(ticker: string): string {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (m) return `${m[2].toLowerCase()}${m[1]}`;
+  return ticker.toLowerCase();
+}
+
+/**
+ * 转换为新浪财经 symbol 格式（与腾讯相同）。
+ * A 股：600276.SH → sh600276
+ */
+export function toSinaSymbol(ticker: string): string {
+  return toTencentSymbol(ticker);
+}
+
 /** 判断是否为 A 股 ticker（规范化后） */
 export function isCN(ticker: string): boolean {
   return detectMarket(ticker) === "CN";
