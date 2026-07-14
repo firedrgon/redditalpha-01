@@ -1,13 +1,19 @@
+/**
+ * 股票分析结果持久化（数据库为唯一存储，无文件缓存）
+ *
+ * 数据流：
+ *  - 每次查询：从数据库读取该 ticker 的分析记录
+ *  - 重新生成：拉取最新财务数据 + LLM 分析 → 写入数据库（upsert，每 ticker 仅一份）
+ *
+ * 降级：未配置数据库时（本地开发）使用内存 Map，重启后丢失，仅用于无 Postgres 时跑通流程。
+ */
+
 import { getPrisma } from "./prisma";
 import type { AnalysisCache as PrismaAnalysisCache } from "@prisma/client";
 import type { StockAnalysis } from "../analysis";
-import {
-  getCachedAnalysis as getCachedAnalysisFile,
-  saveAnalysis as saveAnalysisFile,
-  clearCachedAnalysis as clearCachedAnalysisFile,
-  clearAllCache as clearAllCacheFile,
-  listCachedTickers as listCachedTickersFile,
-} from "../analysis-cache";
+
+// 内存降级存储：仅在未配置数据库时使用
+const memoryStore: Map<string, StockAnalysis> = new Map();
 
 function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
   return {
@@ -35,45 +41,40 @@ function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
     sector: row.sector ?? null,
     news: row.news ? JSON.parse(row.news) : undefined,
     fetchedAt: row.fetchedAt ? row.fetchedAt.toISOString() : row.updatedAt.toISOString(),
-    cached: true,
   };
 }
 
-export async function getCachedAnalysisDB(
+/** 读取某个 ticker 的分析记录，无则返回 null */
+export async function getAnalysis(
   ticker: string
 ): Promise<StockAnalysis | null> {
+  const upper = ticker.toUpperCase();
   const prisma = getPrisma();
-  if (!prisma) return getCachedAnalysisFile(ticker);
+  if (!prisma) return memoryStore.get(upper) ?? null;
 
   try {
     const row = await prisma.analysisCache.findUnique({
-      where: { ticker: ticker.toUpperCase() },
+      where: { ticker: upper },
     });
-    if (!row) {
-      // 数据库中没有记录，降级到文件缓存
-      return getCachedAnalysisFile(ticker);
-    }
-    return mapAnalysis(row);
+    return row ? mapAnalysis(row) : null;
   } catch {
-    // 数据库查询失败，降级到文件缓存
-    return getCachedAnalysisFile(ticker);
+    return memoryStore.get(upper) ?? null;
   }
 }
 
-export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
+/** 写入/覆盖某 ticker 的分析记录（每 ticker 仅一份，基于 @unique(ticker) upsert） */
+export async function saveAnalysis(analysis: StockAnalysis): Promise<void> {
+  const upper = analysis.ticker.toUpperCase();
   const prisma = getPrisma();
   if (!prisma) {
-    await saveAnalysisFile(analysis);
+    memoryStore.set(upper, analysis);
     return;
   }
 
-  // 数据库已配置时，必须把数据真正写到 DB。
-  // 不要在 upsert 失败时静默降级到文件缓存——getCachedAnalysisDB 会优先读 DB，
-  // 一旦 DB 仍是旧数据，再次点开页面就会看到旧内容，且用户毫无感知。
-  // 让错误向上抛出，由调用方（doRefresh）捕获并写入 warnings 提示用户。
-  const ticker = analysis.ticker.toUpperCase();
+  // 数据库已配置时必须真正落库。失败让错误向上抛，由调用方捕获并提示用户，
+  // 避免静默降级导致下次读取仍是旧数据。
   await prisma.analysisCache.upsert({
-    where: { ticker },
+    where: { ticker: upper },
     update: {
       name: analysis.name,
       metrics: JSON.stringify(analysis.metrics),
@@ -100,7 +101,7 @@ export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
       fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
     },
     create: {
-      ticker,
+      ticker: upper,
       name: analysis.name,
       metrics: JSON.stringify(analysis.metrics),
       overallVerdict: analysis.overallVerdict,
@@ -128,46 +129,48 @@ export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
   });
 }
 
-export async function clearCachedAnalysisDB(ticker: string): Promise<void> {
+/** 删除某 ticker 的分析记录 */
+export async function clearAnalysis(ticker: string): Promise<void> {
+  const upper = ticker.toUpperCase();
   const prisma = getPrisma();
   if (!prisma) {
-    await clearCachedAnalysisFile(ticker);
+    memoryStore.delete(upper);
     return;
   }
 
   try {
-    await prisma.analysisCache.delete({
-      where: { ticker: ticker.toUpperCase() },
-    });
+    await prisma.analysisCache.delete({ where: { ticker: upper } });
   } catch {
-    await clearCachedAnalysisFile(ticker);
+    memoryStore.delete(upper);
   }
 }
 
-export async function clearAllCacheDB(): Promise<void> {
+/** 清空所有分析记录 */
+export async function clearAllAnalysis(): Promise<void> {
   const prisma = getPrisma();
   if (!prisma) {
-    await clearAllCacheFile();
+    memoryStore.clear();
     return;
   }
 
   try {
     await prisma.analysisCache.deleteMany();
   } catch {
-    await clearAllCacheFile();
+    memoryStore.clear();
   }
 }
 
-export async function listCachedTickersDB(): Promise<string[]> {
+/** 列出所有已分析的 ticker */
+export async function listAnalysisTickers(): Promise<string[]> {
   const prisma = getPrisma();
-  if (!prisma) return listCachedTickersFile();
+  if (!prisma) return Array.from(memoryStore.keys()).sort();
 
   try {
     const rows = await prisma.analysisCache.findMany({
       orderBy: { ticker: "asc" },
     });
-    return rows.map(mapAnalysis).map((a) => a.ticker);
+    return rows.map((r) => r.ticker);
   } catch {
-    return listCachedTickersFile();
+    return Array.from(memoryStore.keys()).sort();
   }
 }

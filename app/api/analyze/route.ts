@@ -10,10 +10,7 @@ import {
 import { chatCompletion } from "@/lib/llm";
 import { resolveTickerName } from "@/lib/ticker-names";
 import { getEnabledStrategiesDB as getEnabledStrategies } from "@/lib/db";
-import {
-  getCachedAnalysisDB as getCachedAnalysis,
-  saveAnalysisDB as saveAnalysis,
-} from "@/lib/db";
+import { getAnalysis, saveAnalysis } from "@/lib/db";
 import { recordFinanceSnapshot } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -51,29 +48,18 @@ function withTimeout<T>(
   });
 }
 
-async function doRefresh(
-  ticker: string,
-  options: { force?: boolean; useLLM?: boolean; llmTimeoutMs?: number } = {}
-): Promise<{ analysis: StockAnalysis }> {
+/**
+ * 重新生成分析：拉取最新财务数据 → 跑策略判定 → 调用 LLM 生成叙述 → 写入数据库。
+ * 数据库为唯一存储，不使用任何缓存层。每次调用都重新获取、重新分析。
+ */
+async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
   const upper = ticker.toUpperCase();
-  const { force = false, useLLM = true, llmTimeoutMs = LLM_TIMEOUT_MS } = options;
-  const cached = await getCachedAnalysis(upper);
 
-  let metrics;
-  try {
-    metrics = await withTimeout(
-      fetchFinancialMetrics(upper),
-      FETCH_TIMEOUT_MS,
-      "财务数据获取"
-    );
-  } catch (err) {
-    // force 模式下不返回旧缓存：用户明确点了"重新分析"，
-    // 超时后返回旧数据会让用户误以为重新生成成功，但实际是旧内容。
-    if (!force && cached) {
-      return { analysis: { ...cached, cached: true } };
-    }
-    throw err;
-  }
+  const metrics = await withTimeout(
+    fetchFinancialMetrics(upper),
+    FETCH_TIMEOUT_MS,
+    "财务数据获取"
+  );
 
   if (!metrics.name) {
     const name = await resolveTickerName(upper);
@@ -109,51 +95,34 @@ async function doRefresh(
     sector: metrics.sector,
   };
 
-  if (useLLM) {
-    if (!force && cached?.llmNarrative) {
-      analysis.llmNarrative = cached.llmNarrative;
-      analysis.llmProvider = cached.llmProvider;
-      analysis.llmError = cached.llmError;
-    } else {
-      try {
-        const messages = buildLLMMessages(
-          upper,
-          metrics,
-          results,
-          overall,
-          overallSummary
-        );
-        const controller = new AbortController();
-        const llmPromise = chatCompletion(messages, {
-          temperature: 0.4,
-          signal: controller.signal,
-        });
-        const resp = await withTimeout(
-          llmPromise,
-          llmTimeoutMs,
-          "LLM 分析",
-          controller
-        );
-        analysis.llmNarrative = resp.text;
-        analysis.llmProvider = `${resp.providerName} (${resp.model})`;
-      } catch (err) {
-        analysis.llmError =
-          err instanceof Error ? err.message : String(err);
-        // force 模式下不复用旧 narrative：用户明确点了"重新分析"，
-        // 悄悄回退到旧内容会让用户误以为生成成功，且旧 narrative 基于旧新闻/数据，
-        // 与本次新数据不匹配。明确返回 llmError，让用户知道需要重试。
-        // 非 force 模式下（首次打开/后台刷新）复用旧 narrative 仍有价值。
-        if (!force && cached?.llmNarrative) {
-          analysis.llmNarrative = cached.llmNarrative;
-          analysis.llmProvider = cached.llmProvider;
-        }
-      }
-    }
+  // 每次重新生成都会调用 LLM（用户点击「重新生成 AI 分析」即期望拿到新叙述）
+  try {
+    const messages = buildLLMMessages(
+      upper,
+      metrics,
+      results,
+      overall,
+      overallSummary
+    );
+    const controller = new AbortController();
+    const llmPromise = chatCompletion(messages, {
+      temperature: 0.4,
+      signal: controller.signal,
+    });
+    const resp = await withTimeout(
+      llmPromise,
+      LLM_TIMEOUT_MS,
+      "LLM 分析",
+      controller
+    );
+    analysis.llmNarrative = resp.text;
+    analysis.llmProvider = `${resp.providerName} (${resp.model})`;
+  } catch (err) {
+    analysis.llmError = err instanceof Error ? err.message : String(err);
   }
 
-  // 持久化分析结果。必须 await，否则 serverless 实例可能在写完成前就结束，
-  // 导致新分析数据丢失、下次进来仍是旧数据。
-  // 错误不再静默吞掉：记录到 warnings 但不影响响应（用户已拿到 analysis）。
+  // 持久化到数据库。必须 await，否则 serverless 实例可能在写完成前就结束，
+  // 导致新分析数据丢失、下次读取仍是旧数据。
   try {
     await saveAnalysis(analysis);
   } catch (saveErr) {
@@ -165,22 +134,20 @@ async function doRefresh(
     ];
   }
   // 同步保存财务快照（不再 fire-and-forget）：serverless 返回响应后实例可能被回收，
-  // 不 await 会导致财务数据没真正落库，再次点开页面看不到最新财务数据。
+  // 不 await 会导致财务数据没真正落库，再次读取看不到最新财务数据。
   try {
     await recordFinanceSnapshot(upper, metrics);
   } catch (err) {
     console.error("[analyze] recordFinanceSnapshot failed:", err);
   }
 
-  return { analysis };
+  return analysis;
 }
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const ticker = (searchParams.get("ticker") || "").trim();
   const force = searchParams.get("force") === "true";
-  const useLLM = searchParams.get("llm") !== "false";
-  const useCacheOnly = searchParams.get("cache") === "true";
 
   if (!ticker) {
     return NextResponse.json(
@@ -190,31 +157,40 @@ export async function GET(request: NextRequest) {
   }
 
   const upper = ticker.toUpperCase();
-  const cached = await getCachedAnalysis(upper);
 
-  if (useCacheOnly && cached) {
-    return NextResponse.json({ ...cached, cached: true });
-  }
-
-  if (cached && !force) {
-    doRefresh(upper, { force: false, useLLM }).catch(() => {});
-    return NextResponse.json({ ...cached, cached: true, refreshing: true });
-  }
-
-  try {
-    const { analysis } = await doRefresh(upper, { force, useLLM });
-    return NextResponse.json({ ...analysis, cached: false });
-  } catch (err) {
-    if (cached) {
-      return NextResponse.json(
-        {
-          ...cached,
-          cached: true,
+  // 重新生成：每次点击都重新拉取财务数据 + 重新跑 LLM 分析 + 写入数据库
+  if (force) {
+    try {
+      const analysis = await regenerateAnalysis(upper);
+      return NextResponse.json(analysis);
+    } catch (err) {
+      // 重新生成失败时，若数据库已有旧记录则返回旧记录并附带错误信息，
+      // 否则返回错误。避免用户点了一次重新生成失败后看不到任何数据。
+      const existing = await getAnalysis(upper);
+      if (existing) {
+        return NextResponse.json({
+          ...existing,
           refreshError: err instanceof Error ? err.message : String(err),
-        },
-        { status: 200 }
+        });
+      }
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 500 }
       );
     }
+  }
+
+  // 普通查询：直接从数据库读取。每次点开页面都读最新落库的数据。
+  const existing = await getAnalysis(upper);
+  if (existing) {
+    return NextResponse.json(existing);
+  }
+
+  // 数据库中尚无记录（首次打开该 ticker）：触发一次完整生成并落库。
+  try {
+    const analysis = await regenerateAnalysis(upper);
+    return NextResponse.json(analysis);
+  } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 }

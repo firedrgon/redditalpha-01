@@ -46,10 +46,9 @@ export interface StockAnalysis {
   llmNarrative?: string;
   llmProvider?: string;
   llmError?: string;
-  // 当时分析所用的策略 id 列表（缓存命中时显示，便于和当前启用策略对比）
+  // 当时分析所用的策略 id 列表（便于和当前启用策略对比）
   strategyIdsUsed: string[];
   fetchedAt: string;
-  cached?: boolean; // 是否来自缓存
   // 财务数据来源 & 警告（用于排查"未能获取该指标数据"类问题）
   dataSource?: string;
   warnings?: string[];

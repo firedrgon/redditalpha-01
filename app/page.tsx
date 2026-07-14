@@ -76,8 +76,6 @@ interface StockAnalysis {
   llmProvider?: string;
   llmError?: string;
   fetchedAt: string;
-  cached?: boolean;
-  llmReused?: boolean;
   dataSource?: string;
   warnings?: string[];
   strategyIdsUsed?: string[];
@@ -689,11 +687,6 @@ function AnalysisModal({
                 🤖 {analysis.llmProvider}
               </span>
             )}
-            {!isRefreshing && analysis?.llmReused && (
-              <span className="ml-2 inline-flex items-center rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-300">
-                AI 分析已复用
-              </span>
-            )}
           </p>
         </div>
 
@@ -1110,7 +1103,6 @@ function AnalysisModal({
               ) : (
                 <>
                   数据时间：{new Date(analysis.fetchedAt).toLocaleString("zh-CN")}
-                  {analysis.llmReused && " · AI 分析已复用，点击右上可重新生成"}
                 </>
               )}
             </div>
