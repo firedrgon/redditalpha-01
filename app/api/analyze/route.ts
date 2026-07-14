@@ -15,6 +15,10 @@ import { recordFinanceSnapshot } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+// 强制动态渲染，禁止 Next.js 路由缓存——确保每次请求都实时读数据库，
+// 否则删除库数据后页面可能命中旧响应仍显示数据。
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // fetchFinancialMetrics 内部会串行尝试多个数据源（Tiingo→Finnhub→FMP→AV→Yahoo），
 // 每个 API 2-3 秒，7 秒极易超时。改为 15 秒给足时间获取完整数据（含新闻）。
@@ -180,20 +184,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 普通查询：直接从数据库读取。每次点开页面都读最新落库的数据。
+  // 普通查询：直接从数据库读取最新落库的数据。
+  // DB 无记录时返回 null，不自动生成——数据只由用户点击「重新生成」产生。
+  // 这样删除库数据后页面会显示空状态，而非悄悄重新生成。
   const existing = await getAnalysis(upper);
-  if (existing) {
-    return NextResponse.json(existing);
-  }
-
-  // 数据库中尚无记录（首次打开该 ticker）：触发一次完整生成并落库。
-  try {
-    const analysis = await regenerateAnalysis(upper);
-    return NextResponse.json(analysis);
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json(existing);
 }

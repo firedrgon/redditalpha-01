@@ -645,14 +645,14 @@ function AnalysisModal({
                 <span className="ml-2 text-sm text-zinc-400">{item.name}</span>
               )}
             </h3>
-            {analysis && !loading && (
+            {!loading && (
               <button
                 type="button"
                 onClick={handleReanalyze}
                 disabled={isRefreshing}
                 data-share-ignore
                 className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-60 disabled:cursor-not-allowed"
-                title={analysis.llmNarrative ? "重新调用大模型生成 AI 分析（财务数据已自动刷新）" : "调用大模型生成 AI 分析"}
+                title={analysis?.llmNarrative ? "重新调用大模型生成 AI 分析（财务数据已自动刷新）" : "调用大模型生成 AI 分析"}
               >
                 <span className="flex items-center gap-1.5">
                   <svg viewBox="0 0 24 24" className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2}>
@@ -660,7 +660,7 @@ function AnalysisModal({
                   </svg>
                   {isRefreshing
                     ? "生成中..."
-                    : analysis.llmNarrative
+                    : analysis?.llmNarrative
                       ? "重新生成 AI 分析"
                       : "生成 AI 分析"}
                 </span>
@@ -704,6 +704,17 @@ function AnalysisModal({
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
             分析失败：{error}
+          </div>
+        )}
+
+        {!loading && !error && !analysis && (
+          <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-6 text-center">
+            <p className="text-sm text-zinc-400">
+              暂无分析数据
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              点击右上角「生成 AI 分析」获取该股票的分析报告
+            </p>
           </div>
         )}
 
