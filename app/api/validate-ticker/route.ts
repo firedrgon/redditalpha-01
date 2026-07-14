@@ -78,11 +78,13 @@ export async function GET(request: NextRequest) {
         const m = body.match(/\((\{[\s\S]*\})\)/);
         if (m) {
           const data = JSON.parse(m[1]);
-          if (data?.name) {
+          // 名称在 items.name，不是顶层 name
+          const stockName = data?.items?.name;
+          if (stockName) {
             return NextResponse.json({
               valid: true,
               ticker: cnTicker,
-              name: data.name as string,
+              name: stockName as string,
               quoteType: "EQUITY",
               market: "CN",
               exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",

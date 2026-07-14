@@ -23,8 +23,7 @@ const UA =
 /* ------------------------------------------------------------------ */
 
 interface THSRealheadResp {
-  items?: Record<string, string>;
-  name?: string;
+  items?: Record<string, string> & { name?: string };
   time?: string;
 }
 
@@ -107,7 +106,7 @@ async function fetchTonghuashunMetrics(
       const data = parseTHSJsonp(body);
       const items = data?.items;
       if (items) {
-        name = data?.name ?? null;
+        name = items.name ?? null;
         // 字段映射（已通过实测确认）
         const f = (k: string): number | null => {
           const v = items[k];

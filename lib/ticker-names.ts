@@ -186,7 +186,8 @@ async function fetchCNNameFromTonghuashun(ticker: string): Promise<string | null
     const m = body.match(/\((\{[\s\S]*\})\)/);
     if (!m) return null;
     const data = JSON.parse(m[1]);
-    return data?.name ?? null;
+    // 名称在 items.name，不是顶层 name
+    return data?.items?.name ?? null;
   } catch {
     return null;
   }
