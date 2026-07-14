@@ -14,6 +14,8 @@ import { refreshOpenRouterModels, refreshGroqModels, refreshGeminiModels } from 
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /** GET /api/llm-providers/refresh-models：Vercel Cron 调用入口 */
 export async function GET() {

@@ -10,6 +10,9 @@ import { refreshProviderStatuses, testProvider } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+// 强制动态渲染，禁止 Next.js 路由缓存——确保每次请求都实时读数据库
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /** GET /api/llm-providers：列出所有 provider 及状态，按 激活→可用→不可用 排序 */
 export async function GET() {

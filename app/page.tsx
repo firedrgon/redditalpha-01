@@ -1197,7 +1197,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const reloadLLM = useCallback(async () => {
     setLlmLoading(true);
     try {
-      const res = await fetch("/api/llm-providers");
+      const res = await fetch("/api/llm-providers", { cache: "no-store" });
       const json: ProvidersResponse = await res.json();
       setProviders(json.providers);
       setActiveProvider(json.activeProvider);

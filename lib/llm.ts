@@ -167,7 +167,12 @@ export async function chatCompletion(
     status.lastTested = now;
     status.lastError = null;
     status.cooldownUntil = null;
-    await writeConfig(config);
+    // 运行时状态更新写入 DB 失败不应中断 LLM 调用本身
+    try {
+      await writeConfig(config);
+    } catch (writeErr) {
+      console.error("[llm] writeConfig 失败（运行时状态更新）:", writeErr instanceof Error ? writeErr.message : String(writeErr));
+    }
 
     return {
       text,
@@ -222,7 +227,12 @@ export async function chatCompletion(
       status.working = null;
       status.cooldownUntil = now + 2 * 60 * 1000;
     }
-    await writeConfig(config);
+    // 运行时状态更新写入 DB 失败不应影响错误抛出
+    try {
+      await writeConfig(config);
+    } catch (writeErr) {
+      console.error("[llm] writeConfig 失败（错误状态更新）:", writeErr instanceof Error ? writeErr.message : String(writeErr));
+    }
 
     throw new Error(
       `活跃模型 ${provider.name} 调用失败：${lastErr.message}。请在 ⚙ 设置中切换其他模型后重试。`

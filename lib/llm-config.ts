@@ -1,11 +1,13 @@
 /**
  * LLM 配置管理
  *
+ * 数据库为唯一持久化存储，每次读写都直连 DB，不使用内存缓存。
+ *
  * 优先级（高 → 低）：
- *   1. 环境变量 LLM_API_KEY_<PROVIDER_ID> （serverless / 只读文件系统场景）
+ *   1. 环境变量 LLM_API_KEY_<PROVIDER_ID> （serverless / 只读文件系统场景，叠加在 DB 配置之上）
  *   2. 数据库 AppSetting（Vercel 等无持久化文件系统）
- *   3. 本地配置文件 .llm-config.json（开发环境）
- *   4. 内存副本（写入失败时降级使用）
+ *   3. 本地配置文件 .llm-config.json（开发环境，DB 未配置时降级）
+ *   4. 默认配置
  */
 
 import fs from "node:fs/promises";
@@ -68,8 +70,8 @@ const DEFAULT_CONFIG: LLMConfig = {
   updatedAt: 0,
 };
 
-// 内存降级副本：当文件不可写时使用
-let memoryConfig: LLMConfig | null = null;
+// 注：此前版本有模块级 memoryConfig 内存缓存，导致「DB 已更新但页面仍显示旧数据」。
+// 已移除：每次 readConfig 都直连 DB，保证数据实时性。
 
 /** 从环境变量读取 API Key（serverless 场景） */
 function readEnvKeys(): Record<string, string> {
@@ -328,33 +330,25 @@ async function applyPersistedModels(config: LLMConfig): Promise<void> {
   }
 }
 
-/** 读取配置：内存 → 数据库 → 文件 → 默认值，最后叠加环境变量 */
+/** 读取配置：数据库 → 文件 → 默认值，最后叠加环境变量 */
 export async function readConfig(): Promise<LLMConfig> {
   let config: LLMConfig;
   let isFreshConfig = false;
 
-  if (memoryConfig) {
-    config = JSON.parse(JSON.stringify(memoryConfig)) as LLMConfig;
-    // 验证 memoryConfig 中的 activeProvider 是否有效（可能引用了已移除的 provider）
-    if (config.activeProvider && !LLM_PROVIDERS.find((p) => p.id === config.activeProvider)) {
-      config.activeProvider = null;
-    }
+  const fromDb = await getLLMConfigFromDB<Partial<LLMConfig>>();
+  if (fromDb) {
+    config = mergeStoredConfig(fromDb);
   } else {
-    const fromDb = await getLLMConfigFromDB<Partial<LLMConfig>>();
-    if (fromDb) {
-      config = mergeStoredConfig(fromDb);
-    } else {
-      try {
-        const raw = await fs.readFile(CONFIG_FILE, "utf-8");
-        const parsed = JSON.parse(raw) as Partial<LLMConfig>;
-        config = mergeStoredConfig(parsed);
-      } catch {
-        config = {
-          ...DEFAULT_CONFIG,
-          providers: { ...DEFAULT_CONFIG.providers },
-        };
-        isFreshConfig = true;
-      }
+    try {
+      const raw = await fs.readFile(CONFIG_FILE, "utf-8");
+      const parsed = JSON.parse(raw) as Partial<LLMConfig>;
+      config = mergeStoredConfig(parsed);
+    } catch {
+      config = {
+        ...DEFAULT_CONFIG,
+        providers: { ...DEFAULT_CONFIG.providers },
+      };
+      isFreshConfig = true;
     }
   }
   await applyPersistedModels(config);
@@ -365,17 +359,28 @@ export async function readConfig(): Promise<LLMConfig> {
   return config;
 }
 
-/** 写入配置：内存 + 数据库（可用时）+ 本地文件（可写时） */
+/** 写入配置：数据库为主（失败时抛错），本地文件为开发降级（失败时忽略） */
 export async function writeConfig(config: LLMConfig): Promise<void> {
   const data: LLMConfig = { ...config, updatedAt: Date.now() };
-  memoryConfig = JSON.parse(JSON.stringify(data)) as LLMConfig;
-  await saveLLMConfigToDB(data);
+  // DB 已配置时必须写入成功，否则用户操作（测试/设活跃/启用）的结果不会持久化，
+  // 下次读取仍是旧数据。
+  const saved = await saveLLMConfigToDB(data);
+  if (!saved) {
+    // DB 未配置（dev 模式）：降级写本地文件
+    try {
+      await fs.writeFile(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
+    } catch {
+      // 文件也不可写，静默忽略（开发环境无持久化）
+    }
+    return;
+  }
+  // DB 写入成功后，同步写本地文件（兼容本地开发场景）
   try {
     await fs.writeFile(CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("EROFS") && !msg.includes("read-only")) {
-      throw err;
+      // 文件写入失败不影响主流程，DB 已是 source of truth
     }
   }
 }
