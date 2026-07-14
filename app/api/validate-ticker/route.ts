@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { detectMarket, normalizeCNTicker, toXueqiuSymbol, toYahooSymbol } from "@/lib/market";
+import { detectMarket, normalizeCNTicker, toXueqiuSymbol, toYahooSymbol, toTonghuashunSymbol } from "@/lib/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   const market = detectMarket(raw);
 
   // ============================================================
-  // A 股校验：雪球 → Yahoo Finance 降级
+  // A 股校验：同花顺 → 雪球 → Yahoo Finance 降级
   // ============================================================
   if (market === "CN") {
     const cnTicker = normalizeCNTicker(raw);
@@ -58,7 +58,44 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 1. 雪球校验
+    // 1. 同花顺校验（海外可访问，主数据源）
+    try {
+      const symbol = toTonghuashunSymbol(cnTicker);
+      const res = await fetch(
+        `https://d.10jqka.com.cn/v6/realhead/${symbol}/last.js`,
+        {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+            Referer: "https://basic.10jqka.com.cn/",
+          },
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+
+      if (res.ok) {
+        const body = await res.text();
+        const m = body.match(/\((\{[\s\S]*\})\)/);
+        if (m) {
+          const data = JSON.parse(m[1]);
+          if (data?.name) {
+            return NextResponse.json({
+              valid: true,
+              ticker: cnTicker,
+              name: data.name as string,
+              quoteType: "EQUITY",
+              market: "CN",
+              exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
+              exactMatch: true,
+            });
+          }
+        }
+      }
+    } catch {
+      /* 同花顺失败，降级雪球 */
+    }
+
+    // 2. 雪球校验
     try {
       const symbol = toXueqiuSymbol(cnTicker);
       const res = await fetch(
@@ -94,7 +131,7 @@ export async function GET(request: NextRequest) {
       /* 雪球失败，降级 Yahoo */
     }
 
-    // 2. Yahoo Finance 降级（海外服务器可访问）
+    // 3. Yahoo Finance 降级（海外服务器可访问）
     try {
       const yahooSymbol = toYahooSymbol(cnTicker);
       const res = await fetch(
@@ -109,7 +146,6 @@ export async function GET(request: NextRequest) {
       if (res.ok) {
         const data = await res.json();
         const quotes = data?.quotes || [];
-        // 精确匹配 symbol
         const hit = quotes.find(
           (q: { symbol?: string }) => q.symbol?.toUpperCase() === yahooSymbol.toUpperCase()
         );
@@ -133,7 +169,7 @@ export async function GET(request: NextRequest) {
       valid: false,
       ticker: cnTicker,
       market: "CN",
-      error: "未在雪球和 Yahoo Finance 找到该 A 股代码",
+      error: "未在同花顺/雪球/Yahoo Finance 找到该 A 股代码",
     });
   }
 

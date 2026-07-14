@@ -133,6 +133,22 @@ export function toYahooSymbol(ticker: string): string {
   return ticker.toUpperCase();
 }
 
+/**
+ * 转换为同花顺 realhead 接口的 symbol 格式。
+ * A 股：600519.SH → hs_600519（沪深统一用 hs_ 前缀）
+ */
+export function toTonghuashunSymbol(ticker: string): string {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (m) return `hs_${m[1]}`;
+  return ticker.toUpperCase();
+}
+
+/** 提取 A 股 6 位数字代码（用于同花顺 basic 页面 URL） */
+export function toTonghuashunCode(ticker: string): string | null {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  return m ? m[1] : null;
+}
+
 /** 判断是否为 A 股 ticker（规范化后） */
 export function isCN(ticker: string): boolean {
   return detectMarket(ticker) === "CN";

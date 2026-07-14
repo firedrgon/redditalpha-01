@@ -13,10 +13,200 @@
  */
 
 import type { FinancialMetrics } from "./finance";
-import { toXueqiuSymbol, toYahooSymbol } from "./market";
+import { toXueqiuSymbol, toYahooSymbol, toTonghuashunSymbol, toTonghuashunCode } from "./market";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+
+/* ------------------------------------------------------------------ */
+/* 同花顺数据源（海外可访问，A 股主数据源）                              */
+/* ------------------------------------------------------------------ */
+
+interface THSRealheadResp {
+  items?: Record<string, string>;
+  name?: string;
+  time?: string;
+}
+
+/**
+ * 解析同花顺 realhead JSONP 响应。
+ * 格式：quotebridge_v6_realhead_hs_600519_last({...})
+ */
+function parseTHSJsonp(text: string): THSRealheadResp | null {
+  const m = text.match(/\((\{[\s\S]*\})\)/);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[1]) as THSRealheadResp;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从同花顺 basic 页面提取 ROE 和毛利率（GBK 编码 HTML）。
+ * basic 页面含：市盈率(dtsyl/jtsyl)、市净率(sjl)、净资产收益率、毛利率
+ */
+function extractTHSBasicMetrics(html: string): {
+  roe: number | null;
+  grossMargin: number | null;
+  profitMargin: number | null;
+} {
+  // 净资产收益率：</span><span class="tip f12">10.57%</span>
+  let roe: number | null = null;
+  const roeM = html.match(/净资产收益率[：:]<\/span>\s*<span[^>]*>([0-9.]+)%<\/span>/);
+  if (roeM) roe = parseFloat(roeM[1]) / 100;
+
+  // 毛利率：</span><span class="tip f12">89.76%</span>
+  let grossMargin: number | null = null;
+  const gmM = html.match(/毛利率[：:]<\/span>\s*<span[^>]*>([0-9.]+)%<\/span>/);
+  if (gmM) grossMargin = parseFloat(gmM[1]) / 100;
+
+  // 净利率：</span><span class="tip f12">52.22%</span>
+  let profitMargin: number | null = null;
+  const pmM = html.match(/(?:净利率|销售净利率)[：:]<\/span>\s*<span[^>]*>([0-9.]+)%<\/span>/);
+  if (pmM) profitMargin = parseFloat(pmM[1]) / 100;
+
+  return { roe, grossMargin, profitMargin };
+}
+
+/**
+ * 从同花顺获取 A 股财务数据（海外可访问，主数据源）。
+ *
+ * 数据来源：
+ *   1. realhead 接口（d.10jqka.com.cn）— 股票名、当前价、PE、PB、总市值
+ *   2. basic 页面（basic.10jqka.com.cn）— ROE、毛利率、净利率
+ *
+ * 返回 null 表示获取失败（由调用方降级到 Yahoo/雪球/东方财富）。
+ */
+async function fetchTonghuashunMetrics(
+  ticker: string
+): Promise<FinancialMetrics | null> {
+  const thsSymbol = toTonghuashunSymbol(ticker);
+  const code = toTonghuashunCode(ticker);
+  if (!code) return null;
+
+  // 1. realhead 实时行情
+  let name: string | null = null;
+  let currentPrice: number | null = null;
+  let trailingPE: number | null = null;
+  let forwardPE: number | null = null;
+  let pb: number | null = null;
+  let marketCap: number | null = null;
+
+  try {
+    const res = await fetch(
+      `https://d.10jqka.com.cn/v6/realhead/${thsSymbol}/last.js`,
+      {
+        headers: { "User-Agent": UA, Referer: "https://basic.10jqka.com.cn/" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+    if (res.ok) {
+      const body = await res.text();
+      const data = parseTHSJsonp(body);
+      const items = data?.items;
+      if (items) {
+        name = data?.name ?? null;
+        // 字段映射（已通过实测确认）
+        const f = (k: string): number | null => {
+          const v = items[k];
+          if (!v) return null;
+          const n = parseFloat(v);
+          return isNaN(n) ? null : n;
+        };
+        currentPrice = f("10"); // 当前价
+        trailingPE = f("2942"); // PE(动)
+        forwardPE = f("3153"); // PE(静) 作为近似
+        pb = f("592920"); // PB
+        marketCap = f("3475914"); // 总市值
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 2. basic 页面获取 ROE、毛利率、净利率
+  let roe: number | null = null;
+  let grossMargin: number | null = null;
+  let profitMargin: number | null = null;
+
+  try {
+    const res = await fetch(`https://basic.10jqka.com.cn/${code}/`, {
+      headers: {
+        "User-Agent": UA,
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        Referer: "https://basic.10jqka.com.cn/",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer());
+      const html = new TextDecoder("gbk").decode(buf);
+      const basic = extractTHSBasicMetrics(html);
+      roe = basic.roe;
+      grossMargin = basic.grossMargin;
+      profitMargin = basic.profitMargin;
+      // basic 页面 title 含股票名：贵州茅台(600519) ...
+      if (!name) {
+        const titleM = html.match(/<title>([^()（）]+)[(（]/);
+        if (titleM) name = titleM[1].trim();
+      }
+      // basic 页面也有 PE，作为 realhead 的补充
+      if (trailingPE == null) {
+        const peM = html.match(/id="dtsyl"[^>]*>([0-9.]+)/);
+        if (peM) trailingPE = parseFloat(peM[1]);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 如果连名字和价格都没有，认为失败
+  if (!name && currentPrice == null && trailingPE == null) {
+    return null;
+  }
+
+  const metrics: FinancialMetrics = {
+    ticker,
+    name,
+    trailingPE,
+    forwardPE,
+    pegRatio: null,
+    industry: null,
+    industryPE: null,
+    sector: null,
+    industryRank: null,
+    currentPrice,
+    targetMeanPrice: null,
+    targetHighPrice: null,
+    targetLowPrice: null,
+    targetMedianPrice: null,
+    numberOfAnalysts: null,
+    recommendationMean: null,
+    targetUpside: null,
+    revenueGrowthYoY: null,
+    quarterlyRevenueGrowth: null,
+    roe,
+    returnOnEquity5yAvg: null,
+    roeHistory: [],
+    quickRatio: null,
+    currentRatio: null,
+    grossMargin,
+    profitMargin,
+    totalRevenue: null,
+    revenueHistory: [],
+    marketCap,
+    currency: "CNY",
+    news: [],
+    fetchedAt: new Date().toISOString(),
+    dataSource: "tonghuashun",
+    warnings: [],
+  };
+
+  return metrics;
+}
 
 /* ------------------------------------------------------------------ */
 /* 雪球 token 获取                                                      */
@@ -760,8 +950,10 @@ async function fetchYahooCNMetrics(
 /* ------------------------------------------------------------------ */
 
 /**
- * 获取 A 股财务数据：雪球优先 → 东方财富 → Yahoo Finance 降级。
- * 雪球/东方财富在国内服务器快，但在 Vercel 海外服务器上可能无法访问，
+ * 获取 A 股财务数据：同花顺优先 → 雪球 → 东方财富 → Yahoo Finance 降级。
+ *
+ * 同花顺在海外可访问（d.10jqka.com.cn / basic.10jqka.com.cn），作为主数据源。
+ * 雪球/东方财富在国内环境快，但 Vercel 海外服务器可能无法访问，作为降级。
  * Yahoo Finance 作为最终降级（海外可访问，支持 A 股 .SS/.SZ 格式）。
  */
 export async function fetchCNFinancialMetrics(
@@ -769,25 +961,40 @@ export async function fetchCNFinancialMetrics(
 ): Promise<FinancialMetrics> {
   const warnings: string[] = [];
 
-  // 1. 雪球
+  // 1. 同花顺（海外可访问，主数据源）
+  try {
+    const ths = await fetchTonghuashunMetrics(ticker);
+    if (ths) return ths;
+    warnings.push("同花顺数据获取失败");
+  } catch (err) {
+    warnings.push(`同花顺异常: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 2. 雪球降级
   try {
     const xq = await fetchXueqiuMetrics(ticker);
-    if (xq) return xq;
+    if (xq) {
+      if (warnings.length > 0) xq.warnings = [...xq.warnings, ...warnings];
+      return xq;
+    }
     warnings.push("雪球数据获取失败");
   } catch (err) {
     warnings.push(`雪球异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 2. 东方财富降级
+  // 3. 东方财富降级
   try {
     const em = await fetchEastmoneyMetrics(ticker);
-    if (em) return em;
+    if (em) {
+      if (warnings.length > 0) em.warnings = [...em.warnings, ...warnings];
+      return em;
+    }
     warnings.push("东方财富数据获取失败");
   } catch (err) {
     warnings.push(`东方财富异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 3. Yahoo Finance 降级（海外服务器可访问）
+  // 4. Yahoo Finance 降级（海外服务器可访问）
   try {
     const yh = await fetchYahooCNMetrics(ticker);
     if (yh) {
@@ -799,7 +1006,7 @@ export async function fetchCNFinancialMetrics(
     warnings.push(`Yahoo异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 4. 全 null fallback
+  // 5. 全 null fallback
   return {
     ticker,
     name: null,
@@ -834,6 +1041,6 @@ export async function fetchCNFinancialMetrics(
     news: [],
     fetchedAt: new Date().toISOString(),
     dataSource: "fallback",
-    warnings: ["A 股数据源（雪球/东方财富/Yahoo）均获取失败", ...warnings],
+    warnings: ["A 股数据源（同花顺/雪球/东方财富/Yahoo）均获取失败", ...warnings],
   };
 }

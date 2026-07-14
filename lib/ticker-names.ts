@@ -162,8 +162,36 @@ async function fetchNameFromYahoo(ticker: string): Promise<string | null> {
 }
 
 // ============================================================
-// A 股名称解析（雪球 → Yahoo Finance 降级）
+// A 股名称解析（同花顺 → 雪球 → Yahoo Finance 降级）
 // ============================================================
+async function fetchCNNameFromTonghuashun(ticker: string): Promise<string | null> {
+  try {
+    const { toTonghuashunSymbol } = await import("./market");
+    const symbol = toTonghuashunSymbol(ticker);
+    // 同花顺 realhead JSONP 接口返回 name 字段
+    const res = await fetch(
+      `https://d.10jqka.com.cn/v6/realhead/${symbol}/last.js`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+          Referer: "https://basic.10jqka.com.cn/",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const body = await res.text();
+    // 解析 JSONP：quotebridge_v6_realhead_hs_600519_last({...})
+    const m = body.match(/\((\{[\s\S]*\})\)/);
+    if (!m) return null;
+    const data = JSON.parse(m[1]);
+    return data?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCNNameFromXueqiu(ticker: string): Promise<string | null> {
   try {
     const { toXueqiuSymbol } = await import("./market");
@@ -220,7 +248,7 @@ export async function resolveTickerName(ticker: string): Promise<string | null> 
   const cached = getCached(upper);
   if (cached !== undefined) return cached;
 
-  // A 股走雪球 → Yahoo 降级
+  // A 股走同花顺 → 雪球 → Yahoo 降级
   const { detectMarket, normalizeCNTicker } = await import("./market");
   if (detectMarket(upper) === "CN") {
     const cnTicker = normalizeCNTicker(upper) ?? upper;
@@ -229,8 +257,10 @@ export async function resolveTickerName(ticker: string): Promise<string | null> 
       setCached(upper, STATIC_NAMES[cnTicker]);
       return STATIC_NAMES[cnTicker];
     }
-    // 雪球
-    let name = await fetchCNNameFromXueqiu(cnTicker);
+    // 同花顺（海外可访问）
+    let name = await fetchCNNameFromTonghuashun(cnTicker);
+    // 雪球降级
+    if (!name) name = await fetchCNNameFromXueqiu(cnTicker);
     // Yahoo 降级
     if (!name) name = await fetchCNNameFromYahoo(cnTicker);
     setCached(upper, name);

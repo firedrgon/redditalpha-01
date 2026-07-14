@@ -122,7 +122,8 @@ export interface FinancialMetrics {
     | "yahoo-v7"
     | "fallback"
     | "xueqiu"
-    | "eastmoney";
+    | "eastmoney"
+    | "tonghuashun";
   warnings: string[];
 }
 
