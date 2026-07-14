@@ -385,6 +385,25 @@ export async function writeConfig(config: LLMConfig): Promise<void> {
   }
 }
 
+/**
+ * 安全更新配置：重新读取最新配置，应用修改器，再写回。
+ *
+ * 用于 LLM 调用/测试等耗时操作后的状态写回。
+ * 避免直接写回操作开始时读取的旧 config，覆盖用户在此期间
+ * 切换的 activeProvider 等其他配置。
+ *
+ * 场景：用户触发分析 → chatCompletion 读取 config（activeProvider=A）
+ *   → LLM 调用 30-45s → 用户切换到 B → LLM 完成 → 如果直接写回旧 config
+ *   会把 activeProvider 覆盖回 A。本函数在写回前重新读取，保证不覆盖。
+ */
+export async function updateConfigSafely(
+  modifier: (config: LLMConfig) => void
+): Promise<void> {
+  const config = await readConfig();
+  modifier(config);
+  await writeConfig(config);
+}
+
 /** 更新某个 provider 的 API Key（仅本地配置，环境变量优先级更高） */
 export async function setProviderKey(
   providerId: string,

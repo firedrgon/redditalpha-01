@@ -10,7 +10,7 @@
  * （"定时收集保存在本地"——结果写回 .llm-config.json）。
  */
 
-import { readConfig, writeConfig } from "./llm-config";
+import { readConfig, updateConfigSafely } from "./llm-config";
 import {
   LLM_PROVIDERS,
   type LLMProvider,
@@ -163,13 +163,19 @@ export async function chatCompletion(
 
   try {
     const text = await callProviderWithTimeout(provider, status.apiKey, messages, options);
-    status.working = true;
-    status.lastTested = now;
-    status.lastError = null;
-    status.cooldownUntil = null;
-    // 运行时状态更新写入 DB 失败不应中断 LLM 调用本身
+    // 重新读取最新配置后再更新运行时状态。
+    // LLM 调用可能耗时 30-45s，期间用户可能切换了 activeProvider，
+    // 如果直接写回旧 config 会覆盖用户的切换操作。
     try {
-      await writeConfig(config);
+      await updateConfigSafely((freshConfig) => {
+        const s = freshConfig.providers[provider.id];
+        if (s) {
+          s.working = true;
+          s.lastTested = now;
+          s.lastError = null;
+          s.cooldownUntil = null;
+        }
+      });
     } catch (writeErr) {
       console.error("[llm] writeConfig 失败（运行时状态更新）:", writeErr instanceof Error ? writeErr.message : String(writeErr));
     }
@@ -182,54 +188,60 @@ export async function chatCompletion(
     };
   } catch (err) {
     const lastErr = err instanceof Error ? err : new Error(String(err));
-    status.lastTested = now;
-    status.lastError = lastErr.message;
     const msg = lastErr.message;
 
-    if (isPermanentError(msg)) {
-      status.working = false;
-      status.cooldownUntil = null;
-    } else if (isTransientError(msg)) {
-      status.working = null;
-      status.cooldownUntil = now + getCooldownMs(msg);
-      // OpenRouter / Groq 系列共享配额：联动冷却同系列模型
-      if (
-        /429|rate.?limit/i.test(msg) &&
-        OPENROUTER_PROVIDER_IDS.includes(
-          provider.id as (typeof OPENROUTER_PROVIDER_IDS)[number]
-        )
-      ) {
-        for (const id of OPENROUTER_PROVIDER_IDS) {
-          if (id === provider.id) continue;
-          const s = config.providers[id];
-          if (s && s.enabled && s.apiKey) {
-            s.cooldownUntil = now + getCooldownMs(msg);
-            s.working = null;
-          }
-        }
-      }
-      if (
-        /429|rate.?limit/i.test(msg) &&
-        GROQ_PROVIDER_IDS.includes(
-          provider.id as (typeof GROQ_PROVIDER_IDS)[number]
-        )
-      ) {
-        for (const id of GROQ_PROVIDER_IDS) {
-          if (id === provider.id) continue;
-          const s = config.providers[id];
-          if (s && s.enabled && s.apiKey) {
-            s.cooldownUntil = now + getCooldownMs(msg);
-            s.working = null;
-          }
-        }
-      }
-    } else {
-      status.working = null;
-      status.cooldownUntil = now + 2 * 60 * 1000;
-    }
-    // 运行时状态更新写入 DB 失败不应影响错误抛出
+    // 重新读取最新配置后再更新运行时状态。
+    // LLM 调用可能耗时 30-45s，期间用户可能切换了 activeProvider，
+    // 如果直接写回旧 config 会覆盖用户的切换操作。
     try {
-      await writeConfig(config);
+      await updateConfigSafely((freshConfig) => {
+        const freshStatus = freshConfig.providers[provider.id];
+        if (!freshStatus) return;
+        freshStatus.lastTested = now;
+        freshStatus.lastError = msg;
+
+        if (isPermanentError(msg)) {
+          freshStatus.working = false;
+          freshStatus.cooldownUntil = null;
+        } else if (isTransientError(msg)) {
+          freshStatus.working = null;
+          freshStatus.cooldownUntil = now + getCooldownMs(msg);
+          // OpenRouter / Groq 系列共享配额：联动冷却同系列模型
+          if (
+            /429|rate.?limit/i.test(msg) &&
+            OPENROUTER_PROVIDER_IDS.includes(
+              provider.id as (typeof OPENROUTER_PROVIDER_IDS)[number]
+            )
+          ) {
+            for (const id of OPENROUTER_PROVIDER_IDS) {
+              if (id === provider.id) continue;
+              const s = freshConfig.providers[id];
+              if (s && s.enabled && s.apiKey) {
+                s.cooldownUntil = now + getCooldownMs(msg);
+                s.working = null;
+              }
+            }
+          }
+          if (
+            /429|rate.?limit/i.test(msg) &&
+            GROQ_PROVIDER_IDS.includes(
+              provider.id as (typeof GROQ_PROVIDER_IDS)[number]
+            )
+          ) {
+            for (const id of GROQ_PROVIDER_IDS) {
+              if (id === provider.id) continue;
+              const s = freshConfig.providers[id];
+              if (s && s.enabled && s.apiKey) {
+                s.cooldownUntil = now + getCooldownMs(msg);
+                s.working = null;
+              }
+            }
+          }
+        } else {
+          freshStatus.working = null;
+          freshStatus.cooldownUntil = now + 2 * 60 * 1000;
+        }
+      });
     } catch (writeErr) {
       console.error("[llm] writeConfig 失败（错误状态更新）:", writeErr instanceof Error ? writeErr.message : String(writeErr));
     }
@@ -419,11 +431,20 @@ export async function testProvider(
   }
 
   // 写回测试结果到配置
-  status.working = result.ok;
-  status.lastTested = Date.now();
-  status.lastError = result.error ?? null;
-  status.cooldownUntil = null;
-  await writeConfig(config);
+  // 重新读取最新配置后再更新状态，避免覆盖用户在测试期间切换的 activeProvider
+  try {
+    await updateConfigSafely((freshConfig) => {
+      const freshStatus = freshConfig.providers[providerId];
+      if (freshStatus) {
+        freshStatus.working = result.ok;
+        freshStatus.lastTested = Date.now();
+        freshStatus.lastError = result.error ?? null;
+        freshStatus.cooldownUntil = null;
+      }
+    });
+  } catch (writeErr) {
+    console.error("[llm] testProvider writeConfig 失败:", writeErr instanceof Error ? writeErr.message : String(writeErr));
+  }
 
   return result;
 }
