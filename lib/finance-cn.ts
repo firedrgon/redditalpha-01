@@ -802,6 +802,7 @@ interface EMCpdResp {
 
 interface FinanceSupplement {
   revenueGrowthYoY: number | null;
+  quarterlyRevenueGrowth: number | null; // 季度/TTM 营收增长（小数）
   netProfitGrowthPct: number | null; // 净利润同比增长（百分比原值，用于 PEG 计算）
   roe: number | null;
   returnOnEquity5yAvg: number | null;
@@ -814,6 +815,147 @@ interface FinanceSupplement {
   revenueHistory: { year: number; revenue: number | null }[];
   industry: string | null;
   industryPE: number | null;
+  // 分析师共识（来自东方财富研报接口）
+  targetMeanPrice: number | null;
+  targetHighPrice: number | null;
+  targetLowPrice: number | null;
+  numberOfAnalysts: number | null;
+  recommendationMean: number | null; // 1=买入 2=增持 3=中性 4=减持 5=卖出
+}
+
+/* ------------------------------------------------------------------ */
+/* 东方财富研报接口（分析师目标价 + 评级）                                */
+/* ------------------------------------------------------------------ */
+
+interface EMReportItem {
+  orgSName?: string; // 研究机构
+  publishDate?: string;
+  emRatingName?: string; // 评级文字：买入/增持/中性/减持/卖出
+  sRatingName?: string; // 评级文字备份
+  indvAimPriceT?: string | number; // 目标价
+  indvAimPriceL?: string | number; // 目标价（底线）
+  predictThisYearPe?: string | number;
+  predictNextYearPe?: string | number;
+}
+
+interface EMReportResp {
+  hits?: number;
+  data?: EMReportItem[];
+}
+
+interface AnalystConsensus {
+  targetMeanPrice: number | null;
+  targetHighPrice: number | null;
+  targetLowPrice: number | null;
+  numberOfAnalysts: number | null;
+  recommendationMean: number | null;
+}
+
+// 评级文字 → 数值（与 Yahoo 约定一致：1=强力买入, 2=买入, 3=持有, 4=卖出, 5=强力卖出）
+const RATING_VALUE_MAP: Record<string, number> = {
+  买入: 1,
+  推荐: 1,
+  强买: 1,
+  强力买入: 1,
+  增持: 2,
+  优于大势: 2,
+  谨慎推荐: 2,
+  中性: 3,
+  同步大市: 3,
+  持有: 3,
+  减持: 4,
+  回避: 5,
+  卖出: 5,
+};
+
+/**
+ * 从东方财富研报接口获取分析师共识（目标价 + 评级）。
+ *
+ * 接口：https://reportapi.eastmoney.com/report/list
+ *   qType=0 个股研报，返回近期机构研究报告列表。
+ *
+ * 聚合规则：
+ *   - 取最近 50 条研报（约近 1 年）
+ *   - 目标价：从含 indvAimPriceT 的研报中取均值/最高/最低
+ *   - 评级：取最近 10 条评级映射为 1-5 数值求均值
+ *   - 分析师数：按研究机构去重统计
+ */
+async function fetchEastmoneyAnalystConsensus(
+  ticker: string
+): Promise<AnalystConsensus | null> {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return null;
+  const [, code] = m;
+
+  // 取近 2 年研报，pageSize=50 覆盖足够样本
+  const now = new Date();
+  const end = now.toISOString().slice(0, 10);
+  const begin = `${now.getFullYear() - 2}-01-01`;
+
+  try {
+    const res = await fetch(
+      `https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=50&pageNo=1&code=${code}&beginTime=${begin}&endTime=${end}&qType=0`,
+      {
+        headers: {
+          "User-Agent": UA,
+          Referer: "https://data.eastmoney.com/",
+        },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as EMReportResp;
+    const reports = json.data ?? [];
+    if (reports.length === 0) return null;
+
+    // 目标价聚合
+    const targets: number[] = [];
+    for (const r of reports) {
+      const raw =
+        r.indvAimPriceT ?? r.indvAimPriceL ?? null;
+      if (raw == null || raw === "") continue;
+      const n = typeof raw === "number" ? raw : parseFloat(raw);
+      if (!isNaN(n) && n > 0) targets.push(n);
+    }
+    const targetMeanPrice =
+      targets.length > 0
+        ? targets.reduce((s, v) => s + v, 0) / targets.length
+        : null;
+    const targetHighPrice =
+      targets.length > 0 ? Math.max(...targets) : null;
+    const targetLowPrice =
+      targets.length > 0 ? Math.min(...targets) : null;
+
+    // 评级聚合：取最近 10 条评级
+    const ratingValues: number[] = [];
+    for (const r of reports.slice(0, 10)) {
+      const name = r.emRatingName ?? r.sRatingName;
+      if (!name) continue;
+      const v = RATING_VALUE_MAP[name];
+      if (v != null) ratingValues.push(v);
+    }
+    const recommendationMean =
+      ratingValues.length > 0
+        ? ratingValues.reduce((s, v) => s + v, 0) / ratingValues.length
+        : null;
+
+    // 分析师数：按机构去重
+    const orgs = new Set<string>();
+    for (const r of reports) {
+      if (r.orgSName) orgs.add(r.orgSName);
+    }
+    const numberOfAnalysts = orgs.size > 0 ? orgs.size : null;
+
+    return {
+      targetMeanPrice,
+      targetHighPrice,
+      targetLowPrice,
+      numberOfAnalysts,
+      recommendationMean,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -905,10 +1047,16 @@ async function fetchEastmoneyFinanceSupplement(
   const latest = zyzbRows[0] ?? annualRows[0] ?? null;
 
   // 营收同比增长：优先 Zyzb，降级 CPD
+  // latest 来自 type=0 最新季报，TOTALOPERATEREVETZ 即最近报告期同比
   const revenueGrowthPct =
     latest?.TOTALOPERATEREVETZ ?? cpd?.YSTZ ?? null;
   const revenueGrowthYoY =
     revenueGrowthPct != null ? revenueGrowthPct / 100 : null;
+
+  // 季度/TTM 营收增长：与 revenueGrowthYoY 同源（最近报告期同比），
+  // 前端"TTM"标签使用此字段。A股年报累计值即全年，季报为累计值，
+  // 该同比已反映最近 4 季度 vs 上年同期的增长，近似 TTM 口径。
+  const quarterlyRevenueGrowth = revenueGrowthYoY;
 
   // 净利润同比增长（保留百分比原值用于 PEG 计算）
   const netProfitGrowthPct =
@@ -963,9 +1111,10 @@ async function fetchEastmoneyFinanceSupplement(
   // 行业
   const industry = cpd?.BOARD_NAME ?? cpd?.PUBLISHNAME ?? null;
 
-  // 行业 PE：用板块代码取行业成分股 PE 平均值
+  // 行业 PE + 分析师共识并行请求
   let industryPE: number | null = null;
-  if (cpd?.BOARD_CODE) {
+  const industryPePromise = (async (): Promise<number | null> => {
+    if (!cpd?.BOARD_CODE) return null;
     try {
       const res = await fetch(
         `https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=300&po=1&np=1&fltt=2&invt=2&fs=b:${cpd.BOARD_CODE}&fields=f12,f9`,
@@ -977,26 +1126,32 @@ async function fetchEastmoneyFinanceSupplement(
           signal: AbortSignal.timeout(6000),
         }
       );
-      if (res.ok) {
-        const json = (await res.json()) as {
-          data?: { diff?: Array<{ f9?: number }> };
-        };
-        const pes = (json.data?.diff ?? [])
-          .map((x) => x.f9)
-          .filter(
-            (v): v is number => typeof v === "number" && v > 0 && v < 1000
-          );
-        if (pes.length > 0) {
-          industryPE = pes.reduce((s, v) => s + v, 0) / pes.length;
-        }
-      }
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        data?: { diff?: Array<{ f9?: number }> };
+      };
+      const pes = (json.data?.diff ?? [])
+        .map((x) => x.f9)
+        .filter(
+          (v): v is number => typeof v === "number" && v > 0 && v < 1000
+        );
+      return pes.length > 0
+        ? pes.reduce((s, v) => s + v, 0) / pes.length
+        : null;
     } catch {
-      /* ignore */
+      return null;
     }
-  }
+  })();
+
+  const [peResult, analyst] = await Promise.all([
+    industryPePromise,
+    fetchEastmoneyAnalystConsensus(ticker),
+  ]);
+  industryPE = peResult;
 
   return {
     revenueGrowthYoY,
+    quarterlyRevenueGrowth,
     netProfitGrowthPct,
     roe,
     returnOnEquity5yAvg,
@@ -1009,6 +1164,11 @@ async function fetchEastmoneyFinanceSupplement(
     revenueHistory,
     industry,
     industryPE,
+    targetMeanPrice: analyst?.targetMeanPrice ?? null,
+    targetHighPrice: analyst?.targetHighPrice ?? null,
+    targetLowPrice: analyst?.targetLowPrice ?? null,
+    numberOfAnalysts: analyst?.numberOfAnalysts ?? null,
+    recommendationMean: analyst?.recommendationMean ?? null,
   };
 }
 
@@ -1413,6 +1573,8 @@ export async function fetchCNFinancialMetrics(
     // 东方财富财务指标更准确（加权ROE/毛利率/速动比率/多期ROE），有值则覆盖
     if (emSupp.revenueGrowthYoY != null)
       base.revenueGrowthYoY = emSupp.revenueGrowthYoY;
+    if (emSupp.quarterlyRevenueGrowth != null)
+      base.quarterlyRevenueGrowth = emSupp.quarterlyRevenueGrowth;
     if (emSupp.roe != null) base.roe = emSupp.roe;
     if (emSupp.returnOnEquity5yAvg != null)
       base.returnOnEquity5yAvg = emSupp.returnOnEquity5yAvg;
@@ -1426,6 +1588,17 @@ export async function fetchCNFinancialMetrics(
       base.revenueHistory = emSupp.revenueHistory;
     if (emSupp.industry != null) base.industry = emSupp.industry;
     if (emSupp.industryPE != null) base.industryPE = emSupp.industryPE;
+    // 分析师共识（A 股主数据源均不提供，来自东方财富研报接口）
+    if (emSupp.targetMeanPrice != null)
+      base.targetMeanPrice = emSupp.targetMeanPrice;
+    if (emSupp.targetHighPrice != null)
+      base.targetHighPrice = emSupp.targetHighPrice;
+    if (emSupp.targetLowPrice != null)
+      base.targetLowPrice = emSupp.targetLowPrice;
+    if (emSupp.numberOfAnalysts != null)
+      base.numberOfAnalysts = emSupp.numberOfAnalysts;
+    if (emSupp.recommendationMean != null)
+      base.recommendationMean = emSupp.recommendationMean;
     // 计算 PEG = PE / 净利润增长率（用百分比原值，如 PE=40 / 增长21.78% = 1.84）
     if (
       base.pegRatio == null &&
@@ -1435,6 +1608,16 @@ export async function fetchCNFinancialMetrics(
       emSupp.netProfitGrowthPct > 0
     ) {
       base.pegRatio = base.trailingPE / emSupp.netProfitGrowthPct;
+    }
+    // 计算目标价上涨空间 = (目标均价 - 当前价) / 当前价
+    if (
+      base.targetUpside == null &&
+      base.targetMeanPrice != null &&
+      base.currentPrice != null &&
+      base.currentPrice > 0
+    ) {
+      base.targetUpside =
+        (base.targetMeanPrice - base.currentPrice) / base.currentPrice;
     }
   }
 
