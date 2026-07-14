@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { detectMarket, normalizeCNTicker, toXueqiuSymbol } from "@/lib/market";
+import { detectMarket, normalizeCNTicker, toXueqiuSymbol, toYahooSymbol } from "@/lib/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   const market = detectMarket(raw);
 
   // ============================================================
-  // A 股校验：雪球 quote 接口
+  // A 股校验：雪球 → Yahoo Finance 降级
   // ============================================================
   if (market === "CN") {
     const cnTicker = normalizeCNTicker(raw);
@@ -58,6 +58,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // 1. 雪球校验
     try {
       const symbol = toXueqiuSymbol(cnTicker);
       const res = await fetch(
@@ -74,43 +75,66 @@ export async function GET(request: NextRequest) {
         }
       );
 
-      if (!res.ok) {
-        return NextResponse.json({
-          valid: false,
-          ticker: cnTicker,
-          market: "CN",
-          error: `雪球接口返回 ${res.status}，A 股代码可能无效`,
-        });
+      if (res.ok) {
+        const data = await res.json();
+        const quote = data?.data?.quote;
+        if (quote && quote.name) {
+          return NextResponse.json({
+            valid: true,
+            ticker: cnTicker,
+            name: quote.name as string,
+            quoteType: "EQUITY",
+            market: "CN",
+            exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
+            exactMatch: true,
+          });
+        }
       }
-
-      const data = await res.json();
-      const quote = data?.data?.quote;
-      if (!quote || !quote.name) {
-        return NextResponse.json({
-          valid: false,
-          ticker: cnTicker,
-          market: "CN",
-          error: "未在雪球找到该 A 股代码",
-        });
-      }
-
-      return NextResponse.json({
-        valid: true,
-        ticker: cnTicker,
-        name: quote.name as string,
-        quoteType: "EQUITY",
-        market: "CN",
-        exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
-        exactMatch: true,
-      });
-    } catch (err) {
-      return NextResponse.json({
-        valid: false,
-        ticker: cnTicker,
-        market: "CN",
-        error: err instanceof Error ? err.message : String(err),
-      });
+    } catch {
+      /* 雪球失败，降级 Yahoo */
     }
+
+    // 2. Yahoo Finance 降级（海外服务器可访问）
+    try {
+      const yahooSymbol = toYahooSymbol(cnTicker);
+      const res = await fetch(
+        `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(yahooSymbol)}&quotesCount=3&newsCount=0`,
+        {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        const quotes = data?.quotes || [];
+        // 精确匹配 symbol
+        const hit = quotes.find(
+          (q: { symbol?: string }) => q.symbol?.toUpperCase() === yahooSymbol.toUpperCase()
+        );
+        if (hit && (hit.shortname || hit.longname)) {
+          return NextResponse.json({
+            valid: true,
+            ticker: cnTicker,
+            name: hit.longname || hit.shortname,
+            quoteType: hit.quoteType || "EQUITY",
+            market: "CN",
+            exchange: cnTicker.endsWith(".SH") ? "上交所" : "深交所",
+            exactMatch: true,
+          });
+        }
+      }
+    } catch {
+      /* Yahoo 也失败 */
+    }
+
+    return NextResponse.json({
+      valid: false,
+      ticker: cnTicker,
+      market: "CN",
+      error: "未在雪球和 Yahoo Finance 找到该 A 股代码",
+    });
   }
 
   // ============================================================

@@ -118,6 +118,21 @@ export function toXueqiuSymbol(ticker: string): string {
   return ticker.toUpperCase();
 }
 
+/**
+ * 转换为 Yahoo Finance 使用的 symbol 格式。
+ * A 股：600519.SH → 600519.SS（上交所用 .SS，深交所用 .SZ）
+ * 非A股：原样返回
+ */
+export function toYahooSymbol(ticker: string): string {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (m) {
+    // Yahoo: 上交所 .SS，深交所 .SZ
+    const ex = m[2] === "SH" ? "SS" : "SZ";
+    return `${m[1]}.${ex}`;
+  }
+  return ticker.toUpperCase();
+}
+
 /** 判断是否为 A 股 ticker（规范化后） */
 export function isCN(ticker: string): boolean {
   return detectMarket(ticker) === "CN";

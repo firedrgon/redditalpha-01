@@ -13,7 +13,7 @@
  */
 
 import type { FinancialMetrics } from "./finance";
-import { toXueqiuSymbol } from "./market";
+import { toXueqiuSymbol, toYahooSymbol } from "./market";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -478,33 +478,328 @@ async function fetchEastmoneyMetrics(
 }
 
 /* ------------------------------------------------------------------ */
+/* Yahoo Finance A 股降级（海外服务器可访问）                           */
+/* ------------------------------------------------------------------ */
+
+interface YahooV7QuoteResp {
+  quoteResponse?: {
+    result?: Array<{
+      symbol?: string;
+      shortName?: string;
+      longName?: string;
+      regularMarketPrice?: number;
+      trailingPE?: number;
+      forwardPE?: number;
+      priceToSalesTrailing12Months?: number;
+      marketCap?: number;
+      currency?: string;
+      fiftyTwoWeekHigh?: number;
+      fiftyTwoWeekLow?: number;
+      regularMarketChangePercent?: number;
+      averageAnalystRating?: string;
+    }>;
+    error?: { code?: string; description?: string };
+  };
+}
+
+interface YahooQuoteSummaryResp {
+  quoteSummary?: {
+    result?: Array<{
+      summaryDetail?: {
+        trailingPE?: { raw?: number };
+        forwardPE?: { raw?: number };
+        pegRatio?: { raw?: number };
+        profitMargins?: { raw?: number };
+        grossMargins?: { raw?: number };
+        returnOnEquity?: { raw?: number };
+        currentRatio?: { raw?: number };
+        quickRatio?: { raw?: number };
+        revenueGrowth?: { raw?: number };
+        marketCap?: { raw?: number };
+        fiftyTwoWeekHigh?: { raw?: number };
+        fiftyTwoWeekLow?: { raw?: number };
+        targetMeanPrice?: { raw?: number };
+        targetHighPrice?: { raw?: number };
+        targetLowPrice?: { raw?: number };
+        targetMedianPrice?: { raw?: number };
+        numberOfAnalystOpinions?: { raw?: number };
+        recommendationMean?: { raw?: number };
+      };
+      financialData?: {
+        currentRatio?: { raw?: number };
+        quickRatio?: { raw?: number };
+        returnOnEquity?: { raw?: number };
+        revenueGrowth?: { raw?: number };
+        grossMargins?: { raw?: number };
+        profitMargins?: { raw?: number };
+        operatingMargins?: { raw?: number };
+        targetMeanPrice?: { raw?: number };
+        targetHighPrice?: { raw?: number };
+        targetLowPrice?: { raw?: number };
+        targetMedianPrice?: { raw?: number };
+        numberOfAnalystOpinions?: { raw?: number };
+        recommendationMean?: { raw?: number };
+        totalRevenue?: { raw?: number };
+        revenueGrowthQuarterly?: { raw?: number };
+      };
+      summaryProfile?: {
+        sector?: string;
+        industry?: string;
+        longName?: string;
+        shortName?: string;
+      };
+      price?: {
+        regularMarketPrice?: { raw?: number };
+        marketCap?: { raw?: number };
+        currency?: string;
+        shortName?: string;
+        longName?: string;
+      };
+    }>;
+    error?: { code?: string; description?: string };
+  };
+}
+
+/** Yahoo crumb + cookie 缓存 */
+let yahooCrumb: { crumb: string; cookie: string; expireAt: number } | null = null;
+
+async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+  if (yahooCrumb && yahooCrumb.expireAt > Date.now()) {
+    return { crumb: yahooCrumb.crumb, cookie: yahooCrumb.cookie };
+  }
+  try {
+    // 1. 获取 cookie
+    const cookieRes = await fetch("https://fc.yahoo.com/", {
+      redirect: "manual",
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(8000),
+    });
+    const setCookies = cookieRes.headers.getSetCookie?.() ?? [];
+    const cookie = setCookies.map((c) => c.split(";")[0]).join("; ");
+    if (!cookie) return null;
+
+    // 2. 用 cookie 获取 crumb
+    const crumbRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+      headers: { "User-Agent": UA, Cookie: cookie },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!crumbRes.ok) return null;
+    const crumb = (await crumbRes.text()).trim();
+    if (!crumb) return null;
+
+    yahooCrumb = { crumb, cookie, expireAt: Date.now() + 50 * 60 * 1000 };
+    return { crumb, cookie };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 Yahoo Finance 获取 A 股财务数据（海外服务器可访问）。
+ * 使用 .SS/.SZ 后缀格式。作为雪球/东方财富的降级方案。
+ */
+async function fetchYahooCNMetrics(
+  ticker: string
+): Promise<FinancialMetrics | null> {
+  const yahooSymbol = toYahooSymbol(ticker);
+
+  const crumbInfo = await getYahooCrumb();
+  const headers: Record<string, string> = { "User-Agent": UA };
+  if (crumbInfo?.cookie) headers.Cookie = crumbInfo.cookie;
+  const crumbParam = crumbInfo?.crumb ? `&crumb=${encodeURIComponent(crumbInfo.crumb)}` : "";
+
+  // 1. v7 quote 获取基本行情
+  let name: string | null = null;
+  let currentPrice: number | null = null;
+  let trailingPE: number | null = null;
+  let forwardPE: number | null = null;
+  let marketCap: number | null = null;
+  let currency = "CNY";
+
+  try {
+    const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yahooSymbol)}${crumbParam}`;
+    const res = await fetch(url, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as YahooV7QuoteResp;
+      const q = data?.quoteResponse?.result?.[0];
+      if (q) {
+        name = q.shortName || q.longName || null;
+        currentPrice = q.regularMarketPrice ?? null;
+        trailingPE = q.trailingPE ?? null;
+        forwardPE = q.forwardPE ?? null;
+        marketCap = q.marketCap ?? null;
+        currency = q.currency || "CNY";
+      }
+    }
+  } catch {
+    /* ignore, try quoteSummary */
+  }
+
+  // 2. quoteSummary 获取财务指标
+  let pegRatio: number | null = null;
+  let grossMargin: number | null = null;
+  let profitMargin: number | null = null;
+  let roe: number | null = null;
+  let quickRatio: number | null = null;
+  let currentRatio: number | null = null;
+  let revenueGrowthYoY: number | null = null;
+  let totalRevenue: number | null = null;
+  let targetMeanPrice: number | null = null;
+  let targetHighPrice: number | null = null;
+  let targetLowPrice: number | null = null;
+  let targetMedianPrice: number | null = null;
+  let numberOfAnalysts: number | null = null;
+  let recommendationMean: number | null = null;
+  let industry: string | null = null;
+  let sector: string | null = null;
+  let quarterlyRevenueGrowth: number | null = null;
+
+  try {
+    const modules = "summaryDetail,financialData,summaryProfile,price";
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooSymbol)}?modules=${modules}${crumbParam}`;
+    const res = await fetch(url, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as YahooQuoteSummaryResp;
+      const result = data?.quoteSummary?.result?.[0];
+      if (result) {
+        const sd = result.summaryDetail || {};
+        const fd = result.financialData || {};
+        const sp = result.summaryProfile || {};
+        const pr = result.price || {};
+
+        if (!name) name = pr.shortName || pr.longName || sp.shortName || sp.longName || null;
+        if (!currentPrice) currentPrice = pr.regularMarketPrice?.raw ?? null;
+        if (!marketCap) marketCap = pr.marketCap?.raw ?? sd.marketCap?.raw ?? null;
+        if (pr.currency) currency = pr.currency;
+
+        trailingPE = sd.trailingPE?.raw ?? trailingPE;
+        forwardPE = sd.forwardPE?.raw ?? forwardPE;
+        pegRatio = sd.pegRatio?.raw ?? null;
+        grossMargin = sd.grossMargins?.raw ?? fd.grossMargins?.raw ?? null;
+        profitMargin = sd.profitMargins?.raw ?? fd.profitMargins?.raw ?? null;
+        roe = sd.returnOnEquity?.raw ?? fd.returnOnEquity?.raw ?? null;
+        quickRatio = sd.quickRatio?.raw ?? fd.quickRatio?.raw ?? null;
+        currentRatio = sd.currentRatio?.raw ?? fd.currentRatio?.raw ?? null;
+        revenueGrowthYoY = sd.revenueGrowth?.raw ?? fd.revenueGrowth?.raw ?? null;
+        totalRevenue = fd.totalRevenue?.raw ?? null;
+        quarterlyRevenueGrowth = fd.revenueGrowthQuarterly?.raw ?? null;
+        targetMeanPrice = sd.targetMeanPrice?.raw ?? fd.targetMeanPrice?.raw ?? null;
+        targetHighPrice = sd.targetHighPrice?.raw ?? fd.targetHighPrice?.raw ?? null;
+        targetLowPrice = sd.targetLowPrice?.raw ?? fd.targetLowPrice?.raw ?? null;
+        targetMedianPrice = sd.targetMedianPrice?.raw ?? fd.targetMedianPrice?.raw ?? null;
+        numberOfAnalysts = sd.numberOfAnalystOpinions?.raw ?? fd.numberOfAnalystOpinions?.raw ?? null;
+        recommendationMean = sd.recommendationMean?.raw ?? fd.recommendationMean?.raw ?? null;
+        industry = sp.industry || null;
+        sector = sp.sector || null;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 如果连名字和价格都拿不到，认为失败
+  if (!name && currentPrice == null && trailingPE == null) {
+    return null;
+  }
+
+  const targetUpside =
+    targetMeanPrice != null && currentPrice != null && currentPrice > 0
+      ? (targetMeanPrice - currentPrice) / currentPrice
+      : null;
+
+  const metrics: FinancialMetrics = {
+    ticker,
+    name,
+    trailingPE,
+    forwardPE,
+    pegRatio,
+    industry,
+    industryPE: null,
+    sector,
+    industryRank: null,
+    currentPrice,
+    targetMeanPrice,
+    targetHighPrice,
+    targetLowPrice,
+    targetMedianPrice,
+    numberOfAnalysts,
+    recommendationMean,
+    targetUpside,
+    revenueGrowthYoY,
+    quarterlyRevenueGrowth,
+    roe,
+    returnOnEquity5yAvg: null,
+    roeHistory: [],
+    quickRatio,
+    currentRatio,
+    grossMargin,
+    profitMargin,
+    totalRevenue,
+    revenueHistory: [],
+    marketCap,
+    currency,
+    news: [],
+    fetchedAt: new Date().toISOString(),
+    dataSource: "yahoo",
+    warnings: [],
+  };
+
+  return metrics;
+}
+
+/* ------------------------------------------------------------------ */
 /* 主入口                                                              */
 /* ------------------------------------------------------------------ */
 
 /**
- * 获取 A 股财务数据：雪球优先，失败降级到东方财富。
- * 两者均失败时返回全 null 的 fallback（保持接口契约）。
+ * 获取 A 股财务数据：雪球优先 → 东方财富 → Yahoo Finance 降级。
+ * 雪球/东方财富在国内服务器快，但在 Vercel 海外服务器上可能无法访问，
+ * Yahoo Finance 作为最终降级（海外可访问，支持 A 股 .SS/.SZ 格式）。
  */
 export async function fetchCNFinancialMetrics(
   ticker: string
 ): Promise<FinancialMetrics> {
+  const warnings: string[] = [];
+
   // 1. 雪球
   try {
     const xq = await fetchXueqiuMetrics(ticker);
     if (xq) return xq;
+    warnings.push("雪球数据获取失败");
   } catch (err) {
-    console.error("[finance-cn] 雪球获取失败:", err instanceof Error ? err.message : String(err));
+    warnings.push(`雪球异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 2. 东方财富降级
   try {
     const em = await fetchEastmoneyMetrics(ticker);
     if (em) return em;
+    warnings.push("东方财富数据获取失败");
   } catch (err) {
-    console.error("[finance-cn] 东方财富获取失败:", err instanceof Error ? err.message : String(err));
+    warnings.push(`东方财富异常: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // 3. 全 null fallback
+  // 3. Yahoo Finance 降级（海外服务器可访问）
+  try {
+    const yh = await fetchYahooCNMetrics(ticker);
+    if (yh) {
+      if (warnings.length > 0) yh.warnings = [...yh.warnings, ...warnings];
+      return yh;
+    }
+    warnings.push("Yahoo Finance 数据获取失败");
+  } catch (err) {
+    warnings.push(`Yahoo异常: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 4. 全 null fallback
   return {
     ticker,
     name: null,
@@ -539,6 +834,6 @@ export async function fetchCNFinancialMetrics(
     news: [],
     fetchedAt: new Date().toISOString(),
     dataSource: "fallback",
-    warnings: ["A 股数据源（雪球/东方财富）均获取失败"],
+    warnings: ["A 股数据源（雪球/东方财富/Yahoo）均获取失败", ...warnings],
   };
 }

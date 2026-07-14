@@ -162,7 +162,7 @@ async function fetchNameFromYahoo(ticker: string): Promise<string | null> {
 }
 
 // ============================================================
-// A 股名称解析（雪球搜索接口）
+// A 股名称解析（雪球 → Yahoo Finance 降级）
 // ============================================================
 async function fetchCNNameFromXueqiu(ticker: string): Promise<string | null> {
   try {
@@ -190,6 +190,26 @@ async function fetchCNNameFromXueqiu(ticker: string): Promise<string | null> {
   }
 }
 
+async function fetchCNNameFromYahoo(ticker: string): Promise<string | null> {
+  try {
+    const { toYahooSymbol } = await import("./market");
+    const yahooSymbol = toYahooSymbol(ticker);
+    const res = await fetch(
+      `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yahooSymbol)}`,
+      {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.quoteResponse?.result?.[0]?.shortName ?? data?.quoteResponse?.result?.[0]?.longName ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================
 // 单个 ticker 名称解析
 // ============================================================
@@ -200,7 +220,7 @@ export async function resolveTickerName(ticker: string): Promise<string | null> 
   const cached = getCached(upper);
   if (cached !== undefined) return cached;
 
-  // A 股走雪球解析
+  // A 股走雪球 → Yahoo 降级
   const { detectMarket, normalizeCNTicker } = await import("./market");
   if (detectMarket(upper) === "CN") {
     const cnTicker = normalizeCNTicker(upper) ?? upper;
@@ -209,7 +229,10 @@ export async function resolveTickerName(ticker: string): Promise<string | null> 
       setCached(upper, STATIC_NAMES[cnTicker]);
       return STATIC_NAMES[cnTicker];
     }
-    const name = await fetchCNNameFromXueqiu(cnTicker);
+    // 雪球
+    let name = await fetchCNNameFromXueqiu(cnTicker);
+    // Yahoo 降级
+    if (!name) name = await fetchCNNameFromYahoo(cnTicker);
     setCached(upper, name);
     return name;
   }
