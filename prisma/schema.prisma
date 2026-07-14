@@ -101,7 +101,7 @@ model LlmModelCache {
 
 model FinanceSnapshot {
   id              String   @id @default(cuid())
-  ticker          String
+  ticker          String   @unique
   snapshotDate    DateTime @default(now())
   price           Float?
   marketCap       Float?
@@ -126,5 +126,4 @@ model FinanceSnapshot {
   recommendationMean Float?
   dataSource      String?
   rawJson         String?  // 完整 FinancialMetrics 的 JSON 备份
-  @@index([ticker, snapshotDate])
 }

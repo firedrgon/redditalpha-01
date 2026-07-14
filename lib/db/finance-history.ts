@@ -104,108 +104,69 @@ export async function recordFinanceSnapshot(
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
   if (!prisma) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const history = getMemoryHistory(upper);
-    const existingIdx = history.findIndex(
-      (s) => new Date(s.snapshotDate).getTime() >= today.getTime()
-    );
-    const record = metricsToRecord(upper, metrics, today);
-    if (existingIdx >= 0) {
-      history[existingIdx] = { ...record, id: history[existingIdx].id };
-    } else {
-      history.push(record);
-      history.sort(
-        (a, b) =>
-          new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime()
-      );
-    }
-    memorySnapshots.set(upper, history);
+    // 内存模式：每个 ticker 只保留一份最新快照
+    const now = new Date();
+    const record = metricsToRecord(upper, metrics, now);
+    memorySnapshots.set(upper, [record]);
     return;
   }
 
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const existing = await prisma.financeSnapshot.findFirst({
-      where: {
+    // 每个 ticker 在数据库只保留一份：基于 @unique(ticker) 做 upsert
+    await prisma.financeSnapshot.upsert({
+      where: { ticker: upper },
+      update: {
+        snapshotDate: new Date(),
+        price: metrics.currentPrice,
+        marketCap: metrics.marketCap,
+        trailingPE: metrics.trailingPE,
+        forwardPE: metrics.forwardPE,
+        pegRatio: metrics.pegRatio,
+        roe: metrics.roe,
+        returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
+        revenueGrowthYoY: metrics.revenueGrowthYoY,
+        quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
+        grossMargin: metrics.grossMargin,
+        profitMargin: metrics.profitMargin,
+        quickRatio: metrics.quickRatio,
+        currentRatio: metrics.currentRatio,
+        industry: metrics.industry,
+        industryPE: metrics.industryPE,
+        targetMeanPrice: metrics.targetMeanPrice,
+        targetUpside: metrics.targetUpside,
+        recommendationMean: metrics.recommendationMean,
+        dataSource: metrics.dataSource,
+        rawJson: JSON.stringify(metrics),
+      },
+      create: {
         ticker: upper,
-        snapshotDate: { gte: today },
+        price: metrics.currentPrice,
+        marketCap: metrics.marketCap,
+        trailingPE: metrics.trailingPE,
+        forwardPE: metrics.forwardPE,
+        pegRatio: metrics.pegRatio,
+        roe: metrics.roe,
+        returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
+        revenueGrowthYoY: metrics.revenueGrowthYoY,
+        quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
+        grossMargin: metrics.grossMargin,
+        profitMargin: metrics.profitMargin,
+        quickRatio: metrics.quickRatio,
+        currentRatio: metrics.currentRatio,
+        industry: metrics.industry,
+        industryPE: metrics.industryPE,
+        targetMeanPrice: metrics.targetMeanPrice,
+        targetUpside: metrics.targetUpside,
+        recommendationMean: metrics.recommendationMean,
+        dataSource: metrics.dataSource,
+        rawJson: JSON.stringify(metrics),
       },
     });
-
-    if (existing) {
-      await prisma.financeSnapshot.update({
-        where: { id: existing.id },
-        data: {
-          price: metrics.currentPrice,
-          marketCap: metrics.marketCap,
-          trailingPE: metrics.trailingPE,
-          forwardPE: metrics.forwardPE,
-          pegRatio: metrics.pegRatio,
-          roe: metrics.roe,
-          returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
-          revenueGrowthYoY: metrics.revenueGrowthYoY,
-          quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
-          grossMargin: metrics.grossMargin,
-          profitMargin: metrics.profitMargin,
-          quickRatio: metrics.quickRatio,
-          currentRatio: metrics.currentRatio,
-          industry: metrics.industry,
-          industryPE: metrics.industryPE,
-          targetMeanPrice: metrics.targetMeanPrice,
-          targetUpside: metrics.targetUpside,
-          recommendationMean: metrics.recommendationMean,
-          dataSource: metrics.dataSource,
-          rawJson: JSON.stringify(metrics),
-        },
-      });
-    } else {
-      await prisma.financeSnapshot.create({
-        data: {
-          ticker: upper,
-          price: metrics.currentPrice,
-          marketCap: metrics.marketCap,
-          trailingPE: metrics.trailingPE,
-          forwardPE: metrics.forwardPE,
-          pegRatio: metrics.pegRatio,
-          roe: metrics.roe,
-          returnOnEquity5yAvg: metrics.returnOnEquity5yAvg,
-          revenueGrowthYoY: metrics.revenueGrowthYoY,
-          quarterlyRevenueGrowth: metrics.quarterlyRevenueGrowth,
-          grossMargin: metrics.grossMargin,
-          profitMargin: metrics.profitMargin,
-          quickRatio: metrics.quickRatio,
-          currentRatio: metrics.currentRatio,
-          industry: metrics.industry,
-          industryPE: metrics.industryPE,
-          targetMeanPrice: metrics.targetMeanPrice,
-          targetUpside: metrics.targetUpside,
-          recommendationMean: metrics.recommendationMean,
-          dataSource: metrics.dataSource,
-          rawJson: JSON.stringify(metrics),
-        },
-      });
-    }
   } catch {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const history = getMemoryHistory(upper);
-    const existingIdx = history.findIndex(
-      (s) => new Date(s.snapshotDate).getTime() >= today.getTime()
-    );
-    const record = metricsToRecord(upper, metrics, today);
-    if (existingIdx >= 0) {
-      history[existingIdx] = { ...record, id: history[existingIdx].id };
-    } else {
-      history.push(record);
-      history.sort(
-        (a, b) =>
-          new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime()
-      );
-    }
-    memorySnapshots.set(upper, history);
+    // 数据库写入失败时降级到内存，避免阻塞主流程
+    const now = new Date();
+    const record = metricsToRecord(upper, metrics, now);
+    memorySnapshots.set(upper, [record]);
   }
 }
 

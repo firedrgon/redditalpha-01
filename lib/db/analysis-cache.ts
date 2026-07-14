@@ -67,65 +67,65 @@ export async function saveAnalysisDB(analysis: StockAnalysis): Promise<void> {
     return;
   }
 
-  try {
-    const ticker = analysis.ticker.toUpperCase();
-    await prisma.analysisCache.upsert({
-      where: { ticker },
-      update: {
-        name: analysis.name,
-        metrics: JSON.stringify(analysis.metrics),
-        overallVerdict: analysis.overallVerdict,
-        overallSummary: analysis.overallSummary,
-        currentPrice: analysis.currentPrice,
-        targetMeanPrice: analysis.targetMeanPrice,
-        targetHighPrice: analysis.targetHighPrice,
-        targetLowPrice: analysis.targetLowPrice,
-        targetMedianPrice: analysis.targetMedianPrice,
-        targetUpside: analysis.targetUpside,
-        numberOfAnalysts: analysis.numberOfAnalysts,
-        recommendationMean: analysis.recommendationMean,
-        llmNarrative: analysis.llmNarrative,
-        llmProvider: analysis.llmProvider,
-        llmError: analysis.llmError,
-        strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
-        dataSource: analysis.dataSource,
-        warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
-        industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
-        industry: analysis.industry ?? null,
-        sector: analysis.sector ?? null,
-        news: analysis.news ? JSON.stringify(analysis.news) : null,
-        fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
-      },
-      create: {
-        ticker,
-        name: analysis.name,
-        metrics: JSON.stringify(analysis.metrics),
-        overallVerdict: analysis.overallVerdict,
-        overallSummary: analysis.overallSummary,
-        currentPrice: analysis.currentPrice,
-        targetMeanPrice: analysis.targetMeanPrice,
-        targetHighPrice: analysis.targetHighPrice,
-        targetLowPrice: analysis.targetLowPrice,
-        targetMedianPrice: analysis.targetMedianPrice,
-        targetUpside: analysis.targetUpside,
-        numberOfAnalysts: analysis.numberOfAnalysts,
-        recommendationMean: analysis.recommendationMean,
-        llmNarrative: analysis.llmNarrative,
-        llmProvider: analysis.llmProvider,
-        llmError: analysis.llmError,
-        strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
-        dataSource: analysis.dataSource,
-        warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
-        industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
-        industry: analysis.industry ?? null,
-        sector: analysis.sector ?? null,
-        news: analysis.news ? JSON.stringify(analysis.news) : null,
-        fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
-      },
-    });
-  } catch {
-    await saveAnalysisFile(analysis);
-  }
+  // 数据库已配置时，必须把数据真正写到 DB。
+  // 不要在 upsert 失败时静默降级到文件缓存——getCachedAnalysisDB 会优先读 DB，
+  // 一旦 DB 仍是旧数据，再次点开页面就会看到旧内容，且用户毫无感知。
+  // 让错误向上抛出，由调用方（doRefresh）捕获并写入 warnings 提示用户。
+  const ticker = analysis.ticker.toUpperCase();
+  await prisma.analysisCache.upsert({
+    where: { ticker },
+    update: {
+      name: analysis.name,
+      metrics: JSON.stringify(analysis.metrics),
+      overallVerdict: analysis.overallVerdict,
+      overallSummary: analysis.overallSummary,
+      currentPrice: analysis.currentPrice,
+      targetMeanPrice: analysis.targetMeanPrice,
+      targetHighPrice: analysis.targetHighPrice,
+      targetLowPrice: analysis.targetLowPrice,
+      targetMedianPrice: analysis.targetMedianPrice,
+      targetUpside: analysis.targetUpside,
+      numberOfAnalysts: analysis.numberOfAnalysts,
+      recommendationMean: analysis.recommendationMean,
+      llmNarrative: analysis.llmNarrative,
+      llmProvider: analysis.llmProvider,
+      llmError: analysis.llmError,
+      strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
+      dataSource: analysis.dataSource,
+      warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+      industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
+      industry: analysis.industry ?? null,
+      sector: analysis.sector ?? null,
+      news: analysis.news ? JSON.stringify(analysis.news) : null,
+      fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
+    },
+    create: {
+      ticker,
+      name: analysis.name,
+      metrics: JSON.stringify(analysis.metrics),
+      overallVerdict: analysis.overallVerdict,
+      overallSummary: analysis.overallSummary,
+      currentPrice: analysis.currentPrice,
+      targetMeanPrice: analysis.targetMeanPrice,
+      targetHighPrice: analysis.targetHighPrice,
+      targetLowPrice: analysis.targetLowPrice,
+      targetMedianPrice: analysis.targetMedianPrice,
+      targetUpside: analysis.targetUpside,
+      numberOfAnalysts: analysis.numberOfAnalysts,
+      recommendationMean: analysis.recommendationMean,
+      llmNarrative: analysis.llmNarrative,
+      llmProvider: analysis.llmProvider,
+      llmError: analysis.llmError,
+      strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
+      dataSource: analysis.dataSource,
+      warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+      industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
+      industry: analysis.industry ?? null,
+      sector: analysis.sector ?? null,
+      news: analysis.news ? JSON.stringify(analysis.news) : null,
+      fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
+    },
+  });
 }
 
 export async function clearCachedAnalysisDB(ticker: string): Promise<void> {

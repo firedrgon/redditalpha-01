@@ -164,9 +164,13 @@ async function doRefresh(
       `分析结果保存失败: ${msg}`,
     ];
   }
-  recordFinanceSnapshot(upper, metrics).catch((err) => {
+  // 同步保存财务快照（不再 fire-and-forget）：serverless 返回响应后实例可能被回收，
+  // 不 await 会导致财务数据没真正落库，再次点开页面看不到最新财务数据。
+  try {
+    await recordFinanceSnapshot(upper, metrics);
+  } catch (err) {
     console.error("[analyze] recordFinanceSnapshot failed:", err);
-  });
+  }
 
   return { analysis };
 }

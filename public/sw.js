@@ -1,4 +1,4 @@
-const CACHE_NAME = "reddit-alpha-v1";
+const CACHE_NAME = "reddit-alpha-v2";
 const OFFLINE_URL = "/";
 
 const PRECACHE_URLS = ["/", "/manifest.json", "/icon.svg"];
@@ -35,6 +35,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
 
   if (url.origin !== self.location.origin) return;
+
+  // API 请求一律走网络，绝不经缓存读写。
+  // 否则「重新生成 AI 分析」后，再次点开会命中旧的分析结果缓存，
+  // 导致页面数据看起来没有变化。
+  if (url.pathname.startsWith("/api/")) {
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(
