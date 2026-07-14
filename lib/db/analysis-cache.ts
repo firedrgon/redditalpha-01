@@ -52,13 +52,15 @@ export async function getAnalysis(
   const prisma = getPrisma();
   if (!prisma) return memoryStore.get(upper) ?? null;
 
+  // 数据库已配置时，查询失败一律返回 null，绝不回退到内存旧数据。
+  // 否则用户从 DB 删除记录后，内存里残留的旧数据仍会被返回，导致页面显示已删除的数据。
   try {
     const row = await prisma.analysisCache.findUnique({
       where: { ticker: upper },
     });
     return row ? mapAnalysis(row) : null;
   } catch {
-    return memoryStore.get(upper) ?? null;
+    return null;
   }
 }
 
@@ -138,10 +140,15 @@ export async function clearAnalysis(ticker: string): Promise<void> {
     return;
   }
 
+  // 数据库已配置时尝试删除；不存在记录是正常情况（P2025）不视为错误。
   try {
     await prisma.analysisCache.delete({ where: { ticker: upper } });
-  } catch {
-    memoryStore.delete(upper);
+  } catch (err: unknown) {
+    // Prisma P2025: 记录不存在，属正常情况，忽略
+    if (err && typeof err === "object" && "code" in err && err.code === "P2025") {
+      return;
+    }
+    throw err;
   }
 }
 
@@ -153,11 +160,7 @@ export async function clearAllAnalysis(): Promise<void> {
     return;
   }
 
-  try {
-    await prisma.analysisCache.deleteMany();
-  } catch {
-    memoryStore.clear();
-  }
+  await prisma.analysisCache.deleteMany();
 }
 
 /** 列出所有已分析的 ticker */
@@ -171,6 +174,6 @@ export async function listAnalysisTickers(): Promise<string[]> {
     });
     return rows.map((r) => r.ticker);
   } catch {
-    return Array.from(memoryStore.keys()).sort();
+    return [];
   }
 }

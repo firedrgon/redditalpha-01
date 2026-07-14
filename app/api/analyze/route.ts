@@ -12,6 +12,7 @@ import { resolveTickerName } from "@/lib/ticker-names";
 import { getEnabledStrategiesDB as getEnabledStrategies } from "@/lib/db";
 import { getAnalysis, saveAnalysis } from "@/lib/db";
 import { recordFinanceSnapshot } from "@/lib/db";
+import { getDbInitError } from "@/lib/db/prisma";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -161,6 +162,16 @@ export async function GET(request: NextRequest) {
   }
 
   const upper = ticker.toUpperCase();
+
+  // 数据库未配置时直接报错，不走内存降级——否则用户会以为数据来自 DB，
+  // 实际是内存里的旧数据，删除 DB 记录后页面仍显示，造成困惑。
+  const dbInitError = getDbInitError();
+  if (dbInitError) {
+    return NextResponse.json(
+      { error: `数据库未就绪: ${dbInitError.message}` },
+      { status: 500 }
+    );
+  }
 
   // 重新生成：每次点击都重新拉取财务数据 + 重新跑 LLM 分析 + 写入数据库
   if (force) {
