@@ -34,11 +34,6 @@ const baiduStockUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://finance.baidu.com/stock/ab-${cnCode(ticker)}`
     : "";
-// 雪球：A 股 https://xueqiu.com/S/SH600276 ，美股 https://xueqiu.com/S/AAPL
-const xueqiuUrl = (ticker: string) =>
-  isCNTicker(ticker)
-    ? `https://xueqiu.com/S/${ticker.replace(".", "")}`
-    : `https://xueqiu.com/S/${ticker}`;
 const tradingViewUrl = (ticker: string) =>
   `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
 
@@ -452,46 +447,37 @@ function FavoriteCard({
 
       {/* 下半部分：操作按钮 */}
       <div className="flex flex-wrap gap-1.5">
-        <a
-          href={futuUrl(item.ticker)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-          title="在富途牛牛查看"
-        >
-          富途
-        </a>
         {isCNTicker(item.ticker) ? (
-          <>
-            <a
-              href={baiduStockUrl(item.ticker)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-              title="在百度股市通查看"
-            >
-              百度
-            </a>
-            <a
-              href={xueqiuUrl(item.ticker)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-              title="在雪球查看"
-            >
-              雪球
-            </a>
-          </>
-        ) : (
           <a
-            href={tradingViewUrl(item.ticker)}
+            href={baiduStockUrl(item.ticker)}
             target="_blank"
             rel="noopener noreferrer"
             className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-            title="在 TradingView 查看"
+            title="在百度股市通查看"
           >
-            TradingView
+            百度
           </a>
+        ) : (
+          <>
+            <a
+              href={futuUrl(item.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="在富途牛牛查看"
+            >
+              富途
+            </a>
+            <a
+              href={tradingViewUrl(item.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="在 TradingView 查看"
+            >
+              TradingView
+            </a>
+          </>
         )}
         <button
           type="button"
