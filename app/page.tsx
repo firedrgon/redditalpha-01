@@ -20,10 +20,25 @@ const REFRESH_INTERVAL = 10 * 60; // 秒
 
 // 外部跳转链接生成（A 股用 .SH/.SZ 后缀，美股用 -US）
 const isCNTicker = (t: string) => /^\d{6}\.(SH|SZ)$/.test(t);
+// A 股代码提取（600276.SH → 600276）
+const cnCode = (ticker: string) =>
+  isCNTicker(ticker) ? ticker.slice(0, 6) : "";
+
+// 富途：A 股 https://www.futunn.com/stock/600276.SH ，美股 .../AAPL-US
 const futuUrl = (ticker: string) =>
   isCNTicker(ticker)
-    ? `https://www.futunn.com/stock/${ticker.replace(".", "")}`
+    ? `https://www.futunn.com/stock/${ticker}`
     : `https://www.futunn.com/stock/${ticker}-US`;
+// 百度股市通：仅 A 股，https://finance.baidu.com/stock/ab-600276
+const baiduStockUrl = (ticker: string) =>
+  isCNTicker(ticker)
+    ? `https://finance.baidu.com/stock/ab-${cnCode(ticker)}`
+    : "";
+// 雪球：A 股 https://xueqiu.com/S/SH600276 ，美股 https://xueqiu.com/S/AAPL
+const xueqiuUrl = (ticker: string) =>
+  isCNTicker(ticker)
+    ? `https://xueqiu.com/S/${ticker.replace(".", "")}`
+    : `https://xueqiu.com/S/${ticker}`;
 const tradingViewUrl = (ticker: string) =>
   `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
 
@@ -368,7 +383,10 @@ function FavoriteCard({
   onTogglePin: (ticker: string, pinned: boolean) => void;
   onToggleStar: (ticker: string, starred: boolean) => void;
 }) {
-  const redditUrl = `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
+  // A 股标题跳雪球，美股跳 Reddit 搜索
+  const redditUrl = isCNTicker(item.ticker)
+    ? xueqiuUrl(item.ticker)
+    : `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
   return (
@@ -443,15 +461,38 @@ function FavoriteCard({
         >
           富途
         </a>
-        <a
-          href={tradingViewUrl(item.ticker)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-          title="在 TradingView 查看"
-        >
-          TradingView
-        </a>
+        {isCNTicker(item.ticker) ? (
+          <>
+            <a
+              href={baiduStockUrl(item.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="在百度股市通查看"
+            >
+              百度
+            </a>
+            <a
+              href={xueqiuUrl(item.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="在雪球查看"
+            >
+              雪球
+            </a>
+          </>
+        ) : (
+          <a
+            href={tradingViewUrl(item.ticker)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+            title="在 TradingView 查看"
+          >
+            TradingView
+          </a>
+        )}
         <button
           type="button"
           onClick={() => onTogglePin(item.ticker, !isPinned)}
