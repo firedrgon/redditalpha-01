@@ -868,6 +868,212 @@ const RATING_VALUE_MAP: Record<string, number> = {
   卖出: 5,
 };
 
+/* ------------------------------------------------------------------ */
+/* 百度股市通（机构预测页面，优先数据源）                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 从百度股市通页面提取机构预测数据（HTML SSR 解析）。
+ *
+ * 页面：https://finance.baidu.com/stock/ab-{code}?mainTab=概览
+ * 百度股市通页面含"机构预测"区块，展示一致目标价/评级/上涨空间等。
+ *
+ * SSR HTML 中数据以 JSON 形式嵌入（window.__INITIAL_STATE__ 或 data-* 属性），
+ * 此函数尝试两种方式提取：
+ *   1. __INITIAL_STATE__ / __NEXT_DATA__ 中的 JSON
+ *   2. 正则匹配"机构预测"区块的目标价/评级文字
+ *
+ * 返回 null 表示页面不可访问或解析失败（由调用方降级到东方财富研报）。
+ */
+async function fetchBaiduAnalystConsensus(
+  ticker: string
+): Promise<AnalystConsensus | null> {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return null;
+  const [, code] = m;
+
+  try {
+    const res = await fetch(
+      `https://finance.baidu.com/stock/ab-${code}`,
+      {
+        headers: {
+          "User-Agent": UA,
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "zh-CN,zh;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+          Referer: "https://finance.baidu.com/",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "same-origin",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    // 百度对部分服务器 IP 返回 403，此时降级到东方财富
+    if (!res.ok) return null;
+
+    const html = await res.text();
+
+    // 尝试从 SSR JSON 中提取机构预测数据
+    // 百度股市通页面常把数据嵌入 window.__INITIAL_STATE__ = {...}
+    let targetMeanPrice: number | null = null;
+    let targetHighPrice: number | null = null;
+    let targetLowPrice: number | null = null;
+    let numberOfAnalysts: number | null = null;
+    let recommendationMean: number | null = null;
+
+    // 方式1：查找 __INITIAL_STATE__ 或 __NEXT_DATA__ 中的 JSON
+    const jsonMatch =
+      html.match(
+        /window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});/
+      ) ||
+      html.match(/<script id="__NEXT_DATA__"[^>]*>(\{[\s\S]*?\})<\/script>/);
+    if (jsonMatch) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        // 在 JSON 中递归查找机构预测相关字段（百度字段名不固定，按特征匹配）
+        const findNum = (
+          obj: unknown,
+          keys: string[]
+        ): number | null => {
+          if (obj == null) return null;
+          if (typeof obj === "object") {
+            const o = obj as Record<string, unknown>;
+            for (const k of keys) {
+              const v = o[k];
+              if (typeof v === "number" && v > 0) return v;
+              if (typeof v === "string" && v && !isNaN(Number(v))) {
+                const n = Number(v);
+                if (n > 0) return n;
+              }
+            }
+            for (const v of Object.values(o)) {
+              const r = findNum(v, keys);
+              if (r != null) return r;
+            }
+          }
+          return null;
+        };
+        targetMeanPrice = findNum(data, [
+          "targetPrice",
+          "targetMeanPrice",
+          "aimPrice",
+          "avgTargetPrice",
+          "consensusTarget",
+        ]);
+        targetHighPrice = findNum(data, [
+          "targetHighPrice",
+          "maxTargetPrice",
+          "highPrice",
+        ]);
+        targetLowPrice = findNum(data, [
+          "targetLowPrice",
+          "minTargetPrice",
+          "lowPrice",
+        ]);
+        numberOfAnalysts = findNum(data, [
+          "analystCount",
+          "orgCount",
+          "institutionCount",
+          "numAnalysts",
+        ]);
+        recommendationMean = findNum(data, [
+          "ratingValue",
+          "recommendationMean",
+          "consensusRating",
+          "avgRating",
+        ]);
+      } catch {
+        /* JSON 解析失败，降级到正则 */
+      }
+    }
+
+    // 方式2：正则匹配页面文本中的目标价/评级
+    // 示例 HTML：<span>一致目标价</span><span class="value">68.37</span>
+    if (targetMeanPrice == null) {
+      const tm = html.match(
+        /(?:一致目标价|目标均价|机构目标价)[^0-9-]*([0-9]+\.?[0-9]*)/
+      );
+      if (tm) {
+        const n = parseFloat(tm[1]);
+        if (!isNaN(n) && n > 0) targetMeanPrice = n;
+      }
+    }
+    if (targetHighPrice == null) {
+      const th = html.match(
+        /(?:最高目标价|目标最高)[^0-9-]*([0-9]+\.?[0-9]*)/
+      );
+      if (th) {
+        const n = parseFloat(th[1]);
+        if (!isNaN(n) && n > 0) targetHighPrice = n;
+      }
+    }
+    if (targetLowPrice == null) {
+      const tl = html.match(
+        /(?:最低目标价|目标最低)[^0-9-]*([0-9]+\.?[0-9]*)/
+      );
+      if (tl) {
+        const n = parseFloat(tl[1]);
+        if (!isNaN(n) && n > 0) targetLowPrice = n;
+      }
+    }
+    if (numberOfAnalysts == null) {
+      const na = html.match(
+        /(\d+)\s*(?:家机构|位分析师|个机构|家研报)/
+      );
+      if (na) {
+        const n = parseInt(na[1], 10);
+        if (!isNaN(n) && n > 0) numberOfAnalysts = n;
+      }
+    }
+    if (recommendationMean == null) {
+      // 匹配评级文字并映射
+      const ratingText = html.match(
+        /(?:综合评级|机构评级|一致评级)[^<]*<[^>]*>(买入|增持|中性|减持|卖出|推荐|持有|强买|回避)/
+      );
+      if (ratingText) {
+        const v = RATING_VALUE_MAP[ratingText[1]];
+        if (v != null) recommendationMean = v;
+      }
+    }
+
+    // 至少有目标价或评级才认为成功
+    if (
+      targetMeanPrice == null &&
+      recommendationMean == null &&
+      numberOfAnalysts == null
+    ) {
+      return null;
+    }
+
+    return {
+      targetMeanPrice,
+      targetHighPrice,
+      targetLowPrice,
+      numberOfAnalysts,
+      recommendationMean,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 获取分析师共识：百度股市通优先，失败降级东方财富研报接口。
+ */
+async function fetchAnalystConsensus(
+  ticker: string
+): Promise<AnalystConsensus | null> {
+  // 1. 百度股市通（数据直观，但部分服务器 IP 可能 403）
+  const baidu = await fetchBaiduAnalystConsensus(ticker);
+  if (baidu) return baidu;
+
+  // 2. 东方财富研报接口（公开 API，海外可访问）
+  return fetchEastmoneyAnalystConsensus(ticker);
+}
+
 /**
  * 从东方财富研报接口获取分析师共识（目标价 + 评级）。
  *
@@ -1145,7 +1351,7 @@ async function fetchEastmoneyFinanceSupplement(
 
   const [peResult, analyst] = await Promise.all([
     industryPePromise,
-    fetchEastmoneyAnalystConsensus(ticker),
+    fetchAnalystConsensus(ticker),
   ]);
   industryPE = peResult;
 
