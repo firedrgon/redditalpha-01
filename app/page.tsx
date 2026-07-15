@@ -383,9 +383,9 @@ function FavoriteCard({
   onTogglePin: (ticker: string, pinned: boolean) => void;
   onToggleStar: (ticker: string, starred: boolean) => void;
 }) {
-  // A 股标题跳雪球，美股跳 Reddit 搜索
+  // A 股标题跳百度股市通，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
-    ? xueqiuUrl(item.ticker)
+    ? baiduStockUrl(item.ticker)
     : `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
