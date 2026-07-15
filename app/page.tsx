@@ -34,6 +34,12 @@ const baiduStockUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://finance.baidu.com/stock/ab-${cnCode(ticker)}`
     : "";
+// 东方财富：仅 A 股，https://quote.eastmoney.com/sh600276.html
+const eastmoneyUrl = (ticker: string) => {
+  if (!isCNTicker(ticker)) return "";
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  return m ? `https://quote.eastmoney.com/${m[2].toLowerCase()}${m[1]}.html` : "";
+};
 const tradingViewUrl = (ticker: string) =>
   `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
 
@@ -448,15 +454,26 @@ function FavoriteCard({
       {/* 下半部分：操作按钮 */}
       <div className="flex flex-wrap gap-1.5">
         {isCNTicker(item.ticker) ? (
-          <a
-            href={baiduStockUrl(item.ticker)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-            title="在百度股市通查看"
-          >
-            百度
-          </a>
+          <>
+            <a
+              href={baiduStockUrl(item.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="在百度股市通查看"
+            >
+              百度
+            </a>
+            <a
+              href={eastmoneyUrl(item.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="在东方财富查看"
+            >
+              东财
+            </a>
+          </>
         ) : (
           <>
             <a
