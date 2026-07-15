@@ -868,6 +868,278 @@ const RATING_VALUE_MAP: Record<string, number> = {
   卖出: 5,
 };
 
+/* ------------------------------------------------------------------ */
+/* 百度股市通 HTML 页面解析（优先数据源）                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 百度股市通页面提取的全部数据（财务指标 + 分析师共识）。
+ * 来自 https://finance.baidu.com/stock/ab-{code} 的 SSR HTML。
+ */
+interface BaiduStockData {
+  name: string | null;
+  currentPrice: number | null;
+  trailingPE: number | null;
+  forwardPE: number | null;
+  priceToBook: number | null;
+  marketCap: number | null;
+  roe: number | null;
+  grossMargin: number | null;
+  profitMargin: number | null;
+  revenueGrowthYoY: number | null;
+  // 分析师共识
+  targetMeanPrice: number | null;
+  targetHighPrice: number | null;
+  targetLowPrice: number | null;
+  numberOfAnalysts: number | null;
+  recommendationMean: number | null;
+}
+
+/**
+ * 从百度股市通页面提取股票数据（HTML 解析，非 API）。
+ *
+ * 页面：https://finance.baidu.com/stock/ab-{code}
+ * 百度股市通是 SSR 页面，数据嵌入在 HTML 中（__INITIAL_STATE__ 或文本标签）。
+ *
+ * 解析策略：
+ *   1. 优先从 window.__INITIAL_STATE__ / __NEXT_DATA__ 的 JSON 中提取
+ *   2. 降级到正则匹配页面可见文本（"市盈率" "目标价" 等关键词附近数字）
+ *
+ * 返回 null 表示页面不可访问（如服务器 IP 被 403）或解析失败。
+ * 由调用方降级到东方财富数据源。
+ */
+async function fetchBaiduStockPageData(
+  ticker: string
+): Promise<BaiduStockData | null> {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return null;
+  const [, code] = m;
+
+  try {
+    const res = await fetch(
+      `https://finance.baidu.com/stock/ab-${code}`,
+      {
+        headers: {
+          "User-Agent": UA,
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "zh-CN,zh;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+          Referer: "https://finance.baidu.com/",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "same-origin",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    // 百度对部分服务器 IP 返回 403，降级到东方财富
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    if (!html || html.length < 500) return null;
+
+    const result: BaiduStockData = {
+      name: null,
+      currentPrice: null,
+      trailingPE: null,
+      forwardPE: null,
+      priceToBook: null,
+      marketCap: null,
+      roe: null,
+      grossMargin: null,
+      profitMargin: null,
+      revenueGrowthYoY: null,
+      targetMeanPrice: null,
+      targetHighPrice: null,
+      targetLowPrice: null,
+      numberOfAnalysts: null,
+      recommendationMean: null,
+    };
+
+    // 方式1：从 SSR JSON 提取（__INITIAL_STATE__ 或 __NEXT_DATA__）
+    const jsonMatch =
+      html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});/) ||
+      html.match(
+        /<script id="__NEXT_DATA__"[^>]*>(\{[\s\S]*?\})<\/script>/
+      );
+
+    if (jsonMatch) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        // 递归查找数值字段（百度字段名不固定，按候选名匹配）
+        const findNum = (
+          obj: unknown,
+          keys: string[]
+        ): number | null => {
+          if (obj == null) return null;
+          if (typeof obj === "object") {
+            const o = obj as Record<string, unknown>;
+            for (const k of keys) {
+              const v = o[k];
+              if (typeof v === "number" && v > 0) return v;
+              if (typeof v === "string" && v && !isNaN(Number(v))) {
+                const n = Number(v);
+                if (n > 0) return n;
+              }
+            }
+            for (const v of Object.values(o)) {
+              const r = findNum(v, keys);
+              if (r != null) return r;
+            }
+          }
+          return null;
+        };
+        const findStr = (
+          obj: unknown,
+          keys: string[]
+        ): string | null => {
+          if (obj == null) return null;
+          if (typeof obj === "object") {
+            const o = obj as Record<string, unknown>;
+            for (const k of keys) {
+              const v = o[k];
+              if (typeof v === "string" && v) return v;
+            }
+            for (const v of Object.values(o)) {
+              const r = findStr(v, keys);
+              if (r != null) return r;
+            }
+          }
+          return null;
+        };
+
+        result.name = findStr(data, ["name", "stockName", "secName"]);
+        result.currentPrice = findNum(data, [
+          "currentPrice",
+          "price",
+          "lastClose",
+          "close",
+        ]);
+        result.trailingPE = findNum(data, [
+          "peTtm",
+          "trailingPE",
+          "pe",
+          "dynamicPE",
+        ]);
+        result.forwardPE = findNum(data, ["forwardPE", "peForward"]);
+        result.priceToBook = findNum(data, [
+          "pb",
+          "priceToBook",
+          "pbRatio",
+        ]);
+        result.marketCap = findNum(data, [
+          "marketCap",
+          "totalMarketValue",
+          "mv",
+        ]);
+        result.roe = findNum(data, ["roe", "returnOnEquity"]);
+        result.grossMargin = findNum(data, [
+          "grossMargin",
+          "grossProfitMargin",
+        ]);
+        result.profitMargin = findNum(data, [
+          "netProfitMargin",
+          "profitMargin",
+        ]);
+        result.revenueGrowthYoY = findNum(data, [
+          "revenueGrowth",
+          "revenueYoY",
+          "incomeGrowth",
+        ]);
+        result.targetMeanPrice = findNum(data, [
+          "targetPrice",
+          "targetMeanPrice",
+          "aimPrice",
+          "avgTargetPrice",
+        ]);
+        result.targetHighPrice = findNum(data, [
+          "targetHighPrice",
+          "maxTargetPrice",
+        ]);
+        result.targetLowPrice = findNum(data, [
+          "targetLowPrice",
+          "minTargetPrice",
+        ]);
+        result.numberOfAnalysts = findNum(data, [
+          "analystCount",
+          "orgCount",
+          "institutionCount",
+        ]);
+        result.recommendationMean = findNum(data, [
+          "ratingValue",
+          "recommendationMean",
+          "avgRating",
+        ]);
+      } catch {
+        /* JSON 解析失败，降级到正则 */
+      }
+    }
+
+    // 方式2：正则匹配页面可见文本
+    // 匹配 "标签名 ... 数字" 模式（标签和数字间可能有标签/空白）
+    const matchNum = (label: string): number | null => {
+      // 市盈率(动) 39.86  或  <span>市盈率</span><span>39.86</span>
+      const re = new RegExp(
+        `${label}[^0-9-]*([0-9]+\\.?[0-9]*)`
+      );
+      const mm = html.match(re);
+      if (mm) {
+        const n = parseFloat(mm[1]);
+        if (!isNaN(n) && n > 0) return n;
+      }
+      return null;
+    };
+
+    if (result.trailingPE == null)
+      result.trailingPE = matchNum("市盈率");
+    if (result.priceToBook == null)
+      result.priceToBook = matchNum("市净率");
+    if (result.roe == null) result.roe = matchNum("净资产收益率");
+    if (result.grossMargin == null)
+      result.grossMargin = matchNum("毛利率");
+    if (result.profitMargin == null)
+      result.profitMargin = matchNum("净利率");
+    if (result.revenueGrowthYoY == null)
+      result.revenueGrowthYoY = matchNum("营收增长");
+    if (result.targetMeanPrice == null)
+      result.targetMeanPrice = matchNum("目标价");
+    if (result.marketCap == null)
+      result.marketCap = matchNum("总市值");
+
+    // 评级文字匹配
+    if (result.recommendationMean == null) {
+      const ratingMatch = html.match(
+        /(?:综合评级|机构评级|一致评级)[^<]*<[^>]*>(买入|增持|中性|减持|卖出|推荐|持有|强买|回避)/
+      );
+      if (ratingMatch) {
+        const v = RATING_VALUE_MAP[ratingMatch[1]];
+        if (v != null) result.recommendationMean = v;
+      }
+    }
+
+    // 分析师数：正则匹配 "X家机构" "X位分析师"
+    if (result.numberOfAnalysts == null) {
+      const naMatch = html.match(/(\d+)\s*(?:家机构|位分析师|个机构)/);
+      if (naMatch) {
+        const n = parseInt(naMatch[1], 10);
+        if (!isNaN(n) && n > 0) result.numberOfAnalysts = n;
+      }
+    }
+
+    // 至少有 1 个有效字段才认为成功
+    const hasData = Object.values(result).some(
+      (v) => v != null && v !== ""
+    );
+    return hasData ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+
+
 /**
  * 从东方财富研报接口获取分析师共识（目标价 + 评级）。
  *
@@ -1468,13 +1740,17 @@ async function fetchYahooCNMetrics(
 export async function fetchCNFinancialMetrics(
   ticker: string
 ): Promise<FinancialMetrics> {
-  // 并行请求：同花顺（行情+基本面）、腾讯（行情备份）、东方财富 F10 财务补充
-  const [thsResult, tencentResult, emSuppResult] = await Promise.allSettled([
-    fetchTonghuashunMetrics(ticker),
-    fetchTencentMetrics(ticker),
-    fetchEastmoneyFinanceSupplement(ticker),
-  ]);
+  // 并行请求：百度股市通（HTML解析，优先）、同花顺（行情+基本面）、腾讯（行情备份）、东方财富 F10 财务补充
+  const [baiduResult, thsResult, tencentResult, emSuppResult] =
+    await Promise.allSettled([
+      fetchBaiduStockPageData(ticker),
+      fetchTonghuashunMetrics(ticker),
+      fetchTencentMetrics(ticker),
+      fetchEastmoneyFinanceSupplement(ticker),
+    ]);
 
+  const baiduData =
+    baiduResult.status === "fulfilled" ? baiduResult.value : null;
   const thsMetrics = thsResult.status === "fulfilled" ? thsResult.value : null;
   const tencentMetrics =
     tencentResult.status === "fulfilled" ? tencentResult.value : null;
@@ -1566,6 +1842,54 @@ export async function fetchCNFinancialMetrics(
 
   if (warnings.length > 0) {
     base.warnings = [...warnings, ...base.warnings];
+  }
+
+  // 合并百度股市通 HTML 解析数据（优先数据源，有值则填充）
+  if (baiduData) {
+    if (baiduData.name && !base.name) base.name = baiduData.name;
+    if (baiduData.currentPrice != null && base.currentPrice == null)
+      base.currentPrice = baiduData.currentPrice;
+    if (baiduData.trailingPE != null && base.trailingPE == null)
+      base.trailingPE = baiduData.trailingPE;
+    if (baiduData.forwardPE != null && base.forwardPE == null)
+      base.forwardPE = baiduData.forwardPE;
+    // 注：FinancialMetrics 当前无 PB 字段，百度 PB 数据暂不合并
+    // if (baiduData.priceToBook != null && base.xxx == null) base.xxx = baiduData.priceToBook;
+    if (baiduData.marketCap != null && base.marketCap == null)
+      base.marketCap = baiduData.marketCap;
+    if (baiduData.roe != null && base.roe == null)
+      base.roe = baiduData.roe / 100; // 百度百分比转小数
+    if (baiduData.grossMargin != null && base.grossMargin == null)
+      base.grossMargin = baiduData.grossMargin / 100;
+    if (baiduData.profitMargin != null && base.profitMargin == null)
+      base.profitMargin = baiduData.profitMargin / 100;
+    if (baiduData.revenueGrowthYoY != null && base.revenueGrowthYoY == null)
+      base.revenueGrowthYoY = baiduData.revenueGrowthYoY / 100;
+    // 分析师共识
+    if (baiduData.targetMeanPrice != null && base.targetMeanPrice == null)
+      base.targetMeanPrice = baiduData.targetMeanPrice;
+    if (baiduData.targetHighPrice != null && base.targetHighPrice == null)
+      base.targetHighPrice = baiduData.targetHighPrice;
+    if (baiduData.targetLowPrice != null && base.targetLowPrice == null)
+      base.targetLowPrice = baiduData.targetLowPrice;
+    if (baiduData.numberOfAnalysts != null && base.numberOfAnalysts == null)
+      base.numberOfAnalysts = baiduData.numberOfAnalysts;
+    if (
+      baiduData.recommendationMean != null &&
+      base.recommendationMean == null
+    )
+      base.recommendationMean = baiduData.recommendationMean;
+    // 计算目标价上涨空间
+    if (
+      base.targetUpside == null &&
+      base.targetMeanPrice != null &&
+      base.currentPrice != null &&
+      base.currentPrice > 0
+    ) {
+      base.targetUpside =
+        (base.targetMeanPrice - base.currentPrice) / base.currentPrice;
+    }
+    if (base.dataSource === "fallback") base.dataSource = "tonghuashun";
   }
 
   // 合并东方财富 F10 财务补充（覆盖缺失的财务指标字段）
