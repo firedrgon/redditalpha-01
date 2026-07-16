@@ -3172,12 +3172,31 @@ export default function Home() {
             body: JSON.stringify({ ticker: upper, name: name ?? undefined }),
           });
         } else {
-          await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
+          // 取消收藏 = DELETE。校验响应，失败时回拉服务端真实状态，
+          // 避免乐观更新与后端不一致导致「移除不生效」。
+          const res = await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
             method: "DELETE",
           });
+          if (!res.ok) {
+            const syncRes = await fetch("/api/favorites");
+            const syncJson = await syncRes.json();
+            if (syncJson.favorites && Array.isArray(syncJson.favorites)) {
+              setFavorites(syncJson.favorites.map(mapFavoriteFromApi));
+            }
+          }
         }
       } catch (err) {
         console.error("Failed to toggle favorite:", err);
+        // 网络错误时回拉服务端状态
+        try {
+          const syncRes = await fetch("/api/favorites");
+          const syncJson = await syncRes.json();
+          if (syncJson.favorites && Array.isArray(syncJson.favorites)) {
+            setFavorites(syncJson.favorites.map(mapFavoriteFromApi));
+          }
+        } catch {
+          /* ignore */
+        }
       }
     },
     [favorites]
