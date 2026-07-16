@@ -129,27 +129,42 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "缺少 ticker 参数" }, { status: 400 });
   }
 
-  const ticker = normalizeTicker(rawTicker);
+  const normalized = normalizeTicker(rawTicker);
+  const rawUpper = rawTicker.trim().toUpperCase();
+
+  // 同时尝试规范化和原始形式，处理历史未规范化的 DB 数据
+  // （例如旧数据存的是 "600267" 而非 "600267.SH"）
+  const candidates = [...new Set([normalized, rawUpper])];
 
   try {
-    await removeFavorite(ticker);
-    // 同步清除该 ticker 的分析记录和财务快照，避免残留无主数据。
-    // 删除失败不影响收藏删除的主流程。
-    try {
-      await clearAnalysis(ticker);
-    } catch (cacheErr) {
-      console.error("[favorites] clearAnalysis failed:", cacheErr);
+    let totalDeleted = 0;
+    for (const t of candidates) {
+      totalDeleted += await removeFavorite(t);
     }
-    try {
-      await clearFinanceSnapshot(ticker);
-    } catch (snapshotErr) {
-      console.error("[favorites] clearFinanceSnapshot failed:", snapshotErr);
+
+    // 同步清除该 ticker 的分析记录和财务快照
+    for (const t of candidates) {
+      try {
+        await clearAnalysis(t);
+      } catch (cacheErr) {
+        console.error("[favorites] clearAnalysis failed:", cacheErr);
+      }
+      try {
+        await clearFinanceSnapshot(t);
+      } catch (snapshotErr) {
+        console.error("[favorites] clearFinanceSnapshot failed:", snapshotErr);
+      }
     }
-    return NextResponse.json({ success: true });
+
+    return NextResponse.json({
+      success: true,
+      deleted: totalDeleted,
+      tried: candidates,
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
-      { status: 404 }
+      { status: 500 }
     );
   }
 }

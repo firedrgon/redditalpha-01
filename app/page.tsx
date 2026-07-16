@@ -3061,9 +3061,16 @@ export default function Home() {
       const res = await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
         method: "DELETE",
       });
-      // DELETE 在服务端失败时（如 DB 异常），回拉服务端真实状态，
+      // 服务端返回 deleted=0 说明没删到任何记录（可能是 ticker 不匹配），
+      // 或返回非 2xx（DB 异常）。两种情况都回拉服务端真实状态，
       // 避免乐观更新与后端不一致导致「移除不生效」。
-      if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.deleted === 0) {
+        console.warn("[favorites] DELETE may not have removed record:", {
+          status: res.status,
+          deleted: data.deleted,
+          tried: data.tried,
+        });
         const syncRes = await fetch("/api/favorites");
         const syncJson = await syncRes.json();
         if (syncJson.favorites && Array.isArray(syncJson.favorites)) {
@@ -3172,12 +3179,13 @@ export default function Home() {
             body: JSON.stringify({ ticker: upper, name: name ?? undefined }),
           });
         } else {
-          // 取消收藏 = DELETE。校验响应，失败时回拉服务端真实状态，
+          // 取消收藏 = DELETE。校验响应，失败或 deleted=0 时回拉服务端真实状态，
           // 避免乐观更新与后端不一致导致「移除不生效」。
           const res = await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
             method: "DELETE",
           });
-          if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.deleted === 0) {
             const syncRes = await fetch("/api/favorites");
             const syncJson = await syncRes.json();
             if (syncJson.favorites && Array.isArray(syncJson.favorites)) {
