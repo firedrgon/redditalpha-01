@@ -70,6 +70,23 @@ interface FavoriteItem {
   starred?: boolean;
 }
 
+/** 将后端 /api/favorites 返回的原始对象映射为前端 FavoriteItem */
+function mapFavoriteFromApi(f: {
+  ticker: string;
+  name?: string | null;
+  createdAt: number;
+  pinned?: boolean;
+  starred?: boolean;
+}): FavoriteItem {
+  return {
+    ticker: f.ticker,
+    name: f.name ?? null,
+    addedAt: f.createdAt,
+    pinned: !!f.pinned,
+    starred: !!f.starred,
+  };
+}
+
 // ============================================================
 // 分析相关类型
 // ============================================================
@@ -2971,15 +2988,7 @@ export default function Home() {
         const json = await res.json();
         if (cancelled) return;
         if (json.favorites && Array.isArray(json.favorites)) {
-          setFavorites(
-            json.favorites.map((f: { ticker: string; name?: string | null; createdAt: number; pinned?: boolean; starred?: boolean }) => ({
-              ticker: f.ticker,
-              name: f.name ?? null,
-              addedAt: f.createdAt,
-              pinned: !!f.pinned,
-              starred: !!f.starred,
-            }))
-          );
+          setFavorites(json.favorites.map(mapFavoriteFromApi));
         }
       } catch (err) {
         console.error("Failed to load favorites:", err);
@@ -3044,15 +3053,35 @@ export default function Home() {
 
   const removeFavorite = useCallback(async (ticker: string) => {
     const upper = ticker.trim().toUpperCase();
+    // 乐观更新：先从列表移除
     setFavorites((prev) =>
       prev.filter((f) => f.ticker.toUpperCase() !== upper)
     );
     try {
-      await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
+      const res = await fetch(`/api/favorites?ticker=${encodeURIComponent(upper)}`, {
         method: "DELETE",
       });
+      // DELETE 在服务端失败时（如 DB 异常），回拉服务端真实状态，
+      // 避免乐观更新与后端不一致导致「移除不生效」。
+      if (!res.ok) {
+        const syncRes = await fetch("/api/favorites");
+        const syncJson = await syncRes.json();
+        if (syncJson.favorites && Array.isArray(syncJson.favorites)) {
+          setFavorites(syncJson.favorites.map(mapFavoriteFromApi));
+        }
+      }
     } catch (err) {
       console.error("Failed to remove favorite:", err);
+      // 网络错误时同样回拉服务端状态
+      try {
+        const syncRes = await fetch("/api/favorites");
+        const syncJson = await syncRes.json();
+        if (syncJson.favorites && Array.isArray(syncJson.favorites)) {
+          setFavorites(syncJson.favorites.map(mapFavoriteFromApi));
+        }
+      } catch {
+        /* ignore */
+      }
     }
   }, []);
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "reddit-alpha-v2";
+const CACHE_NAME = "reddit-alpha-v3";
 const OFFLINE_URL = "/";
 
 const PRECACHE_URLS = ["/", "/manifest.json", "/icon.svg"];

@@ -229,8 +229,18 @@ export async function removeFavorite(ticker: string): Promise<void> {
     await prisma.favorite.delete({
       where: { ticker: upper },
     });
-  } catch {
-    memoryFavorites.delete(upper);
+  } catch (err) {
+    // P2025 = 记录不存在，删除是幂等的，不算错误。
+    // 其他错误（连接失败、schema 不匹配等）必须上抛，
+    // 否则 API 返回 success 但记录仍在 DB 中，刷新后「移除不生效」。
+    const code =
+      (err as { code?: string })?.code ?? "";
+    if (code === "P2025") {
+      memoryFavorites.delete(upper);
+      return;
+    }
+    console.error("[favorites] removeFavorite DB error:", err);
+    throw err;
   }
 }
 
