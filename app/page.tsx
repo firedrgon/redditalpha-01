@@ -29,6 +29,12 @@ const futuUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://www.futunn.com/stock/${ticker}`
     : `https://www.futunn.com/stock/${ticker}-US`;
+// 百度股市通：仅 A 股
+const baiduStockUrl = (ticker: string) => {
+  if (!isCNTicker(ticker)) return "";
+  const code = cnCode(ticker);
+  return code ? `https://gushitong.baidu.com/stock/ab-${code}` : "";
+};
 // 同花顺财务诊断：仅 A 股
 const thsDiagnosisUrl = (ticker: string) => {
   if (!isCNTicker(ticker)) return "";
@@ -399,9 +405,9 @@ function FavoriteCard({
   onTogglePin: (ticker: string, pinned: boolean) => void;
   onToggleStar: (ticker: string, starred: boolean) => void;
 }) {
-  // A 股标题跳同花顺财务诊断，美股跳 Reddit 搜索
+  // A 股标题跳百度股市通，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
-    ? thsDiagnosisUrl(item.ticker)
+    ? baiduStockUrl(item.ticker)
     : `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
