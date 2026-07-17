@@ -69,6 +69,8 @@ export interface StockAnalysis {
   } | null;
   industry?: string | null;
   sector?: string | null;
+  // 同花顺财务图解 URL（A 股动态获取）
+  thsVisualUrl?: string | null;
 }
 
 function fmtPct(v: number | null): string {

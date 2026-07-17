@@ -126,6 +126,8 @@ export interface FinancialMetrics {
     | "tonghuashun"
     | "tencent";
   warnings: string[];
+  // 同花顺财务图解 URL（A 股动态获取）
+  thsVisualUrl?: string | null;
 }
 
 interface QuoteSummary {
@@ -1814,6 +1816,34 @@ function findNestedKey(obj: unknown, key: string): unknown {
   return undefined;
 }
 
+/**
+ * 从同花顺接口获取财务图解页面 URL（动态，随报告期变化）
+ * 接口：https://basic.10jqka.com.cn/basicapi/finance/stock/visual/recent/?code={code}
+ */
+async function fetchThsVisualUrl(ticker: string): Promise<string | null> {
+  const code = ticker.replace(/\.(SH|SZ|SS)$/i, "").trim();
+  if (!/^\d{6}$/.test(code)) return null;
+  const url = `https://basic.10jqka.com.cn/basicapi/finance/stock/visual/recent/?code=${code}`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, Referer: "https://basic.10jqka.com.cn/" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      status_code?: number;
+      data?: { url?: string };
+    };
+    const pageUrl = data.data?.url;
+    if (!pageUrl) return null;
+    // API 返回的是 // 开头的协议相对 URL，补全为 https
+    return pageUrl.startsWith("//") ? `https:${pageUrl}` : pageUrl;
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================
 // stockanalysis.com 财务指标爬取（核心数据源）
 //
@@ -3028,6 +3058,20 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // 爬取失败不影响主结果
+    }
+  }
+
+  // ============================================================
+  // A 股财务图解 URL：从同花顺接口动态获取（含最新报告期参数）
+  // ============================================================
+  if (isCNAshare) {
+    try {
+      const visualUrl = await fetchThsVisualUrl(upper);
+      if (visualUrl) {
+        result.thsVisualUrl = visualUrl;
+      }
+    } catch {
+      // 获取失败不影响主结果
     }
   }
 

@@ -100,6 +100,7 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
     industryRank: metrics.industryRank,
     industry: metrics.industry,
     sector: metrics.sector,
+    thsVisualUrl: metrics.thsVisualUrl,
   };
 
   // 每次重新生成都会调用 LLM（用户点击「重新生成 AI 分析」即期望拿到新叙述）

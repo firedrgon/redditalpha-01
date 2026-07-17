@@ -37,12 +37,7 @@ const thsDiagnosisUrl = (ticker: string) => {
   const marketid = m[2] === "SH" ? 17 : 33;
   return `https://eq.10jqka.com.cn/webpage/financial-diagnosis/index.html?code=${m[1]}&marketid=${marketid}#/`;
 };
-// 同花顺财务图解：仅 A 股
-const thsVisualUrl = (ticker: string) => {
-  if (!isCNTicker(ticker)) return "";
-  const code = cnCode(ticker);
-  return code ? `https://basic.10jqka.com.cn/${code}/visual.html` : "";
-};
+
 const tradingViewUrl = (ticker: string) =>
   `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
 
@@ -71,6 +66,7 @@ interface FavoriteItem {
   addedAt: number;
   pinned?: boolean;
   starred?: boolean;
+  thsVisualUrl?: string | null;
 }
 
 /** 将后端 /api/favorites 返回的原始对象映射为前端 FavoriteItem */
@@ -142,6 +138,7 @@ interface StockAnalysis {
   } | null;
   industry?: string | null;
   sector?: string | null;
+  thsVisualUrl?: string | null;
 }
 
 // ============================================================
@@ -485,11 +482,11 @@ function FavoriteCard({
               诊断
             </a>
             <a
-              href={thsVisualUrl(item.ticker)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-              title="在同花顺查看财务图解"
+              href={item.thsVisualUrl || "#"}
+              target={item.thsVisualUrl ? "_blank" : undefined}
+              rel={item.thsVisualUrl ? "noopener noreferrer" : undefined}
+              className={`shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs transition-all ${item.thsVisualUrl ? "text-zinc-300 hover:border-orange-500/50 hover:text-orange-400" : "text-zinc-600 cursor-not-allowed"}`}
+              title={item.thsVisualUrl ? "在同花顺查看财务图解" : "分析后可用"}
             >
               图解
             </a>
@@ -581,9 +578,11 @@ function formatCountdown(seconds: number): string {
 function AnalysisModal({
   item,
   onClose,
+  onVisualUrlUpdate,
 }: {
   item: FavoriteItem;
   onClose: () => void;
+  onVisualUrlUpdate?: (ticker: string, url: string) => void;
 }) {
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -620,6 +619,9 @@ function AnalysisModal({
       const json: StockAnalysis = await res.json();
       if (myId === fetchCounterRef.current) {
         setAnalysis(json);
+        if (json.thsVisualUrl && onVisualUrlUpdate) {
+          onVisualUrlUpdate(item.ticker, json.thsVisualUrl);
+        }
       }
     } catch (err) {
       if (myId === fetchCounterRef.current) {
@@ -3716,6 +3718,13 @@ export default function Home() {
         <AnalysisModal
           item={analyzingItem}
           onClose={() => setAnalyzingItem(null)}
+          onVisualUrlUpdate={(ticker, url) => {
+            setFavorites((prev) =>
+              prev.map((f) =>
+                f.ticker === ticker ? { ...f, thsVisualUrl: url } : f
+              )
+            );
+          }}
         />
       )}
       {showSettings && (
