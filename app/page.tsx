@@ -37,11 +37,11 @@ const thsDiagnosisUrl = (ticker: string) => {
   const marketid = m[2] === "SH" ? 17 : 33;
   return `https://eq.10jqka.com.cn/webpage/financial-diagnosis/index.html?code=${m[1]}&marketid=${marketid}#/`;
 };
-// 东方财富：仅 A 股，https://quote.eastmoney.com/sh600276.html
-const eastmoneyUrl = (ticker: string) => {
+// 同花顺财务图解：仅 A 股
+const thsVisualUrl = (ticker: string) => {
   if (!isCNTicker(ticker)) return "";
-  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
-  return m ? `https://quote.eastmoney.com/${m[2].toLowerCase()}${m[1]}.html` : "";
+  const code = cnCode(ticker);
+  return code ? `https://basic.10jqka.com.cn/${code}/visual.html` : "";
 };
 const tradingViewUrl = (ticker: string) =>
   `https://cn.tradingview.com/symbols/${encodeURIComponent(ticker)}/`;
@@ -485,13 +485,13 @@ function FavoriteCard({
               诊断
             </a>
             <a
-              href={eastmoneyUrl(item.ticker)}
+              href={thsVisualUrl(item.ticker)}
               target="_blank"
               rel="noopener noreferrer"
               className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-              title="在东方财富查看"
+              title="在同花顺查看财务图解"
             >
-              东财
+              图解
             </a>
           </>
         ) : (
