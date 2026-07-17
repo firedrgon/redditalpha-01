@@ -3421,7 +3421,7 @@ async function fetchFinancialMetricsInternal(
 
   // ============================================================
   // A 股分流：识别为 A 股（6 位数字 / .SH / .SZ / SH/SZ 前缀）时
-  // 走雪球 + 东方财富数据源，不进入美股数据源链
+  // 走东方财富数据源，不进入美股数据源链
   // ============================================================
   if (detectMarket(upper) === "CN") {
     const cnTicker = normalizeCNTicker(upper) ?? upper;
