@@ -1723,6 +1723,113 @@ async function fetchYahooCNMetrics(
 }
 
 /* ------------------------------------------------------------------ */
+/* 东方财富个股新闻（消息面 / 情绪面数据源）                              */
+/* ------------------------------------------------------------------ */
+
+interface EMNewsItem {
+  Art_Title?: string;
+  Art_ShowTime?: string; // "2026-07-17 15:20:00"
+  Art_Url?: string;
+  Art_OriginUrl?: string;
+  Art_Code?: string;
+}
+
+interface EMNewsResp {
+  code?: number;
+  message?: string;
+  data?: {
+    page_index?: number;
+    list?: EMNewsItem[];
+  };
+}
+
+/**
+ * 从东方财富获取 A 股个股新闻（公开 API，无需认证）。
+ *
+ * 接口：https://np-listapi.eastmoney.com/comm/web/getListInfo
+ * 参数：
+ *   - mTypeAndCode：东方财富 secid，沪市前缀 1（1.600519），深市前缀 0（0.000001）
+ *   - type=1 / client=web / biz=web_news_pre / dataNode=news_pre
+ *
+ * 返回统一新闻结构（供 analyzeNewsSentiment 关键词分析与消息面提示词使用）。
+ * 失败返回 null，不影响主财务数据流程。
+ */
+export async function fetchCNNews(
+  ticker: string
+): Promise<
+  Array<{
+    title: string;
+    source?: string;
+    date?: string;
+    summary?: string;
+    url?: string;
+  }>
+> {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return [];
+  const [, code, ex] = m;
+  // 东方财富 secid：沪市前缀 1，深市前缀 0
+  const secid = ex === "SH" ? `1.${code}` : `0.${code}`;
+
+  try {
+    const url =
+      `https://np-listapi.eastmoney.com/comm/web/getListInfo` +
+      `?client=web&biz=web_news_pre&dataNode=news_pre` +
+      `&mTypeAndCode=${encodeURIComponent(secid)}&type=1` +
+      `&sortEnd=&pageSize=20&pageNo=1`;
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        Referer: "https://data.eastmoney.com/",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+
+    const json = (await res.json()) as EMNewsResp;
+    const list = json?.data?.list;
+    if (!Array.isArray(list) || list.length === 0) return [];
+
+    const news = list
+      .map(
+        (item): {
+          title: string;
+          source?: string;
+          date?: string;
+          url?: string;
+        } | null => {
+          const title = (item.Art_Title ?? "").trim();
+          if (!title) return null;
+          // Art_ShowTime 形如 "2026-07-17 15:20:00"，转 ISO 供 analysis.ts 格式化
+          let date: string | undefined;
+          if (item.Art_ShowTime) {
+            const d = new Date(item.Art_ShowTime.replace(" ", "T") + "+08:00");
+            if (!isNaN(d.getTime())) date = d.toISOString();
+          }
+          const link =
+            item.Art_Url?.trim() || item.Art_OriginUrl?.trim() || undefined;
+          return {
+            title,
+            source: "东方财富",
+            date,
+            url: link,
+          };
+        }
+      )
+      .filter(
+        (n): n is { title: string; source?: string; date?: string; url?: string } =>
+          n !== null
+      );
+
+    return news.slice(0, 15);
+  } catch {
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 主入口                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1740,13 +1847,14 @@ async function fetchYahooCNMetrics(
 export async function fetchCNFinancialMetrics(
   ticker: string
 ): Promise<FinancialMetrics> {
-  // 并行请求：百度股市通（HTML解析，优先）、同花顺（行情+基本面）、腾讯（行情备份）、东方财富 F10 财务补充
-  const [baiduResult, thsResult, tencentResult, emSuppResult] =
+  // 并行请求：百度股市通（HTML解析，优先）、同花顺（行情+基本面）、腾讯（行情备份）、东方财富 F10 财务补充、东方财富个股新闻
+  const [baiduResult, thsResult, tencentResult, emSuppResult, newsResult] =
     await Promise.allSettled([
       fetchBaiduStockPageData(ticker),
       fetchTonghuashunMetrics(ticker),
       fetchTencentMetrics(ticker),
       fetchEastmoneyFinanceSupplement(ticker),
+      fetchCNNews(ticker),
     ]);
 
   const baiduData =
@@ -1756,6 +1864,9 @@ export async function fetchCNFinancialMetrics(
     tencentResult.status === "fulfilled" ? tencentResult.value : null;
   const emSupp =
     emSuppResult.status === "fulfilled" ? emSuppResult.value : null;
+  // 东方财富个股新闻（消息面/情绪面数据源），失败降级为空数组
+  const cnNews =
+    newsResult.status === "fulfilled" ? newsResult.value : [];
 
   // 确定行情基础数据源：优先同花顺，其次腾讯
   let base: FinancialMetrics | null = thsMetrics ?? tencentMetrics ?? null;
@@ -1830,7 +1941,7 @@ export async function fetchCNFinancialMetrics(
       revenueHistory: [],
       marketCap: null,
       currency: "CNY",
-      news: [],
+      news: cnNews,
       fetchedAt: new Date().toISOString(),
       dataSource: "fallback",
       warnings: [
@@ -1943,6 +2054,12 @@ export async function fetchCNFinancialMetrics(
       base.targetUpside =
         (base.targetMeanPrice - base.currentPrice) / base.currentPrice;
     }
+  }
+
+  // 填充东方财富个股新闻（消息面/情绪面分析的数据源）。
+  // 各数据源（同花顺/腾讯/雪球/东方财富）均不返回个股新闻，统一在此注入。
+  if (cnNews.length > 0) {
+    base.news = cnNews;
   }
 
   return base;

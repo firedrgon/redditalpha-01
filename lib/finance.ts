@@ -24,7 +24,7 @@ import {
   getTiingoApiKey as getConfigTiingoKey,
   getFinnhubApiKey as getConfigFinnhubKey,
 } from "./finance-config";
-import { detectMarket, normalizeCNTicker } from "./market";
+import { detectMarket, normalizeCNTicker, toYahooSymbol } from "./market";
 import { fetchCNFinancialMetrics } from "./finance-cn";
 
 const UA =
@@ -2856,9 +2856,12 @@ export async function fetchFinancialMetrics(
 
   // 新闻获取：优先使用 Yahoo Finance RSS（无需 Key / crumb，稳定性最好），
   // 若 Yahoo 无结果再用 Finnhub 补充。
+  // 注：A 股新闻已在 fetchCNFinancialMetrics 内通过东方财富个股新闻接口获取，
+  // 此处仅作为 A 股新闻获取失败时的兜底（Yahoo 需用 .SS/.SZ 格式而非 .SH）。
   if (!result.news || result.news.length === 0) {
     try {
-      const yNews = await fetchYahooRSSNews(upper);
+      const yahooSym = detectMarket(upper) === "CN" ? toYahooSymbol(upper) : upper;
+      const yNews = await fetchYahooRSSNews(yahooSym);
       if (yNews && yNews.length > 0) {
         result.news = yNews;
       }
