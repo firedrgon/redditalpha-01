@@ -1,0 +1,1100 @@
+{
+  "items": {
+    "MSTR": {
+      "ticker": "MSTR",
+      "name": "Strategy Inc",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "6.79%",
+          "numericValue": 0.0679,
+          "threshold": ">= 10.00%",
+          "verdict": "fail",
+          "reasoning": "实际值 6.79% 不满足 >= 10.00%，未达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "Forward PE 8.25 / 行业 28.00 = 0.29",
+          "numericValue": 0.29474281654983636,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 0.29 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "-0.03",
+          "numericValue": -0.02764432313185263,
+          "threshold": "<= 2.00",
+          "verdict": "pass",
+          "reasoning": "实际值 -0.03 满足 <= 2.00，达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "-10.04%",
+          "numericValue": -0.10039999999999999,
+          "threshold": "> 15.00%",
+          "verdict": "fail",
+          "reasoning": "实际值 -10.04% 不满足 > 15.00%，未达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "5.52",
+          "numericValue": 5.5177,
+          "threshold": "> 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 5.52 满足 > 1.50，达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": ">= 10.00%",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "1.88（买入）",
+          "numericValue": 1.88,
+          "threshold": "<= 2.00",
+          "verdict": "pass",
+          "reasoning": "实际值 1.88 满足 <= 2.00，达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "MSTR：2 项指标未通过，建议谨慎。未通过项：营收年增长 ≥ 10%、近 5 年平均 ROE > 15%。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-04T15:34:04.756Z",
+      "dataSource": "finnhub",
+      "warnings": [
+        "行业 PE 用 Technology 行业经验值 28（仅供参考）。"
+      ],
+      "currentPrice": 100.77,
+      "targetMeanPrice": null,
+      "targetHighPrice": null,
+      "targetLowPrice": null,
+      "targetMedianPrice": null,
+      "targetUpside": null,
+      "numberOfAnalysts": 25,
+      "recommendationMean": 1.88
+    },
+    "AAPL": {
+      "ticker": "AAPL",
+      "name": "Apple Inc",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "12.76%",
+          "numericValue": 0.1276,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 12.76% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 36.98 / 行业 28.00 = 1.32",
+          "numericValue": 1.3207535714285714,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 1.32 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "2.65",
+          "numericValue": 2.64762,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 2.65 不满足 <= 2.00，未达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "163.92%",
+          "numericValue": 1.6391999999999998,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 163.92% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "0.86",
+          "numericValue": 0.8588,
+          "threshold": "> 1.50",
+          "verdict": "fail",
+          "reasoning": "实际值 0.86 不满足 > 1.50，未达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": ">= 10.00%",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "2.09（买入）",
+          "numericValue": 2.090909090909091,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 2.09 不满足 <= 2.00，未达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "AAPL：3 项指标未通过，建议谨慎。未通过项：PEG ≤ 2、速动比率 > 1.5、分析师评级为买入或以上。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-04T15:34:04.872Z",
+      "dataSource": "finnhub",
+      "warnings": [
+        "行业 PE 用 Technology 行业经验值 28（仅供参考）。"
+      ],
+      "currentPrice": 308.63,
+      "targetMeanPrice": null,
+      "targetHighPrice": null,
+      "targetLowPrice": null,
+      "targetMedianPrice": null,
+      "targetUpside": null,
+      "numberOfAnalysts": 55,
+      "recommendationMean": 2.090909090909091
+    },
+    "MSFT": {
+      "ticker": "MSFT",
+      "name": "Microsoft Corporation",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "14.93%",
+          "numericValue": 0.14932156232406713,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 14.93% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 36.31 / 行业 28.00 = 1.30",
+          "numericValue": 1.2966892596454642,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 1.30 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "2.34",
+          "numericValue": 2.3402422246905754,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 2.34 不满足 <= 2.00，未达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "36.88%",
+          "numericValue": 0.36878357486375923,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 36.88% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "1.35",
+          "numericValue": 1.3468042317551587,
+          "threshold": "> 1.50",
+          "verdict": "fail",
+          "reasoning": "实际值 1.35 不满足 > 1.50，未达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "MSFT：2 项指标未通过，建议谨慎。未通过项：PEG ≤ 2、速动比率 > 1.5。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio"
+      ],
+      "fetchedAt": "2026-07-04T06:54:35.726Z",
+      "dataSource": "fmp",
+      "warnings": [
+        "revenueGrowthYoY 由历史营收估算。",
+        "行业 PE 用 Technology 行业经验值 28（仅供参考）。"
+      ]
+    },
+    "ADBE": {
+      "ticker": "ADBE",
+      "name": "Adobe Inc",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "11.49%",
+          "numericValue": 0.1149,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 11.49% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 12.08 / 行业 28.00 = 0.43",
+          "numericValue": 0.4314892857142857,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 0.43 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "0.79",
+          "numericValue": 0.78652,
+          "threshold": "<= 2.00",
+          "verdict": "pass",
+          "reasoning": "实际值 0.79 满足 <= 2.00，达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "40.01%",
+          "numericValue": 0.40009999999999996,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 40.01% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "0.93",
+          "numericValue": 0.9252,
+          "threshold": "> 1.50",
+          "verdict": "fail",
+          "reasoning": "实际值 0.93 不满足 > 1.50，未达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "当前价 $219.72 → 目标均价 $280.66\n上涨空间 27.74%（45位分析师）",
+          "numericValue": 0.2773529947205535,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 27.74% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "2.44（买入）",
+          "numericValue": 2.4444444444444446,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 2.44 不满足 <= 2.00，未达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "ADBE：2 项指标未通过，建议谨慎。未通过项：速动比率 > 1.5、分析师评级为买入或以上。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-04T15:34:04.154Z",
+      "dataSource": "finnhub",
+      "warnings": [
+        "行业 PE 用 Technology 行业经验值 28（仅供参考）。",
+        "分析师目标价与评级由 Alpha Vantage 补充。"
+      ],
+      "currentPrice": 219.72,
+      "targetMeanPrice": 280.66,
+      "targetHighPrice": null,
+      "targetLowPrice": null,
+      "targetMedianPrice": null,
+      "targetUpside": 0.2773529947205535,
+      "numberOfAnalysts": 45,
+      "recommendationMean": 2.4444444444444446
+    },
+    "NVDA": {
+      "ticker": "NVDA",
+      "name": "NVIDIA Corporation",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "65.47%",
+          "numericValue": 0.6547353579009478,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 65.47% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 37.82 / 行业 28.00 = 1.35",
+          "numericValue": 1.3508403361344539,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 1.35 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "0.57",
+          "numericValue": 0.5731422569027613,
+          "threshold": "<= 2.00",
+          "verdict": "pass",
+          "reasoning": "实际值 0.57 满足 <= 2.00，达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "58.77%",
+          "numericValue": 0.5877197685083276,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 58.77% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "3.24",
+          "numericValue": 3.239809719242608,
+          "threshold": "> 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 3.24 满足 > 1.50，达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "分析师目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "当前价 $194.83 → 目标均价 $316.79，上涨空间 62.60%",
+          "numericValue": 0.6259816250064159,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 62.60% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": "<= 2.00",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        }
+      ],
+      "overallVerdict": "pass",
+      "overallSummary": "NVDA：6 项关键指标全部通过，符合长期持有候选标准。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-04T10:17:04.314Z",
+      "dataSource": "fmp",
+      "warnings": [
+        "revenueGrowthYoY 由历史营收估算。",
+        "行业 PE 用 Technology 行业经验值 28（仅供参考）。"
+      ],
+      "currentPrice": 194.83,
+      "targetMeanPrice": 316.79,
+      "targetHighPrice": 500,
+      "targetLowPrice": 218,
+      "targetMedianPrice": 300,
+      "targetUpside": 0.6259816250064159,
+      "numberOfAnalysts": null,
+      "recommendationMean": null,
+      "llmError": "所有 LLM 提供商均不可用。请在 LLM 设置中配置 API Key。"
+    },
+    "NFLX": {
+      "ticker": "NFLX",
+      "name": "Netflix Inc",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "16.72%",
+          "numericValue": 0.1672,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 16.72% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 24.45 / 行业 22.00 = 1.11",
+          "numericValue": 1.1113045454545454,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 1.11 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "1.09",
+          "numericValue": 1.08535,
+          "threshold": "<= 2.00",
+          "verdict": "pass",
+          "reasoning": "实际值 1.09 满足 <= 2.00，达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "31.33%",
+          "numericValue": 0.31329999999999997,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 31.33% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "1.14",
+          "numericValue": 1.1404,
+          "threshold": "> 1.50",
+          "verdict": "fail",
+          "reasoning": "实际值 1.14 不满足 > 1.50，未达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": ">= 10.00%",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "1.95（买入）",
+          "numericValue": 1.9482758620689655,
+          "threshold": "<= 2.00",
+          "verdict": "pass",
+          "reasoning": "实际值 1.95 满足 <= 2.00，达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "NFLX：1 项指标未通过，建议谨慎。未通过项：速动比率 > 1.5。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-04T15:34:04.666Z",
+      "dataSource": "finnhub",
+      "warnings": [
+        "行业 PE 用 Communication Services 行业经验值 22（仅供参考）。"
+      ],
+      "currentPrice": 77.65,
+      "targetMeanPrice": null,
+      "targetHighPrice": null,
+      "targetLowPrice": null,
+      "targetMedianPrice": null,
+      "targetUpside": null,
+      "numberOfAnalysts": 58,
+      "recommendationMean": 1.9482758620689655
+    },
+    "TSLA": {
+      "ticker": "TSLA",
+      "name": "Tesla Inc",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "2.25%",
+          "numericValue": 0.0225,
+          "threshold": ">= 10.00%",
+          "verdict": "fail",
+          "reasoning": "实际值 2.25% 不满足 >= 10.00%，未达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 382.62 / 行业 22.00 = 17.39",
+          "numericValue": 17.39195,
+          "threshold": "<= 1.50",
+          "verdict": "fail",
+          "reasoning": "实际值 17.39 不满足 <= 1.50，未达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "27.54",
+          "numericValue": 27.53693,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 27.54 不满足 <= 2.00，未达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "16.96%",
+          "numericValue": 0.1696,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 16.96% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "1.55",
+          "numericValue": 1.5499,
+          "threshold": "> 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 1.55 满足 > 1.50，达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": ">= 10.00%",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "2.52（持有）",
+          "numericValue": 2.5166666666666666,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 2.52 不满足 <= 2.00，未达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "TSLA：4 项指标未通过，建议谨慎。未通过项：营收年增长 ≥ 10%、PE 不远高于行业平均、PEG ≤ 2、分析师评级为买入或以上。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-04T15:34:04.490Z",
+      "dataSource": "finnhub",
+      "warnings": [
+        "行业 PE 用 Consumer Cyclical 行业经验值 22（仅供参考）。"
+      ],
+      "currentPrice": 393.45,
+      "targetMeanPrice": null,
+      "targetHighPrice": null,
+      "targetLowPrice": null,
+      "targetMedianPrice": null,
+      "targetUpside": null,
+      "numberOfAnalysts": 60,
+      "recommendationMean": 2.5166666666666666
+    },
+    "NVO": {
+      "ticker": "NVO",
+      "name": "Novo Nordisk",
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "8.13%",
+          "numericValue": 0.08130000000000001,
+          "threshold": ">= 10.00%",
+          "verdict": "fail",
+          "reasoning": "实际值 8.13% 不满足 >= 10.00%，未达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 12.07 / 行业 46.20 = 0.26",
+          "numericValue": 0.26119913419913415,
+          "threshold": "<= 1.50",
+          "verdict": "pass",
+          "reasoning": "实际值 0.26 满足 <= 1.50，达标。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "16.16",
+          "numericValue": 16.16094,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 16.16 不满足 <= 2.00，未达标。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "67.14%",
+          "numericValue": 0.6714,
+          "threshold": "> 15.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 67.14% 满足 > 15.00%，达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "0.57",
+          "numericValue": 0.5696,
+          "threshold": "> 1.50",
+          "verdict": "fail",
+          "reasoning": "实际值 0.57 不满足 > 1.50，未达标。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "当前价 $50.43 → 目标均价 $47.64\n上涨空间 -5.53%（14位分析师）",
+          "numericValue": -0.05532421177870317,
+          "threshold": ">= 10.00%",
+          "verdict": "fail",
+          "reasoning": "实际值 -5.53% 不满足 >= 10.00%，未达标。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "2.86（持有），目标价区间 $39.58~$63.04",
+          "numericValue": 2.857142857142857,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 2.86 不满足 <= 2.00，未达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "NVO：5 项指标未通过，建议谨慎。未通过项：营收年增长 ≥ 10%、PEG ≤ 2、速动比率 > 1.5、目标价上涨空间 ≥ 10%、分析师评级为买入或以上。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-05T14:03:29.026Z",
+      "dataSource": "finnhub+tiingo",
+      "warnings": [
+        "Tiingo /tiingo/fundamentals/NVO/daily: HTTP 400 Error: Free and Power plans are limited to the DOW 30. If you would like access to all supported tickers, then please E-mail support@tiingo.com to get the Fundamental Data API added as an add-on service.",
+        "Tiingo 基本面数据受限（免费/ Power 计划仅覆盖 DOW 30），尝试用 Finnhub 补充财务指标。",
+        "行业 PE 用 Healthcare 行业经验值 18（仅供参考）。",
+        "分析师目标价由 stockanalysis.com (S&P Global) 补充。",
+        "行业 PE 来自 stockanalysis.com 实时数据：Healthcare 加权平均 PE = 46.2。"
+      ],
+      "currentPrice": 50.43,
+      "targetMeanPrice": 47.64,
+      "targetHighPrice": 63.04,
+      "targetLowPrice": 39.58,
+      "targetMedianPrice": 45.17,
+      "targetUpside": -0.05532421177870317,
+      "numberOfAnalysts": 14,
+      "recommendationMean": 2.857142857142857,
+      "news": [
+        {
+          "title": "Trump’s FDA May Soon Throw Its Weight Behind Peptides. Should You Buy In?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-05T06:00:00.000Z",
+          "summary": "Peptides are short-chain amino acids that are formulated into drugs.  Insulin is a peptide.  Legions of other peptides are on the market in the “wellness” industry, promoted for everything from athletic performance to skin care, mental focus, and “romantic connection”—the latter pitched by a startup called Feel Peptides.",
+          "url": "https://finance.yahoo.com/m/3a979245-1c70-3d78-8c3f-900248ee7452/trump%E2%80%99s-fda-may-soon-throw.html?.tsrc=rss"
+        },
+        {
+          "title": "How Much Could $1,000 Invested in Viking Therapeutics Be Worth by 2030?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-05T05:25:00.000Z",
+          "summary": "This biotech might have a bright future, but it'll need to survive against the incumbents to do so.",
+          "url": "https://www.fool.com/investing/2026/07/05/how-much-could-1000-invested-in-viking-therapeutic/?.tsrc=rss"
+        },
+        {
+          "title": "Is Viking Therapeutics Stock Going to $50? Here's What the Bulls and Bears Are Saying",
+          "source": "Yahoo Finance",
+          "date": "2026-07-04T09:30:00.000Z",
+          "summary": "The stock is known to soar on good news.",
+          "url": "https://www.fool.com/investing/2026/07/04/is-viking-therapeutics-stock-going-to-50-heres-wha/?.tsrc=rss"
+        },
+        {
+          "title": "Johnson &amp; Johnson Is Walking Away From a $100 Billion Obesity Market. Could That Actually Make It the Better Long-Term Buy Than Eli Lilly?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-04T01:35:00.000Z",
+          "summary": "Johnson &amp; Johnson doesn't need GLP-1 drugs to grow, and that's good news for long-term investors.",
+          "url": "https://www.fool.com/investing/2026/07/03/johnson-johnson-is-walking-away-from-a-100-billion/?.tsrc=rss"
+        },
+        {
+          "title": "Novo Nordisk (NVO) Stock May Be 48% Undervalued On Medicare GLP 1 Coverage",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T14:14:12.000Z",
+          "summary": "Novo Nordisk stock has delivered a decline of 32.7% over the past three years, yet current valuation work, including a Discounted Cash Flow (DCF) intrinsic value estimate and market multiple checks, both point to the shares trading at a discount to what the business may be worth. The three-year return of 32.7% down raises the question of whether sentiment has moved further than the underlying value of Novo Nordisk. Medicare’s decision to cover certain GLP-1 weight loss drugs and growing use...",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/novo-nordisk-nvo-stock-may-141412298.html?.tsrc=rss"
+        },
+        {
+          "title": "Microsoft Launches AI Adoption Firm",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T13:53:13.000Z",
+          "summary": "The new unit will start with $2.5 billion to help companies choose and use AI tools.",
+          "url": "https://finance.yahoo.com/technology/ai/articles/microsoft-launches-ai-adoption-firm-135313441.html?.tsrc=rss"
+        },
+        {
+          "title": "Here's Why Viking Therapeutics Stock Surged Higher in June",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T13:45:39.000Z",
+          "summary": "Investors are growing more optimistic over the company's pipeline and the initiation of a Phase 1 trial with a new drug.",
+          "url": "https://www.fool.com/investing/2026/07/03/heres-why-viking-therapeutics-stock-surged-higher/?.tsrc=rss"
+        },
+        {
+          "title": "Lexicon Pharmaceuticals (LXRX) Gains on Russell 3000 Inclusion",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T13:12:32.000Z",
+          "summary": "Lexicon Pharmaceuticals, Inc. (NASDAQ:LXRX) has gained more than 15% over the past month, mainly driven by the stock’s inclusion in the Russell 3000 index and strong Q1 2026 earnings. Wall Street expects more than 21% upside over the next 12-months making Lexicon Pharmaceuticals, Inc. (NASDAQ:LXRX) one of the Best Rising Penny Stocks to Buy According […]",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/lexicon-pharmaceuticals-lxrx-gains-russell-131232712.html?.tsrc=rss"
+        },
+        {
+          "title": "Can Medicare Bridge Help Novo Nordisk Defend Its GLP-1 Leadership?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T13:12:00.000Z",
+          "summary": "NVO benefits from Medicare's GLP-1 Bridge, but equal coverage for rival therapies shifts the obesity race toward clinical differentiation and long-term outcomes.",
+          "url": "https://finance.yahoo.com/healthcare/articles/medicare-bridge-help-novo-nordisk-131200842.html?.tsrc=rss"
+        },
+        {
+          "title": "Novo Nordisk (NVO) Is At The Center Of A Fast Growing Diabetes Drug Market",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T10:19:05.000Z",
+          "summary": "Market research highlights Novo Nordisk (NYSE:NVO) as a leading company in the global antidiabetic drugs market. The report points to rising diabetes prevalence and new therapeutic approaches as key drivers for the sector. Novo Nordisk is identified as a major participant in advanced drug classes, including GLP-1 receptor agonists. Novo Nordisk is a central player in a global antidiabetic market that research identifies as having significant long-term potential, with diabetes prevalence and...",
+          "url": "https://finance.yahoo.com/healthcare/articles/novo-nordisk-nvo-center-fast-101905395.html?.tsrc=rss"
+        },
+        {
+          "title": "Novo Nordisk (CPSE:NOVO B) Stock Looks Undervalued As Broader Checks Stay Supportive",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T10:18:26.000Z",
+          "summary": "Novo Nordisk stock has given investors a mixed ride over the past few years, with a 36.1% gain over 5 years but weaker recent returns, and the valuation checks now suggest the shares may lean cheap rather than fully priced in. Over the last 5 years, Novo Nordisk has returned 36.1%, which points to a longer term story that still created value even though shorter term performance has been more muted. Recent headlines around Medicare’s GLP-1 Bridge program and expanding cardiometabolic research...",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/novo-nordisk-cpse-novo-b-101826775.html?.tsrc=rss"
+        },
+        {
+          "title": "[Latest] Global Antidiabetic Drugs Market Size/Share Worth USD 309.84 Billion by 2035 at a 11.62% CAGR: Healthcare Foresights (Analysis, Outlook, Leaders, Report, Trends, Forecast, Segmentation, Growth Rate, Value, SWOT Analysis)",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T08:30:00.000Z",
+          "summary": "[220+ Pages Latest Report] According to a market research study published by Healthcare Foresights, the demand analysis of Global Antidiabetic Drugs Market size &amp; share revenue was valued at approximately USD 103.21 Billion in 2025 and is expected to reach USD 115.02 Billion in 2026 and is expected to reach around USD 309.84 Billion by 2035, at a CAGR of 11.62% between 2026 and 2035. The key market players listed in the report with their sales, revenues and strategies are Eli Lilly and Company,",
+          "url": "https://finance.yahoo.com/healthcare/articles/latest-global-antidiabetic-drugs-market-083000491.html?.tsrc=rss"
+        },
+        {
+          "title": "Microsoft launches Microsoft Frontier Company with $2.5bn investment",
+          "source": "Yahoo Finance",
+          "date": "2026-07-03T07:55:42.000Z",
+          "summary": "The new company will focus on integrating enterprise AI, offering tailored support and protecting client data and intellectual property.",
+          "url": "https://www.verdict.co.uk/microsoft-launches-microsoft-frontier-company/?.tsrc=rss"
+        },
+        {
+          "title": "MSFT Stock Alert: Microsoft Invests $2.5 Billion in AI Implementation Unit",
+          "source": "Yahoo Finance",
+          "date": "2026-07-02T20:24:53.000Z",
+          "summary": "Microsoft shares soar as the behemoth announces a $2.5 billion investment in a new initiative, Microsoft Frontier Co. But does that warrant buying MSFT stock today?",
+          "url": "https://www.barchart.com/story/news/3106223/msft-stock-alert-microsoft-invests-2-5-billion-in-ai-implementation-unit?.tsrc=rss"
+        },
+        {
+          "title": "Microsoft Invests $2.5 Billion in New AI Implementation Business",
+          "source": "Yahoo Finance",
+          "date": "2026-07-02T19:25:15.000Z",
+          "summary": "Microsoft (MSFT) is launching a new business unit with a $2.5 billion investment that will help clie",
+          "url": "https://finance.yahoo.com/technology/ai/articles/microsoft-invests-2-5-billion-192515066.html?.tsrc=rss"
+        }
+      ]
+    },
+    "SOFI": {
+      "ticker": "SOFI",
+      "name": null,
+      "metrics": [
+        {
+          "key": "default-revenue-growth",
+          "title": "营收年增长 ≥ 10%",
+          "description": "营收是公司成长的发动机，达不到 10% 说明成长动力明显不足。",
+          "value": "TTM 41.03% / 上财年 35.56%",
+          "numericValue": 0.35559,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 35.56% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-pe-vs-industry",
+          "title": "PE 不远高于行业平均",
+          "description": "PE 远高于同行说明股价可能已被市场炒高，有接盘风险。",
+          "value": "PE 42.21 / 行业 —",
+          "numericValue": null,
+          "threshold": "<= 1.50",
+          "verdict": "unknown",
+          "reasoning": "未能获取行业 PE 数据，无法判定。"
+        },
+        {
+          "key": "default-peg",
+          "title": "PEG ≤ 2",
+          "description": "PEG 看增长和估值搭不搭，超过 2 说明增长撑不起当前价格。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": "<= 2.00",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        },
+        {
+          "key": "default-roe-5y",
+          "title": "近 5 年平均 ROE > 15%",
+          "description": "ROE 是赚钱能力的硬核指标，低于 15% 说明盈利能力偏弱。",
+          "value": "5年均值 -2.05% / 当前 5.42%",
+          "numericValue": -0.02053238,
+          "threshold": "> 15.00%",
+          "verdict": "fail",
+          "reasoning": "实际值 -2.05% 不满足 > 15.00%，未达标。"
+        },
+        {
+          "key": "default-quick-ratio",
+          "title": "速动比率 > 1.5",
+          "description": "看公司短期还钱能力，低于 1.5 有流动性隐患。",
+          "value": "—",
+          "numericValue": null,
+          "threshold": "> 1.50",
+          "verdict": "unknown",
+          "reasoning": "未能获取该指标数据，无法判定。"
+        },
+        {
+          "key": "default-target-upside",
+          "title": "目标价上涨空间 ≥ 10%",
+          "description": "华尔街分析师共识目标价相对当前价有 10% 以上的上涨空间。",
+          "value": "当前价 $18.79 → 目标均价 $21.10\n上涨空间 12.32%（24位分析师）",
+          "numericValue": 0.12323662496672894,
+          "threshold": ">= 10.00%",
+          "verdict": "pass",
+          "reasoning": "实际值 12.32% 满足 >= 10.00%，达标。"
+        },
+        {
+          "key": "default-recommendation",
+          "title": "分析师评级为买入或以上",
+          "description": "分析师推荐均值 ≤ 2.0（2=买入，1=强力买入），多数分析师看好。",
+          "value": "3.00（持有），目标价区间 $12.00~$31.00",
+          "numericValue": 3,
+          "threshold": "<= 2.00",
+          "verdict": "fail",
+          "reasoning": "实际值 3.00 不满足 <= 2.00，未达标。"
+        }
+      ],
+      "overallVerdict": "fail",
+      "overallSummary": "SOFI：2 项指标未通过，建议谨慎。未通过项：近 5 年平均 ROE > 15%、分析师评级为买入或以上。",
+      "strategyIdsUsed": [
+        "default-revenue-growth",
+        "default-pe-vs-industry",
+        "default-peg",
+        "default-roe-5y",
+        "default-quick-ratio",
+        "default-target-upside",
+        "default-recommendation"
+      ],
+      "fetchedAt": "2026-07-12T02:53:24.821Z",
+      "dataSource": "yahoo",
+      "warnings": [
+        "核心财务指标（PE/PEG/ROE/速动比率/营收增长）由 stockanalysis.com (Fiscal.ai) 提供。",
+        "分析师目标价由 stockanalysis.com (S&P Global) 补充。"
+      ],
+      "currentPrice": 18.785,
+      "targetMeanPrice": 21.1,
+      "targetHighPrice": 31,
+      "targetLowPrice": 12,
+      "targetMedianPrice": 18,
+      "targetUpside": 0.12323662496672894,
+      "numberOfAnalysts": 24,
+      "recommendationMean": 3,
+      "news": [
+        {
+          "title": "Are AI Agents SoFi Stock's Next Big Catalyst?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-09T21:05:00.000Z",
+          "summary": "The digital bank is growing fast and leaning into AI.",
+          "url": "https://www.fool.com/investing/2026/07/09/are-ai-agents-sofi-stocks-next-big-catalyst/?.tsrc=rss"
+        },
+        {
+          "title": "Is Dave's ARPU Growth Story Still Gaining Momentum in 2026?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-09T14:22:00.000Z",
+          "summary": "DAVE's ARPU growth is being driven by ExtraCash demand, higher fees, second draws and liquidity moves, even as valuation has climbed.",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/daves-arpu-growth-story-still-142200787.html?.tsrc=rss"
+        },
+        {
+          "title": "The Standoff Over PYPL Stock",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T21:16:08.000Z",
+          "summary": "The market has been relentlessly selling this payments giant, but one buyer has been quietly accumulating an enormous position: the company itself.",
+          "url": "https://www.trefis.com/articles/606201/the-standoff-over-pypl-stock/2026-07-08?.tsrc=rss"
+        },
+        {
+          "title": "PYPL Stock: Where Compounding Could Take The Price",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T20:29:26.000Z",
+          "summary": "PayPal (PYPL) trades at $45.65 per share on a $41.7B market cap and 8.2x trailing earnings. Under a conservative 3-year scenario, the math points to roughly 15% of upside. Revenue compounding does most of the work in our scenario. Here is the picture that the math sits on top of.",
+          "url": "https://www.trefis.com/articles/606182/pypl-stock-where-compounding-could-take-the-price/2026-07-08?.tsrc=rss"
+        },
+        {
+          "title": "SOFI's ETF Expansion: Can It Lift Fee-Based Revenues Ahead?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T17:18:00.000Z",
+          "summary": "SOFI expands its ETF lineup with SFYI, combining popular holdings and an options strategy to deepen investing engagement and grow fee revenue.",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/sofis-etf-expansion-lift-fee-171800851.html?.tsrc=rss"
+        },
+        {
+          "title": "Can SoFi Turn Today’s Investors Into Millionaires?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T16:00:57.000Z",
+          "summary": "SoFi Technologies (NASDAQ:SOFI) has achieved sustained GAAP profitability, and CEO Anthony Noto is pushing for aggressive growth. He told investors on the Q1 call, “Over the past 8 years, we’ve grown members by more than 20x from 650,000 to 14.7 million members.” Yet shares are down 28.92% year to date, trading at $18.61. Can this ... Can SoFi Turn Today’s Investors Into Millionaires?",
+          "url": "https://247wallst.com/investing/2026/07/08/can-sofi-turn-todays-investors-into-millionaires/?.tsrc=rss"
+        },
+        {
+          "title": "Can Dave's Flex Card Capture More of Members' Everyday Spending?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T15:28:00.000Z",
+          "summary": "Dave Flex could shift DAVE from short-term liquidity into everyday discretionary spending, but credit performance is likely to shape how far it scales.",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/daves-flex-card-capture-more-152800378.html?.tsrc=rss"
+        },
+        {
+          "title": "SoFi Technologies (SOFI) Could Be 23% Undervalued As New ETF Fuels Valuation Debate",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T14:15:30.000Z",
+          "summary": "SoFi Technologies (SOFI) just rolled out the SoFi Social 50 Income ETF, a fund built around the 50 most held stocks in SoFi Invest accounts and an actively managed options income strategy. See our latest analysis for SoFi Technologies. SoFi Technologies' share price has been choppy, with a 1 day share price return that declined 4.62% and a year to date share price return down 35.36%. However, a 30 day share price return of 10.73% and a 3 year total shareholder return of 95.70% suggest that...",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/sofi-technologies-sofi-could-23-141530796.html?.tsrc=rss"
+        },
+        {
+          "title": "Can a $25,000 Investment in SoFi Stock Make You a Millionaire?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T13:42:00.000Z",
+          "summary": "The fast-growing company could reward investors in a big way.",
+          "url": "https://www.fool.com/investing/2026/07/08/can-a-25000-investment-in-sofi-stock-make-you-a-mi/?.tsrc=rss"
+        },
+        {
+          "title": "Is Trending Stock SoFi Technologies, Inc. (SOFI) a Buy Now?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T13:00:05.000Z",
+          "summary": "SoFi Technologies (SOFI) has received quite a bit of attention from Zacks.com users lately. Therefore, it is wise to be aware of the facts that can impact the stock's prospects.",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/trending-stock-sofi-technologies-inc-130005136.html?.tsrc=rss"
+        },
+        {
+          "title": "Are You A New Investor? Get Up To $1,000 In Stock With SoFi [UPDATED]",
+          "source": "Yahoo Finance",
+          "date": "2026-07-08T11:35:10.000Z",
+          "summary": "Editor’s Note: This article has been adjusted according to the most current information on the topic Getting started as an investor usually costs money. SoFi is flipping that idea on its head. For a limited time, SoFi is offering new investors up to $1,000 in stock when they open and fund a self-directed investing account. Instead of charging commissions or requiring large balances, the platform is giving investors stock upfront, capital they can put to work right away. In a market where commiss",
+          "url": "https://finance.yahoo.com/markets/stocks/articles/investor-1-000-stock-sofi-113510297.html?.tsrc=rss"
+        },
+        {
+          "title": "SOFI Innovation: Are Coach and Composer the Next Growth Layer?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-07T17:44:00.000Z",
+          "summary": "SoFi Technologies' AI push with Coach and Composer aims to deepen member engagement as rapid user, product and revenue growth strengthens its financial ecosystem.",
+          "url": "https://finance.yahoo.com/technology/ai/articles/sofi-innovation-coach-composer-next-174400720.html?.tsrc=rss"
+        },
+        {
+          "title": "New Position: TTRF Capital Initiates IREN Stake With 66,800 Shares",
+          "source": "Yahoo Finance",
+          "date": "2026-07-07T16:05:01.000Z",
+          "summary": "Fund bets on data center and Bitcoin mining operator as portfolio outperforms S&amp;P 500 by 141 percentage points.",
+          "url": "https://www.fool.com/coverage/filings/2026/07/07/new-position-ttrf-capital-initiates-iren-stake-with-66-800-shares/?.tsrc=rss"
+        },
+        {
+          "title": "New Position: TTRF Capital Loads Up on AI Infrastructure Company Nebius Stock",
+          "source": "Yahoo Finance",
+          "date": "2026-07-07T15:49:46.000Z",
+          "summary": "TTRF's debut stake in AI infrastructure provider Nebius makes it the fund's largest holding. The stock has quadrupled over the past year.",
+          "url": "https://www.fool.com/coverage/filings/2026/07/07/new-position-ttrf-capital-loads-up-on-ai-infrastructure-company-nebius-stock/?.tsrc=rss"
+        },
+        {
+          "title": "SoFi Survived the Short Sellers. Has the Stock Finally Bottomed?",
+          "source": "Yahoo Finance",
+          "date": "2026-07-07T15:45:11.000Z",
+          "summary": "A short seller's bombshell report torched SoFi shares by nearly a third, yet the stock has quietly climbed back off its lows while smart money keeps buying. The real test arrives on July 29, and the answer hinges on one credit metric.",
+          "url": "https://247wallst.com/investing/2026/07/07/sofi-survived-the-short-sellers-has-the-stock-finally-bottomed/?.tsrc=rss"
+        }
+      ],
+      "industry": null,
+      "llmError": "活跃模型 Groq · Qwen3 32B 已禁用，请在 ⚙ 设置中启用。"
+    }
+  },
+  "updatedAt": 1783824804823
+}

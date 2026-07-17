@@ -1738,6 +1738,82 @@ async function fetchStockAnalysisTargets(
   }
 }
 
+/**
+ * 从百度财经开放接口获取 A 股分析师机构评级与目标价（免费无需 Key）
+ *
+ * 响应结构较深且索引不固定，用递归搜索定位 organRating 字段。
+ * organRating 包含：organNum（分析师数量）、avgPrice（目标均价）、
+ * maxPrice（最高目标价）、minPrice（最低目标价）、curPrice（当前价）、
+ * body 数组（每条含 organ/date/rating/price）
+ */
+async function fetchBaiduFinanceAnalystRating(
+  ticker: string
+): Promise<{
+  targetLow: number | null;
+  targetHigh: number | null;
+  targetAverage: number | null;
+  numberOfAnalysts: number | null;
+  currentPrice: number | null;
+} | null> {
+  // 提取纯数字代码：601138.SS → 601138，000858.SZ → 000858
+  const code = ticker.replace(/\.(SS|SZ|SH)$/i, "").trim();
+  if (!/^\d{6}$/.test(code)) return null;
+
+  const url = `https://finance.baidu.com/opendata?openapi=1&dspName=iphone&tn=tangram&client=app&query=${code}&code=${code}&word=${code}&resource_id=5429&ma_ver=4&finClientType=pc`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    // 递归搜索 organRating 字段（响应结构深且索引不固定）
+    const organRating = findNestedKey(data, "organRating");
+    if (!organRating || typeof organRating !== "object") return null;
+
+    const or = organRating as Record<string, unknown>;
+    const parseNum = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = parseFloat(String(v));
+      return isNaN(n) ? null : n;
+    };
+
+    const targetAverage = parseNum(or.avgPrice);
+    const targetHigh = parseNum(or.maxPrice);
+    const targetLow = parseNum(or.minPrice);
+    const numberOfAnalysts = parseNum(or.organNum);
+    const currentPrice = parseNum(or.curPrice);
+
+    if (targetAverage == null && targetHigh == null && targetLow == null) {
+      return null;
+    }
+
+    return { targetAverage, targetHigh, targetLow, numberOfAnalysts, currentPrice };
+  } catch {
+    return null;
+  }
+}
+
+/** 递归搜索嵌套对象中指定 key 的值（返回第一个命中） */
+function findNestedKey(obj: unknown, key: string): unknown {
+  if (!obj || typeof obj !== "object") return undefined;
+  if (key in (obj as Record<string, unknown>)) return (obj as Record<string, unknown>)[key];
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findNestedKey(item, key);
+      if (found !== undefined) return found;
+    }
+  } else {
+    for (const v of Object.values(obj as Record<string, unknown>)) {
+      const found = findNestedKey(v, key);
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
+}
+
 // ============================================================
 // stockanalysis.com 财务指标爬取（核心数据源）
 //
@@ -2928,6 +3004,53 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // 爬取失败不影响主结果
+    }
+  }
+
+  // ============================================================
+  // A股分析师目标价：百度财经开放接口（免费无需 Key）
+  // 仅对 A 股 ticker（.SS/.SZ 后缀）生效
+  // ============================================================
+  if (/\.(SS|SZ|SH)$/i.test(upper)) {
+    if (
+      result.targetMeanPrice == null ||
+      result.targetHighPrice == null ||
+      result.targetLowPrice == null
+    ) {
+      try {
+        const bd = await fetchBaiduFinanceAnalystRating(upper);
+        if (bd) {
+          let hasNewData = false;
+          if (bd.targetAverage != null && result.targetMeanPrice == null) {
+            result.targetMeanPrice = bd.targetAverage;
+            hasNewData = true;
+          }
+          if (bd.targetHigh != null && result.targetHighPrice == null) {
+            result.targetHighPrice = bd.targetHigh;
+            hasNewData = true;
+          }
+          if (bd.targetLow != null && result.targetLowPrice == null) {
+            result.targetLowPrice = bd.targetLow;
+            hasNewData = true;
+          }
+          if (bd.numberOfAnalysts != null && result.numberOfAnalysts == null) {
+            result.numberOfAnalysts = bd.numberOfAnalysts;
+            hasNewData = true;
+          }
+          if (bd.currentPrice != null && result.currentPrice == null) {
+            result.currentPrice = bd.currentPrice;
+            hasNewData = true;
+          }
+          if (hasNewData) {
+            result.warnings.push("分析师目标价由百度财经补充。");
+            if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+              result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+            }
+          }
+        }
+      } catch {
+        // 百度财经爬取失败不影响主结果
+      }
     }
   }
 
