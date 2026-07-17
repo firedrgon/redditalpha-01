@@ -2958,15 +2958,61 @@ export async function fetchFinancialMetrics(
   }
 
   // ============================================================
-  // 分析师目标价：优先爬取 stockanalysis.com（免费、无需 Key、数据最完整）
-  // 数据来源：S&P Global，提供 low/median/average/high + consensus rating + 分析师数量
+  // 分析师目标价获取
+  // A 股：优先百度财经开放接口（免费无需 Key，数据覆盖完整）
+  // 美股：爬取 stockanalysis.com（S&P Global 数据）
   // ============================================================
-  if (
+  const isCNAshare = detectMarket(upper) === "CN";
+
+  if (isCNAshare) {
+    // A 股：百度财经优先
+    if (
+      result.targetMeanPrice == null ||
+      result.targetHighPrice == null ||
+      result.targetLowPrice == null
+    ) {
+      try {
+        const bd = await fetchBaiduFinanceAnalystRating(upper);
+        if (bd) {
+          let hasNewData = false;
+          if (bd.targetAverage != null && result.targetMeanPrice == null) {
+            result.targetMeanPrice = bd.targetAverage;
+            hasNewData = true;
+          }
+          if (bd.targetHigh != null && result.targetHighPrice == null) {
+            result.targetHighPrice = bd.targetHigh;
+            hasNewData = true;
+          }
+          if (bd.targetLow != null && result.targetLowPrice == null) {
+            result.targetLowPrice = bd.targetLow;
+            hasNewData = true;
+          }
+          if (bd.numberOfAnalysts != null && result.numberOfAnalysts == null) {
+            result.numberOfAnalysts = bd.numberOfAnalysts;
+            hasNewData = true;
+          }
+          if (bd.currentPrice != null && result.currentPrice == null) {
+            result.currentPrice = bd.currentPrice;
+            hasNewData = true;
+          }
+          if (hasNewData) {
+            result.warnings.push("分析师目标价由百度财经提供。");
+            if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+              result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+            }
+          }
+        }
+      } catch {
+        // 百度财经爬取失败不影响主结果
+      }
+    }
+  } else if (
     result.targetMeanPrice == null ||
     result.targetHighPrice == null ||
     result.targetLowPrice == null ||
     result.targetMedianPrice == null
   ) {
+    // 美股：stockanalysis.com
     try {
       const sa = await fetchStockAnalysisTargets(upper);
       if (sa) {
@@ -3004,53 +3050,6 @@ export async function fetchFinancialMetrics(
       }
     } catch {
       // 爬取失败不影响主结果
-    }
-  }
-
-  // ============================================================
-  // A股分析师目标价：百度财经开放接口（免费无需 Key）
-  // 仅对 A 股 ticker（.SS/.SZ 后缀）生效
-  // ============================================================
-  if (/\.(SS|SZ|SH)$/i.test(upper)) {
-    if (
-      result.targetMeanPrice == null ||
-      result.targetHighPrice == null ||
-      result.targetLowPrice == null
-    ) {
-      try {
-        const bd = await fetchBaiduFinanceAnalystRating(upper);
-        if (bd) {
-          let hasNewData = false;
-          if (bd.targetAverage != null && result.targetMeanPrice == null) {
-            result.targetMeanPrice = bd.targetAverage;
-            hasNewData = true;
-          }
-          if (bd.targetHigh != null && result.targetHighPrice == null) {
-            result.targetHighPrice = bd.targetHigh;
-            hasNewData = true;
-          }
-          if (bd.targetLow != null && result.targetLowPrice == null) {
-            result.targetLowPrice = bd.targetLow;
-            hasNewData = true;
-          }
-          if (bd.numberOfAnalysts != null && result.numberOfAnalysts == null) {
-            result.numberOfAnalysts = bd.numberOfAnalysts;
-            hasNewData = true;
-          }
-          if (bd.currentPrice != null && result.currentPrice == null) {
-            result.currentPrice = bd.currentPrice;
-            hasNewData = true;
-          }
-          if (hasNewData) {
-            result.warnings.push("分析师目标价由百度财经补充。");
-            if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
-              result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
-            }
-          }
-        }
-      } catch {
-        // 百度财经爬取失败不影响主结果
-      }
     }
   }
 
