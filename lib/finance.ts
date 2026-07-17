@@ -1369,6 +1369,11 @@ const POSITIVE_KEYWORDS = [
   "record", "high", "breakthrough", "win", "deal", "partnership", "approval", "fda",
   "outperform", "overweight", "top pick", "accumulate", "initiate", "expansion",
   "innovate", "launch", "demand", "recovery", "turnaround", "guidance raise",
+  // 中文正面关键词（A股新闻情绪分析）
+  "涨停", "大涨", "突破", "利好", "增长", "盈利", "新高", "买入", "推荐",
+  "看好", "反弹", "回暖", "超预期", "景气", "放量", "加仓", "分红", "回购",
+  "扩产", "订单", "合作", "获批", "创新", "龙头", "强势", "飙升", "暴涨",
+  "净利润增", "营收增长", "业绩超预期", "机构看好", "资金流入",
 ];
 
 const NEGATIVE_KEYWORDS = [
@@ -1377,6 +1382,11 @@ const NEGATIVE_KEYWORDS = [
   "low", "fail", "recall", "fraud", "probe", "warning", "guidance cut", "halt",
   "suspend", "bankrupt", "default", "down", "plunge", "crash", "bubble", "concern",
   "headwind", "pressure", "slump", "shrink", "exit", "depart", "resign", "underperform",
+  // 中文负面关键词（A股新闻情绪分析）
+  "跌停", "大跌", "暴跌", "利空", "下滑", "亏损", "下跌", "卖出", "减持",
+  "看空", "回调", "承压", "低于预期", "萎缩", "减仓", "质押", "爆雷", "违规",
+  "处罚", "调查", "退市", "停牌", "诉讼", "债务违约", "业绩不及预期",
+  "资金流出", "商誉减值", "计提减值",
 ];
 
 function analyzeNewsSentiment(
@@ -1401,10 +1411,12 @@ function analyzeNewsSentiment(
   for (const item of news) {
     if (!item || !item.title) continue;
     // 标题 + summary 一起做关键词匹配（summary 可能更长，信息更全）
+    // 中文关键词无大小写，toLowerCase 不影响中文匹配
     const text = `${item.title} ${item.summary || ""}`.toLowerCase();
     let isPositive = false;
     let isNegative = false;
 
+    // 英文关键词始终启用（英文新闻或中英混合）
     for (const kw of POSITIVE_KEYWORDS) {
       if (text.includes(kw)) {
         isPositive = true;
@@ -2171,7 +2183,12 @@ async function fetchYahooRSSNews(
   ticker: string
 ): Promise<Array<{ title: string; source?: string; date?: string; summary?: string; url?: string }> | null> {
   const upper = ticker.toUpperCase();
-  const url = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(upper)}&region=US&lang=en-US`;
+  // A股 ticker 格式：600519.SS（上交所）/ 000858.SZ（深交所）
+  // 使用中国区域和中文语言参数获取中文新闻
+  const isAShare = /\.(SS|SZ)$/.test(upper);
+  const region = isAShare ? "CN" : "US";
+  const lang = isAShare ? "zh-CN" : "en-US";
+  const url = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(upper)}&region=${region}&lang=${lang}`;
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA },
