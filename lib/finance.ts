@@ -2965,46 +2965,24 @@ export async function fetchFinancialMetrics(
   const isCNAshare = detectMarket(upper) === "CN";
 
   if (isCNAshare) {
-    // A 股：百度财经优先
-    if (
-      result.targetMeanPrice == null ||
-      result.targetHighPrice == null ||
-      result.targetLowPrice == null
-    ) {
-      try {
-        const bd = await fetchBaiduFinanceAnalystRating(upper);
-        if (bd) {
-          let hasNewData = false;
-          if (bd.targetAverage != null && result.targetMeanPrice == null) {
-            result.targetMeanPrice = bd.targetAverage;
-            hasNewData = true;
-          }
-          if (bd.targetHigh != null && result.targetHighPrice == null) {
-            result.targetHighPrice = bd.targetHigh;
-            hasNewData = true;
-          }
-          if (bd.targetLow != null && result.targetLowPrice == null) {
-            result.targetLowPrice = bd.targetLow;
-            hasNewData = true;
-          }
-          if (bd.numberOfAnalysts != null && result.numberOfAnalysts == null) {
-            result.numberOfAnalysts = bd.numberOfAnalysts;
-            hasNewData = true;
-          }
-          if (bd.currentPrice != null && result.currentPrice == null) {
-            result.currentPrice = bd.currentPrice;
-            hasNewData = true;
-          }
-          if (hasNewData) {
-            result.warnings.push("分析师目标价由百度财经提供。");
-            if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
-              result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
-            }
-          }
+    // A 股：百度财经优先，直接覆盖东方财富等其他数据源的结果
+    try {
+      const bd = await fetchBaiduFinanceAnalystRating(upper);
+      if (bd) {
+        if (bd.targetAverage != null) result.targetMeanPrice = bd.targetAverage;
+        if (bd.targetHigh != null) result.targetHighPrice = bd.targetHigh;
+        if (bd.targetLow != null) result.targetLowPrice = bd.targetLow;
+        if (bd.numberOfAnalysts != null) result.numberOfAnalysts = bd.numberOfAnalysts;
+        if (bd.currentPrice != null && result.currentPrice == null) {
+          result.currentPrice = bd.currentPrice;
         }
-      } catch {
-        // 百度财经爬取失败不影响主结果
+        result.warnings.push("分析师目标价由百度财经提供。");
+        if (result.currentPrice != null && result.targetMeanPrice != null && result.currentPrice > 0) {
+          result.targetUpside = result.targetMeanPrice / result.currentPrice - 1;
+        }
       }
+    } catch {
+      // 百度财经爬取失败时保留东方财富等已有数据
     }
   } else if (
     result.targetMeanPrice == null ||
