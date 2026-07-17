@@ -66,7 +66,6 @@ interface FavoriteItem {
   addedAt: number;
   pinned?: boolean;
   starred?: boolean;
-  thsVisualUrl?: string | null;
 }
 
 /** 将后端 /api/favorites 返回的原始对象映射为前端 FavoriteItem */
@@ -138,7 +137,6 @@ interface StockAnalysis {
   } | null;
   industry?: string | null;
   sector?: string | null;
-  thsVisualUrl?: string | null;
 }
 
 // ============================================================
@@ -407,6 +405,21 @@ function FavoriteCard({
     : `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
+
+  // A 股图解 URL：卡片挂载时自动获取
+  const [visualUrl, setVisualUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isCNTicker(item.ticker)) return;
+    let cancelled = false;
+    fetch(`/api/ths-visual?ticker=${encodeURIComponent(item.ticker)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d.url) setVisualUrl(d.url);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [item.ticker]);
+
   return (
     <div
       className={`group relative flex w-full flex-col gap-3 rounded-xl border p-4 text-left transition-all hover:bg-zinc-900 md:items-stretch ${
@@ -482,11 +495,11 @@ function FavoriteCard({
               诊断
             </a>
             <a
-              href={item.thsVisualUrl || "#"}
-              target={item.thsVisualUrl ? "_blank" : undefined}
-              rel={item.thsVisualUrl ? "noopener noreferrer" : undefined}
-              className={`shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs transition-all ${item.thsVisualUrl ? "text-zinc-300 hover:border-orange-500/50 hover:text-orange-400" : "text-zinc-600 cursor-not-allowed"}`}
-              title={item.thsVisualUrl ? "在同花顺查看财务图解" : "分析后可用"}
+              href={visualUrl || "#"}
+              target={visualUrl ? "_blank" : undefined}
+              rel={visualUrl ? "noopener noreferrer" : undefined}
+              className={`shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs transition-all ${visualUrl ? "text-zinc-300 hover:border-orange-500/50 hover:text-orange-400" : "text-zinc-600 cursor-not-allowed"}`}
+              title={visualUrl ? "在同花顺查看财务图解" : "加载中..."}
             >
               图解
             </a>
@@ -578,11 +591,9 @@ function formatCountdown(seconds: number): string {
 function AnalysisModal({
   item,
   onClose,
-  onVisualUrlUpdate,
 }: {
   item: FavoriteItem;
   onClose: () => void;
-  onVisualUrlUpdate?: (ticker: string, url: string) => void;
 }) {
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -619,9 +630,6 @@ function AnalysisModal({
       const json: StockAnalysis = await res.json();
       if (myId === fetchCounterRef.current) {
         setAnalysis(json);
-        if (json.thsVisualUrl && onVisualUrlUpdate) {
-          onVisualUrlUpdate(item.ticker, json.thsVisualUrl);
-        }
       }
     } catch (err) {
       if (myId === fetchCounterRef.current) {
@@ -3718,13 +3726,6 @@ export default function Home() {
         <AnalysisModal
           item={analyzingItem}
           onClose={() => setAnalyzingItem(null)}
-          onVisualUrlUpdate={(ticker, url) => {
-            setFavorites((prev) =>
-              prev.map((f) =>
-                f.ticker === ticker ? { ...f, thsVisualUrl: url } : f
-              )
-            );
-          }}
         />
       )}
       {showSettings && (
