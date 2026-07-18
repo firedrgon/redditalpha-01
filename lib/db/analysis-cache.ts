@@ -40,6 +40,7 @@ function mapAnalysis(row: PrismaAnalysisCache): StockAnalysis {
     industry: row.industry ?? null,
     sector: row.sector ?? null,
     news: row.news ? JSON.parse(row.news) : undefined,
+    technicalSignals: row.technicalSignals ? JSON.parse(row.technicalSignals) : null,
     fetchedAt: row.fetchedAt ? row.fetchedAt.toISOString() : row.updatedAt.toISOString(),
   };
 }
@@ -100,6 +101,7 @@ export async function saveAnalysis(analysis: StockAnalysis): Promise<void> {
       industry: analysis.industry ?? null,
       sector: analysis.sector ?? null,
       news: analysis.news ? JSON.stringify(analysis.news) : null,
+      technicalSignals: analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : null,
       fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
     },
     create: {
@@ -126,6 +128,7 @@ export async function saveAnalysis(analysis: StockAnalysis): Promise<void> {
       industry: analysis.industry ?? null,
       sector: analysis.sector ?? null,
       news: analysis.news ? JSON.stringify(analysis.news) : null,
+      technicalSignals: analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : null,
       fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
     },
   });

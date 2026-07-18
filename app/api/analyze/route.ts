@@ -14,6 +14,7 @@ import { getAnalysis, saveAnalysis } from "@/lib/db";
 import { recordFinanceSnapshot } from "@/lib/db";
 import { getDbInitError } from "@/lib/db/prisma";
 import { detectMarket, normalizeCNTicker } from "@/lib/market";
+import { fetchTradingViewTechnicals } from "@/lib/technical";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -102,6 +103,15 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
     sector: metrics.sector,
     thsVisualUrl: metrics.thsVisualUrl,
   };
+
+  // 美股：获取 TradingView 技术信号（与财务数据并行会更快，但为简化流程此处串行调用）
+  if (detectMarket(upper) !== "CN") {
+    try {
+      analysis.technicalSignals = await fetchTradingViewTechnicals(upper);
+    } catch {
+      // 技术信号获取失败不影响主分析流程
+    }
+  }
 
   // 每次重新生成都会调用 LLM（用户点击「重新生成 AI 分析」即期望拿到新叙述）
   try {

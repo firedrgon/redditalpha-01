@@ -13,6 +13,7 @@ import type { FinancialMetrics } from "./finance";
 import type { LLMMessage } from "./llm";
 import type { Strategy, MetricField, ValueFormat } from "./strategies";
 import { DEFAULT_STRATEGIES } from "./strategies";
+import type { TechnicalSignals } from "./technical";
 
 export type Verdict = "pass" | "fail" | "unknown";
 
@@ -71,6 +72,8 @@ export interface StockAnalysis {
   sector?: string | null;
   // 同花顺财务图解 URL（A 股动态获取）
   thsVisualUrl?: string | null;
+  // TradingView 技术信号（仅美股）
+  technicalSignals?: TechnicalSignals | null;
 }
 
 function fmtPct(v: number | null): string {

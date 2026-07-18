@@ -143,7 +143,33 @@ interface StockAnalysis {
   } | null;
   industry?: string | null;
   sector?: string | null;
+  technicalSignals?: TechnicalSignals | null;
 }
+
+// TradingView 技术信号
+type Signal = "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell";
+
+interface TechnicalSignals {
+  oscillators: Signal;
+  movingAverages: Signal;
+  overall: Signal;
+}
+
+const SIGNAL_LABELS: Record<Signal, string> = {
+  strong_sell: "强烈卖出",
+  sell: "卖出",
+  neutral: "中立",
+  buy: "买入",
+  strong_buy: "强烈买入",
+};
+
+const SIGNAL_COLORS: Record<Signal, string> = {
+  strong_sell: "text-red-600",
+  sell: "text-red-400",
+  neutral: "text-zinc-400",
+  buy: "text-green-400",
+  strong_buy: "text-green-600",
+};
 
 // ============================================================
 // LLM Provider 类型
@@ -1189,6 +1215,33 @@ function AnalysisModal({
                       当前模型响应过慢，可在 ⚙ 设置中切换更快的模型（如 Gemini 2.5 Flash / Groq），或稍后重试。
                     </div>
                   )}
+              </div>
+            )}
+
+            {/* TradingView 技术信号（仅美股） */}
+            {analysis.technicalSignals && (
+              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                  </svg>
+                  <span className="text-sm font-medium text-cyan-300">技术信号</span>
+                  <span className="text-[10px] text-zinc-500">TradingView</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: "综合", signal: analysis.technicalSignals.overall },
+                    { label: "振荡指标", signal: analysis.technicalSignals.oscillators },
+                    { label: "移动均线", signal: analysis.technicalSignals.movingAverages },
+                  ].map(({ label, signal }) => (
+                    <div key={label} className="flex flex-col items-center gap-1 rounded-md bg-zinc-800/50 p-2">
+                      <span className="text-[10px] text-zinc-500">{label}</span>
+                      <span className={`text-xs font-medium ${SIGNAL_COLORS[signal]}`}>
+                        ● {SIGNAL_LABELS[signal]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
