@@ -276,7 +276,7 @@ async function fetchEastmoneyMetrics(
         /* ignore */
       }
       if (!boardCode) return null;
-      // 取行业成分股 PE 平均值
+      // 取行业成分股 PE 中位数（比简单平均更抗极端值干扰）
       try {
         const res = await fetch(
           `https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=300&po=1&np=1&fltt=2&invt=2&fs=b:${boardCode}&fields=f12,f9`,
@@ -293,11 +293,14 @@ async function fetchEastmoneyMetrics(
           .map((x) => x.f9)
           .filter(
             (v): v is number =>
-              typeof v === "number" && v > 0 && v < 1000
-          );
-        return pes.length > 0
-          ? pes.reduce((s, v) => s + v, 0) / pes.length
-          : null;
+              typeof v === "number" && v > 0 && v < 300
+          )
+          .sort((a, b) => a - b);
+        if (pes.length === 0) return null;
+        const mid = Math.floor(pes.length / 2);
+        return pes.length % 2
+          ? pes[mid]
+          : (pes[mid - 1] + pes[mid]) / 2;
       } catch {
         return null;
       }
