@@ -52,25 +52,20 @@ interface EMMarketResp {
   data?: EMMarketData;
 }
 
-/** RPT_LICO_FN_CPD 财务摘要行 */
+/** RPT_LICO_FN_CPD 财务摘要行（字段名与东方财富实际返回一致） */
 interface EMFinanceRow {
-  REPORT_DATE?: string;
+  REPORTDATE?: string; // 报告日期（注意无下划线）
   TOTAL_OPERATE_INCOME?: number; // 营业总收入
-  TOTAL_OPERATE_INCOME_YOY?: number; // 营收同比增长（小数，如 0.2178）
   PARENT_NETPROFIT?: number; // 归母净利润
-  PARENT_NETPROFIT_YOY?: number; // 净利润同比增长（小数）
-  ROE_DILUTED?: number; // 摊薄 ROE（小数）
-  WEIGHTAVG_ROE?: number; // 加权 ROE（小数）
-  GROSS_PROFIT_RATIO?: number; // 毛利率（小数）
-  NET_PROFIT_RATIO?: number; // 净利率（小数）
-  QUICK_RATIO?: number; // 速动比率
-  CURRENT_RATIO?: number; // 流动比率
-  YSTZ?: number; // 营收同比增长（百分比，备用）
-  SJLTZ?: number; // 净利润同比增长（百分比，备用）
-  XSMLL?: number; // 毛利率（百分比，备用）
+  WEIGHTAVG_ROE?: number; // 加权 ROE（百分比，如 6.18 表示 6.18%）
+  YSTZ?: number; // 营收同比增长（百分比，如 56.52 表示 56.52%）
+  SJLTZ?: number; // 净利润同比增长（百分比）
+  XSMLL?: number; // 销售毛利率（百分比）
+  BPS?: number; // 每股净资产
   BOARD_CODE?: string; // 行业板块代码
   BOARD_NAME?: string; // 行业名
   PUBLISHNAME?: string; // 行业别名
+  BASIC_EPS?: number; // 基本每股收益
 }
 
 interface EMFinanceResp {
@@ -217,7 +212,7 @@ async function fetchEastmoneyMetrics(
     // 2. RPT_LICO_FN_CPD 财务摘要（最近 6 期）
     (async () => {
       const res = await fetch(
-        `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_LICO_FN_CPD&columns=ALL&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=6&sortColumns=REPORT_DATE&sortTypes=-1`,
+        `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_LICO_FN_CPD&columns=ALL&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=6&sortColumns=REPORTDATE&sortTypes=-1`,
         {
           headers: { "User-Agent": UA, Referer: "https://data.eastmoney.com/" },
           signal: AbortSignal.timeout(10000),
@@ -333,7 +328,9 @@ async function fetchEastmoneyMetrics(
 
   const priceDivisor = 100; // 东方财富价格单位：分 → 元
   const currentPrice = quote.f43 != null ? quote.f43 / priceDivisor : null;
-  const trailingPE = quote.f162 != null ? quote.f162 : null;
+  // PE(f162) 和 PB(f167) 同样以分为单位，需 /100
+  const trailingPE = quote.f162 != null ? quote.f162 / 100 : null;
+  const pbRatio = quote.f167 != null ? quote.f167 / 100 : null;
   const marketCap = quote.f116 != null ? quote.f116 : null;
 
   // 财务摘要（CPD，最近一期）
@@ -342,11 +339,8 @@ async function fetchEastmoneyMetrics(
   // Zyzb 最新一期
   const zyzbLatest = zyzbRows[0] ?? null;
 
-  // 营收同比增长：优先 Zyzb（最新季报），降级 CPD
-  const cpdRevenueGrowthPct =
-    finance?.TOTAL_OPERATE_INCOME_YOY != null
-      ? finance.TOTAL_OPERATE_INCOME_YOY * 100
-      : finance?.YSTZ != null ? finance.YSTZ : null;
+  // 营收同比增长：优先 Zyzb（最新季报），降级 CPD（YSTZ 已是百分比）
+  const cpdRevenueGrowthPct = finance?.YSTZ ?? null;
   const revenueGrowthPct =
     zyzbLatest?.TOTALOPERATEREVETZ ?? cpdRevenueGrowthPct;
   const revenueGrowthYoY =
@@ -355,19 +349,13 @@ async function fetchEastmoneyMetrics(
   // 季度/TTM 营收增长（与 revenueGrowthYoY 同源）
   const quarterlyRevenueGrowth = revenueGrowthYoY;
 
-  // 净利润同比增长（保留百分比原值用于 PEG 计算）
-  const cpdNetProfitGrowthPct =
-    finance?.PARENT_NETPROFIT_YOY != null
-      ? finance.PARENT_NETPROFIT_YOY * 100
-      : finance?.SJLTZ != null ? finance.SJLTZ : null;
+  // 净利润同比增长（保留百分比原值用于 PEG 计算，SJLTZ 已是百分比）
+  const cpdNetProfitGrowthPct = finance?.SJLTZ ?? null;
   const netProfitGrowthPct =
     zyzbLatest?.PARENTNETPROFITTZ ?? cpdNetProfitGrowthPct;
 
-  // ROE：优先 Zyzb 加权 ROE，降级 CPD 摊薄 ROE
-  const cpdRoePct =
-    finance?.WEIGHTAVG_ROE != null
-      ? finance.WEIGHTAVG_ROE * 100
-      : finance?.ROE_DILUTED != null ? finance.ROE_DILUTED * 100 : null;
+  // ROE：优先 Zyzb 加权 ROE，降级 CPD WEIGHTAVG_ROE（均已是百分比）
+  const cpdRoePct = finance?.WEIGHTAVG_ROE ?? null;
   const roePct = zyzbLatest?.ROEJQ ?? cpdRoePct;
   const roe = roePct != null ? roePct / 100 : null;
 
@@ -391,28 +379,26 @@ async function fetchEastmoneyMetrics(
     .filter((x) => x.year && x.roe != null)
     .reverse();
 
-  // 毛利率/净利率：优先 Zyzb，降级 CPD
-  const cpdGrossMarginPct =
-    finance?.GROSS_PROFIT_RATIO != null
-      ? finance.GROSS_PROFIT_RATIO * 100
-      : finance?.XSMLL != null ? finance.XSMLL : null;
+  // 毛利率：优先 Zyzb，降级 CPD（XSMLL 已是百分比）
+  const cpdGrossMarginPct = finance?.XSMLL ?? null;
   const grossMarginPct = zyzbLatest?.XSMLL ?? cpdGrossMarginPct;
   const grossMargin =
     grossMarginPct != null ? grossMarginPct / 100 : null;
 
+  // 净利率：优先 Zyzb（XSJLL），降级 CPD（手动计算）
   const cpdProfitMarginPct =
-    finance?.NET_PROFIT_RATIO != null
-      ? finance.NET_PROFIT_RATIO * 100
+    finance?.PARENT_NETPROFIT != null &&
+    finance?.TOTAL_OPERATE_INCOME != null &&
+    finance.TOTAL_OPERATE_INCOME > 0
+      ? (finance.PARENT_NETPROFIT / finance.TOTAL_OPERATE_INCOME) * 100
       : null;
   const profitMarginPct = zyzbLatest?.XSJLL ?? cpdProfitMarginPct;
   const profitMargin =
     profitMarginPct != null ? profitMarginPct / 100 : null;
 
-  // 速动比率/流动比率：优先 Zyzb，降级 CPD
-  const quickRatio =
-    zyzbLatest?.SD ?? finance?.QUICK_RATIO ?? null;
-  const currentRatio =
-    zyzbLatest?.LD ?? finance?.CURRENT_RATIO ?? null;
+  // 速动比率/流动比率：仅 Zyzb 提供，CPD 无此字段
+  const quickRatio = zyzbLatest?.SD ?? null;
+  const currentRatio = zyzbLatest?.LD ?? null;
 
   // 营收总额
   const totalRevenue =
