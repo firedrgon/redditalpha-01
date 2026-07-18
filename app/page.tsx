@@ -634,6 +634,9 @@ function AnalysisModal({
   const [sharing, setSharing] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "metrics" | "ai">("overview");
   const shareRef = useRef<HTMLDivElement>(null);
+  const overviewRef = useRef<HTMLDivElement>(null);
+  const metricsRef = useRef<HTMLDivElement>(null);
+  const aiRef = useRef<HTMLDivElement>(null);
   const fetchCounterRef = useRef(0);
   const analysisRef = useRef<StockAnalysis | null>(null);
 
@@ -687,11 +690,21 @@ function AnalysisModal({
   };
 
   const handleShare = async () => {
-    if (!shareRef.current || !analysis) return;
+    if (!analysis) return;
+
+    // 根据当前 Tab 选择截图目标
+    const tabRefMap = {
+      overview: overviewRef,
+      metrics: metricsRef,
+      ai: aiRef,
+    };
+    const targetRef = tabRefMap[activeTab];
+    if (!targetRef.current) return;
+
     setSharing(true);
     try {
       const { toPng } = await import("html-to-image");
-      const dataUrl = await toPng(shareRef.current, {
+      const dataUrl = await toPng(targetRef.current, {
         cacheBust: true,
         pixelRatio: 2,
         backgroundColor: "#09090b",
@@ -705,23 +718,36 @@ function AnalysisModal({
 
       // 下载图片到本地
       const date = new Date().toISOString().slice(0, 10);
+      const tabLabels: Record<typeof activeTab, string> = {
+        overview: "概览",
+        metrics: "指标详解",
+        ai: "AI点评",
+      };
       const link = document.createElement("a");
-      link.download = `${item.ticker}-analysis-${date}.png`;
+      link.download = `${item.ticker}-${tabLabels[activeTab]}-${date}.png`;
       link.href = dataUrl;
       link.click();
 
-      // 打开 X 分享链接（预填文字，用户需手动上传刚下载的图片）
-      const verdictText =
-        analysis.overallVerdict === "pass"
-          ? "✅ 通过"
-          : analysis.overallVerdict === "fail"
-            ? "❌ 未通过"
-            : "❓ 数据缺失";
-      const upsideText =
-        analysis.targetUpside != null
-          ? ` | 目标价上涨空间 ${(analysis.targetUpside * 100).toFixed(1)}%`
-          : "";
-      const text = `📊 $${item.ticker} 股票分析\n\n总判定：${verdictText}${upsideText}\n\nvia Reddit Alpha`;
+      // 根据 Tab 生成不同分享文案
+      let text = "";
+      if (activeTab === "overview") {
+        const verdictText =
+          analysis.overallVerdict === "pass"
+            ? "✅ 通过"
+            : analysis.overallVerdict === "fail"
+              ? "❌ 未通过"
+              : "❓ 数据缺失";
+        const upsideText =
+          analysis.targetUpside != null
+            ? ` | 目标价上涨空间 ${(analysis.targetUpside * 100).toFixed(1)}%`
+            : "";
+        text = `📊 $${item.ticker} 股票概览\n\n总判定：${verdictText}${upsideText}\n\nvia Reddit Alpha`;
+      } else if (activeTab === "metrics") {
+        const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
+        text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过\n\nvia Reddit Alpha`;
+      } else {
+        text = `🤖 $${item.ticker} AI 分析点评\n\nvia Reddit Alpha`;
+      }
       const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
       window.open(xUrl, "_blank");
     } catch (err) {
@@ -867,7 +893,7 @@ function AnalysisModal({
 
             {/* ==================== 概览 Tab ==================== */}
             {activeTab === "overview" && (
-              <>
+              <div ref={overviewRef} className="space-y-4">
             {/* 总判定 */}
             <div className="flex items-center gap-3 rounded-lg border border-zinc-700 bg-zinc-800/40 p-3">
               <VerdictBadge verdict={analysis.overallVerdict} />
@@ -1077,59 +1103,56 @@ function AnalysisModal({
                 </div>
               </div>
             )}
-              </>
+              </div>
             )}
 
             {/* ==================== 指标详解 Tab ==================== */}
             {activeTab === "metrics" && (
-            <>
-            {/* 5 项指标 */}
-            {analysis.metrics.length > 0 ? (
-            <div className="space-y-2">
-              {analysis.metrics.map((m) => (
-                <div
-                  key={m.key}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3.5"
-                >
-                  {/* 第一行：标题 + 徽章 | 数值 */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-zinc-100">
-                        {m.title}
-                      </span>
-                      <VerdictBadge verdict={m.verdict} />
+              <div ref={metricsRef} className="space-y-2">
+                {analysis.metrics.length > 0 ? (
+                  analysis.metrics.map((m) => (
+                    <div
+                      key={m.key}
+                      className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3.5"
+                    >
+                      {/* 第一行：标题 + 徽章 | 数值 */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-zinc-100">
+                            {m.title}
+                          </span>
+                          <VerdictBadge verdict={m.verdict} />
+                        </div>
+                        <div className="flex-shrink-0 text-right">
+                          <span className="whitespace-pre-line text-sm font-mono font-semibold text-orange-400">
+                            {m.value}
+                          </span>
+                        </div>
+                      </div>
+                      {/* 第二行：阈值 */}
+                      <div className="mt-1 text-[10px] text-zinc-600">
+                        阈值 {m.threshold}
+                      </div>
+                      {/* 第三行：描述 */}
+                      <p className="mt-1.5 text-xs text-zinc-500">{m.description}</p>
+                      {/* 第四行：分析结论（带分隔线） */}
+                      <p className="mt-2 border-t border-zinc-800/60 pt-2 text-xs text-zinc-400 leading-relaxed">{m.reasoning}</p>
                     </div>
-                    <div className="flex-shrink-0 text-right">
-                      <span className="whitespace-pre-line text-sm font-mono font-semibold text-orange-400">
-                        {m.value}
-                      </span>
-                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-6 text-center">
+                    <p className="text-sm text-zinc-400">暂无指标数据</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      请点击右上角「重新生成 AI 分析」获取最新指标
+                    </p>
                   </div>
-                  {/* 第二行：阈值 */}
-                  <div className="mt-1 text-[10px] text-zinc-600">
-                    阈值 {m.threshold}
-                  </div>
-                  {/* 第三行：描述 */}
-                  <p className="mt-1.5 text-xs text-zinc-500">{m.description}</p>
-                  {/* 第四行：分析结论（带分隔线） */}
-                  <p className="mt-2 border-t border-zinc-800/60 pt-2 text-xs text-zinc-400 leading-relaxed">{m.reasoning}</p>
-                </div>
-              ))}
-            </div>
-            ) : (
-              <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-6 text-center">
-                <p className="text-sm text-zinc-400">暂无指标数据</p>
-                <p className="mt-1 text-xs text-zinc-500">
-                  请点击右上角「重新生成 AI 分析」获取最新指标
-                </p>
+                )}
               </div>
-            )}
-            </>
             )}
 
             {/* ==================== AI 点评 Tab ==================== */}
             {activeTab === "ai" && (
-            <>
+              <div ref={aiRef} className="space-y-3">
             {/* LLM 叙述（完整内容：公司概览/指标判定/消息面分析/行业前景/总评） */}
             {(analysis.llmNarrative || (isRefreshing && analysis)) && (
               <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
@@ -1282,7 +1305,7 @@ function AnalysisModal({
                   )}
               </div>
             )}
-            </>
+              </div>
             )}
 
             {/* 数据来源 & 警告——Tab 外部，始终显示 */}
@@ -1331,7 +1354,7 @@ function AnalysisModal({
                 onClick={handleShare}
                 disabled={sharing}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:bg-zinc-800 disabled:opacity-50"
-                title="生成分析图片并分享到 X"
+                title="生成当前 Tab 内容图片并分享到 X"
               >
                 {sharing ? (
                   <>
@@ -1345,7 +1368,7 @@ function AnalysisModal({
                     <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
                       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                     </svg>
-                    分享到 X
+                    分享{activeTab === "overview" ? "概览" : activeTab === "metrics" ? "指标" : "AI点评"}
                   </>
                 )}
               </button>
