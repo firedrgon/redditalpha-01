@@ -690,15 +690,11 @@ function AnalysisModal({
     // 根据 Tab 生成不同分享文案
     let text = "";
     if (activeTab === "overview") {
-      const verdictText =
-        analysis.overallVerdict === "pass"
-          ? "✅ 通过"
-          : analysis.overallVerdict === "fail"
-            ? "❌ 未通过"
-            : "❓ 数据缺失";
+      const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
+      const failCount = analysis.metrics.filter((m) => m.verdict === "fail").length;
       const lines: string[] = [`📊 $${item.ticker} 股票概览`];
       lines.push("");
-      lines.push(`总判定：${verdictText}`);
+      lines.push(`指标判定：${passCount} 项通过 / ${failCount} 项未通过`);
 
       // 价格与目标价区间
       if (analysis.currentPrice != null) {
@@ -719,14 +715,12 @@ function AnalysisModal({
         lines.push(`综合技术信号：${SIGNAL_LABELS[analysis.technicalSignals.overall]}`);
       }
 
-      lines.push("");
-      lines.push("via Reddit Alpha");
       text = lines.join("\n");
     } else if (activeTab === "metrics") {
       const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
-      text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过\n\nvia Reddit Alpha`;
+      text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过`;
     } else {
-      text = `🤖 $${item.ticker} AI 分析点评\n\nvia Reddit Alpha`;
+      text = `🤖 $${item.ticker} AI 分析点评`;
     }
     const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
     window.open(xUrl, "_blank");
