@@ -4,7 +4,7 @@ import { getPrisma } from "@/lib/db/prisma";
 export const dynamic = "force-dynamic";
 
 /**
- * 诊断端点：测试 TradingView API 连通性 + 检查 DB 中技术信号数据
+ * 诊断端点：测试多种 TradingView API 端点，找到可用的
  *
  * 使用方式：访问 /api/test-tv?ticker=AAPL
  */
@@ -17,50 +17,94 @@ export async function GET(request: Request) {
     timestamp: new Date().toISOString(),
   };
 
-  // 1. 测试 TradingView API
-  const tvStart = Date.now();
-  const tvResult: Record<string, unknown> = {};
-  try {
-    const body = JSON.stringify({
-      symbols: { tickers: [`NASDAQ:${ticker}`, `NYSE:${ticker}`] },
-      columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
-    });
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Content-Type": "application/json",
+    Origin: "https://www.tradingview.com",
+    Referer: "https://www.tradingview.com/",
+  };
 
-    const res = await fetch("https://scanner.tradingview.com/us/scan", {
-      method: "POST",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Content-Type": "application/json",
-        Origin: "https://www.tradingview.com",
-        Referer: "https://www.tradingview.com/",
+  const tvTicker = `NASDAQ:${ticker}`;
+  const fields = "Recommend.All,Recommend.MA,Recommend.Other,RSI,MACD.macd,close";
+
+  // 测试多个 TradingView 端点
+  const endpoints = [
+    {
+      name: "scanner_us_scan",
+      url: "https://scanner.tradingview.com/us/scan",
+      options: {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          symbols: { tickers: [tvTicker, `NYSE:${ticker}`] },
+          columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
+        }),
       },
-      body,
-      signal: AbortSignal.timeout(15000),
-    });
+    },
+    {
+      name: "scanner_symbol_get",
+      url: `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(tvTicker)}&fields=${fields}`,
+      options: { method: "GET", headers },
+    },
+    {
+      name: "scanner_global_scan",
+      url: "https://scanner.tradingview.com/global/scan",
+      options: {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          symbols: { tickers: [tvTicker, `NYSE:${ticker}`] },
+          columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
+        }),
+      },
+    },
+    {
+      name: "scanner_americas_scan",
+      url: "https://scanner.tradingview.com/america/scan",
+      options: {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          symbols: { tickers: [tvTicker, `NYSE:${ticker}`] },
+          columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
+        }),
+      },
+    },
+  ];
 
-    tvResult.status = res.status;
-    tvResult.statusText = res.statusText;
-    tvResult.timeMs = Date.now() - tvStart;
+  const endpointResults: Record<string, unknown>[] = [];
 
-    if (res.ok) {
-      const json = await res.json();
-      tvResult.dataCount = json.data?.length ?? 0;
-      tvResult.data = json.data;
-    } else {
-      tvResult.body = (await res.text()).slice(0, 200);
+  for (const ep of endpoints) {
+    const start = Date.now();
+    const result: Record<string, unknown> = { name: ep.name, url: ep.url };
+    try {
+      const res = await fetch(ep.url, {
+        ...ep.options,
+        signal: AbortSignal.timeout(10000),
+      } as RequestInit);
+      result.status = res.status;
+      result.statusText = res.statusText;
+      result.timeMs = Date.now() - start;
+      if (res.ok) {
+        const text = await res.text();
+        result.bodyPreview = text.slice(0, 300);
+      } else {
+        result.bodyPreview = (await res.text()).slice(0, 200);
+      }
+    } catch (err) {
+      result.error = err instanceof Error ? err.message : String(err);
+      result.timeMs = Date.now() - start;
     }
-  } catch (err) {
-    tvResult.error = err instanceof Error ? err.message : String(err);
-    tvResult.timeMs = Date.now() - tvStart;
+    endpointResults.push(result);
   }
-  results.tv = tvResult;
 
-  // 2. 检查 DB 中该 ticker 的技术信号数据
+  results.endpoints = endpointResults;
+
+  // 检查 DB 状态
   const prisma = getPrisma();
   if (prisma) {
     try {
-      // 用 raw SQL 查询，避免 technicalSignals 列不存在时报错
       const rows = await prisma.$queryRawUnsafe<
         Array<{ ticker: string; technical_signals: string | null; updated_at: Date }>
       >(
@@ -78,8 +122,7 @@ export async function GET(request: Request) {
       } else {
         results.db = { found: false };
       }
-    } catch (err) {
-      // 如果 technical_signals 列不存在，用不含该列的查询
+    } catch {
       try {
         const rows = await prisma.$queryRawUnsafe<
           Array<{ ticker: string; updated_at: Date }>
