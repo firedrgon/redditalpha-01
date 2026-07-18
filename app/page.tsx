@@ -632,6 +632,7 @@ function AnalysisModal({
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "metrics" | "ai">("overview");
   const shareRef = useRef<HTMLDivElement>(null);
   const fetchCounterRef = useRef(0);
   const analysisRef = useRef<StockAnalysis | null>(null);
@@ -681,6 +682,7 @@ function AnalysisModal({
 
   const handleReanalyze = () => {
     if (isRefreshing || loading) return;
+    setActiveTab("ai");
     fetchAnalysis(true);
   };
 
@@ -808,7 +810,7 @@ function AnalysisModal({
         {loading && (
           <div className="space-y-3 py-8">
             <div className="text-center text-sm text-zinc-400">
-              正在拉取财务数据并调用大模型...
+              正在加载分析数据...
             </div>
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="h-16 rounded-lg bg-zinc-800/60 animate-pulse" />
@@ -835,6 +837,37 @@ function AnalysisModal({
 
         {analysis && !loading && (
           <div className="space-y-4">
+            {/* Tab 导航 */}
+            <div className="flex gap-1 border-b border-zinc-800">
+              {([
+                { key: "overview", label: "概览" },
+                { key: "metrics", label: `指标详解${analysis.metrics.length ? ` (${analysis.metrics.length})` : ""}` },
+                { key: "ai", label: "AI 点评" },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`relative px-3 py-2 text-xs font-medium transition-colors ${
+                    activeTab === tab.key
+                      ? "text-orange-400"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {tab.label}
+                  {tab.key === "ai" && analysis.llmError && (
+                    <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-yellow-500" />
+                  )}
+                  {activeTab === tab.key && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-400" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* ==================== 概览 Tab ==================== */}
+            {activeTab === "overview" && (
+              <>
             {/* 总判定 */}
             <div className="flex items-center gap-3 rounded-lg border border-zinc-700 bg-zinc-800/40 p-3">
               <VerdictBadge verdict={analysis.overallVerdict} />
@@ -1017,7 +1050,12 @@ function AnalysisModal({
                 </div>
               </div>
             )}
+              </>
+            )}
 
+            {/* ==================== 指标详解 Tab ==================== */}
+            {activeTab === "metrics" && (
+            <>
             {/* 5 项指标 */}
             <div className="space-y-2">
               {analysis.metrics.map((m) => (
@@ -1050,7 +1088,12 @@ function AnalysisModal({
                 </div>
               ))}
             </div>
+            </>
+            )}
 
+            {/* ==================== AI 点评 Tab ==================== */}
+            {activeTab === "ai" && (
+            <>
             {/* LLM 叙述（完整内容：公司概览/指标判定/消息面分析/行业前景/总评） */}
             {(analysis.llmNarrative || (isRefreshing && analysis)) && (
               <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
@@ -1163,27 +1206,13 @@ function AnalysisModal({
               </div>
             )}
 
-            {/* 数据来源 & 警告：解释为何部分指标显示"未能获取该指标数据" */}
-            {analysis.warnings && analysis.warnings.length > 0 && (
-              <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.852l.041-.02M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-                  </svg>
-                  <span className="text-xs font-medium text-zinc-300">
-                    数据来源与警告
-                  </span>
-                  {analysis.dataSource && (
-                    <span className="text-[10px] text-zinc-500">
-                      · {analysis.dataSource}
-                    </span>
-                  )}
-                </div>
-                <ul className="ml-4 list-disc space-y-0.5 text-[11px] leading-relaxed text-zinc-400">
-                  {analysis.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
+            {/* AI 点评空状态：无叙述、无错误、非刷新中 */}
+            {!analysis.llmNarrative && !analysis.llmError && !isRefreshing && (
+              <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 p-6 text-center">
+                <p className="text-sm text-zinc-400">暂无 AI 分析</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  点击右上角「生成 AI 分析」获取大模型点评
+                </p>
               </div>
             )}
 
@@ -1217,9 +1246,35 @@ function AnalysisModal({
                   )}
               </div>
             )}
+            </>
+            )}
 
-            {/* TradingView 技术信号（仅美股） */}
-            {analysis.technicalSignals && (
+            {/* 数据来源 & 警告——Tab 外部，始终显示 */}
+            {analysis.warnings && analysis.warnings.length > 0 && (
+              <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.852l.041-.02M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                  </svg>
+                  <span className="text-xs font-medium text-zinc-300">
+                    数据来源与警告
+                  </span>
+                  {analysis.dataSource && (
+                    <span className="text-[10px] text-zinc-500">
+                      · {analysis.dataSource}
+                    </span>
+                  )}
+                </div>
+                <ul className="ml-4 list-disc space-y-0.5 text-[11px] leading-relaxed text-zinc-400">
+                  {analysis.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* TradingView 技术信号（仅美股）——归入概览 Tab */}
+            {activeTab === "overview" && analysis.technicalSignals && (
               <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <svg viewBox="0 0 24 24" className="h-4 w-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
