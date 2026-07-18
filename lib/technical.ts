@@ -1,11 +1,9 @@
 /**
  * 美股技术指标（TradingView Scanner API）
  *
- * 从 TradingView scanner 获取原始指标值，自行计算信号，
- * 返回 5 级信号：强烈卖出 / 卖出 / 中立 / 买入 / 强烈买入。
- *
- * 不依赖 scanner 的 Recommend 值（与前端页面计算方式不同），
- * 而是逐个评估振荡指标和移动均线，再汇总得出信号。
+ * 直接使用 TradingView 的 Recommend 值（Recommend.Other / Recommend.MA /
+ * Recommend.All），确保与 TradingView 网站显示的信号完全一致。
+ * 这些值由 TradingView 官方计算，范围为 -1（强烈卖出）到 1（强烈买入）。
  *
  * 仅用于美股，A 股不调用。
  */
@@ -40,27 +38,13 @@ export const SIGNAL_LABELS: Record<Signal, string> = {
 /* TradingView 字段列表                                                */
 /* ------------------------------------------------------------------ */
 
-/** 请求 scanner API 的完整字段列表（原始指标值，非 Recommend） */
+/** 请求 scanner API 的字段列表（TradingView 官方 Recommend 值 + 价格） */
 const COLUMNS: string[] = [
-  // 振荡指标
-  "RSI",
-  "Stoch.K",
-  "Stoch.D",
-  "CCI20",
-  "ADX",
-  "ADX+DI",
-  "ADX-DI",
-  "AO",
-  "Mom",
-  "MACD.macd",
-  "MACD.signal",
-  "W.R",
-  "UO",
-  // 移动均线
-  "EMA10", "EMA20", "EMA30", "EMA50", "EMA100", "EMA200",
-  "SMA10", "SMA20", "SMA30", "SMA50", "SMA100", "SMA200",
-  "VWMA", "HullMA9", "Ichimoku.BLine",
-  // 价格
+  // TradingView 官方推荐值（-1 到 1，与网站显示一致）
+  "Recommend.All",    // 综合信号
+  "Recommend.MA",     // 移动均线信号
+  "Recommend.Other",  // 振荡指标信号
+  // 价格（用于日志）
   "close",
 ];
 
@@ -84,105 +68,25 @@ function num(val: number | string | null | undefined): number | null {
 }
 
 /* ------------------------------------------------------------------ */
-/* 振荡指标逐个评估                                                     */
+/* Recommend 值 → 5 级信号映射                                          */
 /* ------------------------------------------------------------------ */
 
 /**
- * 评估单个振荡指标，返回 +1(买入) / 0(中立) / -1(卖出)
+ * 将 TradingView 的 Recommend 值（-1 到 1）映射为 5 级信号。
+ * 阈值与 TradingView 前端完全一致：
+ *   < -0.5  → 强烈卖出
+ *   < -0.1  → 卖出
+ *   < 0.1   → 中立
+ *   < 0.5   → 买入
+ *   >= 0.5  → 强烈买入
  */
-function evalOscillator(
-  name: string,
-  v: Record<string, number | null>
-): number {
-  switch (name) {
-    case "RSI": {
-      const rsi = v["RSI"];
-      if (rsi == null) return 0;
-      if (rsi < 30) return 1;   // 超卖 → 买入
-      if (rsi > 70) return -1;  // 超买 → 卖出
-      return 0;
-    }
-    case "Stoch": {
-      const k = v["Stoch.K"];
-      const d = v["Stoch.D"];
-      if (k == null || d == null) return 0;
-      if (k < 20 && d < 20) return 1;
-      if (k > 80 && d > 80) return -1;
-      return 0;
-    }
-    case "CCI20": {
-      const cci = v["CCI20"];
-      if (cci == null) return 0;
-      if (cci > 100) return -1;  // 超买
-      if (cci < -100) return 1;  // 超卖
-      return 0;
-    }
-    case "ADX": {
-      const adx = v["ADX"];
-      const plusDI = v["ADX+DI"];
-      const minusDI = v["ADX-DI"];
-      if (adx == null || plusDI == null || minusDI == null) return 0;
-      if (adx > 20) {
-        if (plusDI > minusDI) return 1;
-        if (minusDI > plusDI) return -1;
-      }
-      return 0;
-    }
-    case "AO": {
-      const ao = v["AO"];
-      if (ao == null) return 0;
-      return ao > 0 ? 1 : -1;
-    }
-    case "Mom": {
-      const mom = v["Mom"];
-      if (mom == null) return 0;
-      return mom > 0 ? 1 : -1;
-    }
-    case "MACD": {
-      const macd = v["MACD.macd"];
-      const signal = v["MACD.signal"];
-      if (macd == null || signal == null) return 0;
-      if (macd > signal) return 1;
-      if (macd < signal) return -1;
-      return 0;
-    }
-    case "W.R": {
-      const wr = v["W.R"];
-      if (wr == null) return 0;
-      if (wr < -80) return 1;   // 超卖
-      if (wr > -20) return -1;  // 超买
-      return 0;
-    }
-    case "UO": {
-      const uo = v["UO"];
-      if (uo == null) return 0;
-      if (uo < 30) return 1;
-      if (uo > 70) return -1;
-      return 0;
-    }
-    default:
-      return 0;
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* 信号计算                                                             */
-/* ------------------------------------------------------------------ */
-
-/**
- * 从一组 +1/0/-1 评分计算 5 级信号。
- * score = sum / count（-1 到 1 之间）
- * 然后用阈值映射到信号。
- */
-function scoresToSignal(scores: number[]): Signal {
-  if (scores.length === 0) return "neutral";
-  const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-  // 阈值：与 TradingView 前端一致的 5 级映射
-  if (avg >= 0.5) return "strong_buy";
-  if (avg >= 0.1) return "buy";
-  if (avg > -0.1) return "neutral";
-  if (avg > -0.5) return "sell";
-  return "strong_sell";
+function recommendToSignal(val: number | null): Signal {
+  if (val == null) return "neutral";
+  if (val < -0.5) return "strong_sell";
+  if (val < -0.1) return "sell";
+  if (val < 0.1) return "neutral";
+  if (val < 0.5) return "buy";
+  return "strong_buy";
 }
 
 /* ------------------------------------------------------------------ */
@@ -240,36 +144,18 @@ export async function fetchTradingViewTechnicals(
       return null;
     }
 
-    // ---- 振荡指标信号 ----
-    const oscNames = ["RSI", "Stoch", "CCI20", "ADX", "AO", "Mom", "MACD", "W.R", "UO"];
-    const oscScores = oscNames.map((name) => evalOscillator(name, v));
-    const oscillators = scoresToSignal(oscScores);
-
-    // ---- 移动均线信号 ----
-    const maColumns = [
-      "EMA10", "EMA20", "EMA30", "EMA50", "EMA100", "EMA200",
-      "SMA10", "SMA20", "SMA30", "SMA50", "SMA100", "SMA200",
-      "VWMA", "HullMA9", "Ichimoku.BLine",
-    ];
-    const maScores: number[] = [];
-    for (const col of maColumns) {
-      const maVal = v[col];
-      if (maVal != null) {
-        maScores.push(price > maVal ? 1 : -1);
-      }
-    }
-    const movingAverages = scoresToSignal(maScores);
-
-    // ---- 综合信号（振荡 + 均线合并）----
-    const allScores = [...oscScores, ...maScores];
-    const overall = scoresToSignal(allScores);
+    // 直接使用 TradingView 官方 Recommend 值映射信号（与网站显示一致）
+    const oscillators = recommendToSignal(v["Recommend.Other"]);
+    const movingAverages = recommendToSignal(v["Recommend.MA"]);
+    const overall = recommendToSignal(v["Recommend.All"]);
 
     const result = { oscillators, movingAverages, overall };
     console.log(
       `[technical] 成功 (${Date.now() - startTime}ms): ` +
-      `振荡=${oscillators}(${oscScores}), ` +
-      `均线=${movingAverages}(${maScores.filter(s => s > 0).length}B/${maScores.filter(s => s < 0).length}S), ` +
-      `综合=${overall}`
+      `价格=${price}, ` +
+      `振荡=${oscillators}(raw=${v["Recommend.Other"]?.toFixed(4)}), ` +
+      `均线=${movingAverages}(raw=${v["Recommend.MA"]?.toFixed(4)}), ` +
+      `综合=${overall}(raw=${v["Recommend.All"]?.toFixed(4)})`
     );
     return result;
   } catch (err) {
