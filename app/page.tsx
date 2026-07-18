@@ -741,9 +741,60 @@ function AnalysisModal({
       text = lines.join("\n");
     } else if (activeTab === "metrics") {
       const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
-      text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过`;
+      const failCount = analysis.metrics.filter((m) => m.verdict === "fail").length;
+      const lines: string[] = [`📈 $${item.ticker} 财务指标详解`];
+      lines.push("");
+
+      // 列出每项指标的标题、数值和判定
+      for (const m of analysis.metrics) {
+        const mark = m.verdict === "pass" ? "✅" : m.verdict === "fail" ? "❌" : "—";
+        lines.push(`${mark} ${m.title}：${m.value}`);
+      }
+
+      lines.push("");
+      // 末尾点评
+      let comment = "";
+      if (analysis.metrics.length === 0) {
+        comment = "暂无指标数据";
+      } else if (failCount === 0) {
+        comment = "各项指标全部通过，基本面稳健";
+      } else if (passCount === 0) {
+        comment = "各项指标均未通过，基本面偏弱";
+      } else if (passCount > failCount) {
+        comment = `${passCount} 项通过 ${failCount} 项未通过，基本面整体偏多`;
+      } else {
+        comment = `${passCount} 项通过 ${failCount} 项未通过，基本面存在分歧`;
+      }
+      lines.push(`💡 ${comment}`);
+
+      text = lines.join("\n");
     } else {
-      text = `🤖 $${item.ticker} AI 分析点评`;
+      const lines: string[] = [`🤖 $${item.ticker} AI 分析点评`];
+      if (analysis.llmProvider) {
+        lines.push(`（${analysis.llmProvider}）`);
+      }
+      lines.push("");
+
+      // 从 LLM 叙述中提取首段作为摘要
+      if (analysis.llmNarrative) {
+        // 去掉 Markdown 标记，取第一段非空文本
+        const plain = analysis.llmNarrative
+          .replace(/^#+\s*/gm, "")
+          .replace(/[*_`>]/g, "")
+          .trim();
+        const firstPara = plain.split(/\n\n+/).find((p) => p.trim().length > 0);
+        if (firstPara) {
+          // X 推文限制，截断到 180 字符
+          const summary = firstPara.length > 180 ? firstPara.slice(0, 177) + "..." : firstPara;
+          lines.push(summary);
+        }
+      } else if (analysis.llmError) {
+        lines.push("（AI 分析生成失败）");
+      } else {
+        lines.push("（暂无 AI 分析）");
+      }
+
+      text = lines.join("\n");
     }
     const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
     window.open(xUrl, "_blank");
