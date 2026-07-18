@@ -690,11 +690,8 @@ function AnalysisModal({
     // 根据 Tab 生成不同分享文案
     let text = "";
     if (activeTab === "overview") {
-      const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
-      const failCount = analysis.metrics.filter((m) => m.verdict === "fail").length;
       const lines: string[] = [`📊 $${item.ticker} 股票概览`];
       lines.push("");
-      lines.push(`指标判定：${passCount} 项通过 / ${failCount} 项未通过`);
 
       // 价格与目标价区间
       if (analysis.currentPrice != null) {
@@ -714,6 +711,32 @@ function AnalysisModal({
       if (analysis.technicalSignals?.overall) {
         lines.push(`综合技术信号：${SIGNAL_LABELS[analysis.technicalSignals.overall]}`);
       }
+
+      // 末尾点评：综合上涨空间与技术信号给出一句结论
+      lines.push("");
+      const upside = analysis.targetUpside;
+      const sig = analysis.technicalSignals?.overall;
+      let comment = "";
+      if (upside != null && sig) {
+        const bullish = upside > 0.1 && (sig === "buy" || sig === "strong_buy");
+        const bearish = upside < -0.1 && (sig === "sell" || sig === "strong_sell");
+        if (bullish) {
+          comment = "分析师看多且技术信号偏多，短期偏强";
+        } else if (bearish) {
+          comment = "分析师看空且技术信号偏空，短期偏弱";
+        } else if (upside > 0.1) {
+          comment = "目标价有上行空间，但技术信号未共振，注意分歧";
+        } else if (upside < -0.1) {
+          comment = "目标价低于现价，技术信号偏弱，谨慎对待";
+        } else {
+          comment = "多空信号交织，建议观望等待方向";
+        }
+      } else if (upside != null) {
+        comment = upside > 0.1 ? "目标价有上行空间" : upside < -0.1 ? "目标价低于现价" : "目标价与现价接近";
+      } else if (sig) {
+        comment = sig === "buy" || sig === "strong_buy" ? "技术信号偏多" : sig === "sell" || sig === "strong_sell" ? "技术信号偏空" : "技术信号中性";
+      }
+      if (comment) lines.push(`💡 ${comment}`);
 
       text = lines.join("\n");
     } else if (activeTab === "metrics") {
