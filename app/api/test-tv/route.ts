@@ -127,7 +127,7 @@ export async function GET(request: Request) {
           const rows = await prisma.$queryRawUnsafe<
             Array<{ ticker: string; technical_signals: string | null; updated_at: Date }>
           >(
-            `SELECT ticker, "technicalSignals" as technical_signals, updated_at FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`,
+            `SELECT ticker, "technicalSignals" as technical_signals, "updatedAt" as updated_at FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`,
             ticker
           );
           if (rows.length > 0) {
