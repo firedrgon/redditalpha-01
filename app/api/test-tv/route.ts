@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
-import { getPrisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 诊断端点：测试多种 TradingView API 端点，找到可用的
- *
- * 使用方式：访问 /api/test-tv?ticker=AAPL
+ * 诊断：获取 TradingView 完整原始指标值，用于对比前端页面
+ * 访问 /api/test-tv?ticker=NFLX
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const ticker = (searchParams.get("ticker") || "AAPL").toUpperCase();
-
-  const results: Record<string, unknown> = {
-    ticker,
-    timestamp: new Date().toISOString(),
-  };
+  const ticker = (searchParams.get("ticker") || "NFLX").toUpperCase();
 
   const headers = {
     "User-Agent":
@@ -25,133 +18,64 @@ export async function GET(request: Request) {
     Referer: "https://www.tradingview.com/",
   };
 
-  const tvTicker = `NASDAQ:${ticker}`;
-  const fields = "Recommend.All,Recommend.MA,Recommend.Other,RSI,MACD.macd,close";
-
-  // 测试多个 TradingView 端点
-  const endpoints = [
-    {
-      name: "scanner_us_scan",
-      url: "https://scanner.tradingview.com/us/scan",
-      options: {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          symbols: { tickers: [tvTicker, `NYSE:${ticker}`] },
-          columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
-        }),
-      },
-    },
-    {
-      name: "scanner_symbol_get",
-      url: `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(tvTicker)}&fields=${fields}`,
-      options: { method: "GET", headers },
-    },
-    {
-      name: "scanner_global_scan",
-      url: "https://scanner.tradingview.com/global/scan",
-      options: {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          symbols: { tickers: [tvTicker, `NYSE:${ticker}`] },
-          columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
-        }),
-      },
-    },
-    {
-      name: "scanner_americas_scan",
-      url: "https://scanner.tradingview.com/america/scan",
-      options: {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          symbols: { tickers: [tvTicker, `NYSE:${ticker}`] },
-          columns: ["Recommend.All", "Recommend.MA", "Recommend.Other", "close"],
-        }),
-      },
-    },
+  // 完整的振荡指标 + 移动均线字段
+  const allColumns = [
+    // 推荐汇总
+    "Recommend.All", "Recommend.MA", "Recommend.Other",
+    // 振荡指标
+    "RSI", "RSI[1]", "Stoch.K", "Stoch.D", "CCI20", "ADX", "ADX+DI", "ADX-DI",
+    "AO", "Mom", "MACD.macd", "MACD.signal", "StochRSI.K", "W.R", "BBPower", "UO",
+    // 移动均线
+    "EMA10", "EMA20", "EMA30", "EMA50", "EMA100", "EMA200",
+    "SMA10", "SMA20", "SMA30", "SMA50", "SMA100", "SMA200",
+    "VWMA", "HullMA9", "Ichimoku.BLine",
+    // 价格
+    "close", "change",
   ];
 
-  const endpointResults: Record<string, unknown>[] = [];
+  const results: Record<string, unknown> = { ticker, timestamp: new Date().toISOString() };
 
-  for (const ep of endpoints) {
-    const start = Date.now();
-    const result: Record<string, unknown> = { name: ep.name, url: ep.url };
-    try {
-      const res = await fetch(ep.url, {
-        ...ep.options,
-        signal: AbortSignal.timeout(10000),
-      } as RequestInit);
-      result.status = res.status;
-      result.statusText = res.statusText;
-      result.timeMs = Date.now() - start;
-      if (res.ok) {
-        const text = await res.text();
-        result.bodyPreview = text.slice(0, 300);
-      } else {
-        result.bodyPreview = (await res.text()).slice(0, 200);
+  // 用 /america/scan 获取完整数据
+  const tickers = [`NASDAQ:${ticker}`, `NYSE:${ticker}`];
+  const scanStart = Date.now();
+  try {
+    const res = await fetch("https://scanner.tradingview.com/america/scan", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        symbols: { tickers },
+        columns: allColumns,
+      }),
+      signal: AbortSignal.timeout(10000),
+    } as RequestInit);
+
+    results.scanStatus = res.status;
+    results.scanTimeMs = Date.now() - scanStart;
+
+    if (res.ok) {
+      const json = await res.json() as {
+        data?: Array<{ s?: string; d?: (number | string | null)[] }>;
+      };
+      const row = json.data?.find((r) => r.d && r.d.length > 0);
+      if (row?.d) {
+        // 将字段名和值映射为对象
+        const values: Record<string, number | string | null> = {};
+        allColumns.forEach((col, i) => {
+          values[col] = row.d![i] ?? null;
+        });
+        results.symbol = row.s;
+        results.values = values;
+
+        // 解析 Recommend 值
+        results.recommend = {
+          all: row.d[allColumns.indexOf("Recommend.All")],
+          MA: row.d[allColumns.indexOf("Recommend.MA")],
+          Other: row.d[allColumns.indexOf("Recommend.Other")],
+        };
       }
-    } catch (err) {
-      result.error = err instanceof Error ? err.message : String(err);
-      result.timeMs = Date.now() - start;
     }
-    endpointResults.push(result);
-  }
-
-  results.endpoints = endpointResults;
-
-  // 检查 DB 状态
-  const prisma = getPrisma();
-  if (prisma) {
-    try {
-      // 先测试基本连接
-      await prisma.$queryRawUnsafe<{ one: number }[]>(`SELECT 1 as one`);
-      results.dbConnection = "OK";
-
-      // 检查 AnalysisCache 表是否存在
-      const tableCheck = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
-        `SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_name = 'AnalysisCache'`
-      );
-      results.tableExists = Number(tableCheck[0]?.cnt ?? 0) > 0;
-
-      if (results.tableExists) {
-        // 检查列
-        const colCheck = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
-          `SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_name = 'AnalysisCache' AND column_name = 'technicalSignals'`
-        );
-        results.hasTechnicalSignals = Number(colCheck[0]?.cnt ?? 0) > 0;
-
-        // 尝试查询数据
-        try {
-          const rows = await prisma.$queryRawUnsafe<
-            Array<{ ticker: string; technical_signals: string | null; updated_at: Date }>
-          >(
-            `SELECT ticker, "technicalSignals" as technical_signals, "updatedAt" as updated_at FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`,
-            ticker
-          );
-          if (rows.length > 0) {
-            results.db = {
-              found: true,
-              technicalSignals: rows[0].technical_signals
-                ? JSON.parse(rows[0].technical_signals)
-                : null,
-              updatedAt: rows[0].updated_at,
-            };
-          } else {
-            results.db = { found: false };
-          }
-        } catch (qErr) {
-          results.db = { error: qErr instanceof Error ? qErr.message : String(qErr) };
-        }
-      } else {
-        results.db = { error: "AnalysisCache 表不存在" };
-      }
-    } catch (err) {
-      results.db = { error: err instanceof Error ? err.message : String(err) };
-    }
-  } else {
-    results.db = { error: "数据库未配置" };
+  } catch (err) {
+    results.scanError = err instanceof Error ? err.message : String(err);
   }
 
   return NextResponse.json(results);
