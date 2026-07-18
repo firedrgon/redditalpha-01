@@ -223,6 +223,11 @@ export async function GET(request: NextRequest) {
   // 普通查询：直接从数据库读取最新落库的数据。
   // DB 无记录时返回 null，不自动生成——数据只由用户点击「重新生成」产生。
   // 这样删除库数据后页面会显示空状态，而非悄悄重新生成。
-  const existing = await getAnalysis(upper);
+  // 注意：如果记录包含 llmError，这是之前 force=true 调用时产生的历史错误，
+  // 当前普通查询并未触发 LLM 调用，因此清除该字段，避免用户误解。
+  let existing = await getAnalysis(upper);
+  if (existing && existing.llmError) {
+    existing = { ...existing, llmError: undefined };
+  }
   return NextResponse.json(existing);
 }
