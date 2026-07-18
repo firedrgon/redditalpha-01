@@ -135,18 +135,60 @@ export async function saveAnalysis(analysis: StockAnalysis): Promise<void> {
       },
     });
   } catch (firstErr) {
-    // 若因 technicalSignals 列不存在而失败，回退到不含该字段的写入
+    // 若因 technicalSignals 列不存在而失败，回退到 raw SQL（完全绕过 Prisma 的 SELECT 列表）
     const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
     if (errMsg.includes("technicalSignals") || errMsg.includes("does not exist") || errMsg.includes("Unknown argument")) {
-      console.warn("[analysis-cache] technicalSignals column not found, saving without it");
-      await prisma.analysisCache.upsert({
-        where: { ticker: upper },
-        update: baseData,
-        create: {
-          ticker: upper,
-          ...baseData,
-        },
-      });
+      console.warn("[analysis-cache] technicalSignals column not found, falling back to raw SQL");
+      const now = new Date();
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "AnalysisCache" (
+          "id", "ticker", "name", "metrics", "overallVerdict", "overallSummary",
+          "currentPrice", "targetMeanPrice", "targetHighPrice", "targetLowPrice",
+          "targetMedianPrice", "targetUpside", "numberOfAnalysts", "recommendationMean",
+          "llmNarrative", "llmProvider", "llmError", "strategyIdsUsed", "dataSource",
+          "warnings", "industryRank", "industry", "sector", "news",
+          "fetchedAt", "createdAt", "updatedAt"
+        ) VALUES (
+          gen_random_uuid()::text, $1, $2, $3, $4, $5,
+          $6, $7, $8, $9,
+          $10, $11, $12, $13,
+          $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23,
+          $24, $25, $25
+        )
+        ON CONFLICT ("ticker") DO UPDATE SET
+          "name" = $2, "metrics" = $3, "overallVerdict" = $4, "overallSummary" = $5,
+          "currentPrice" = $6, "targetMeanPrice" = $7, "targetHighPrice" = $8, "targetLowPrice" = $9,
+          "targetMedianPrice" = $10, "targetUpside" = $11, "numberOfAnalysts" = $12, "recommendationMean" = $13,
+          "llmNarrative" = $14, "llmProvider" = $15, "llmError" = $16, "strategyIdsUsed" = $17, "dataSource" = $18,
+          "warnings" = $19, "industryRank" = $20, "industry" = $21, "sector" = $22, "news" = $23,
+          "fetchedAt" = $24, "updatedAt" = $25`,
+        upper,
+        baseData.name,
+        baseData.metrics,
+        baseData.overallVerdict,
+        baseData.overallSummary,
+        baseData.currentPrice,
+        baseData.targetMeanPrice,
+        baseData.targetHighPrice,
+        baseData.targetLowPrice,
+        baseData.targetMedianPrice,
+        baseData.targetUpside,
+        baseData.numberOfAnalysts,
+        baseData.recommendationMean,
+        baseData.llmNarrative,
+        baseData.llmProvider,
+        baseData.llmError,
+        baseData.strategyIdsUsed,
+        baseData.dataSource,
+        baseData.warnings,
+        baseData.industryRank,
+        baseData.industry,
+        baseData.sector,
+        baseData.news,
+        baseData.fetchedAt,
+        now
+      );
     } else {
       throw firstErr;
     }
