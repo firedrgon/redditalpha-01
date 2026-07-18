@@ -115,6 +115,7 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
   if (isUS) {
     try {
       analysis.technicalSignals = await tvPromise;
+      console.log(`[analyze] ${upper} 技术信号:`, analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : "null");
     } catch {
       // 技术信号获取失败不影响主分析流程
     }

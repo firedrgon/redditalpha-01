@@ -128,8 +128,10 @@ export async function fetchTradingViewTechnicals(
   ticker: string
 ): Promise<TechnicalSignals | null> {
   const tvTickers = toTVTickers(ticker);
+  const startTime = Date.now();
 
   try {
+    console.log(`[technical] 请求 TradingView: ${tvTickers.join(", ")}`);
     const res = await fetch("https://scanner.tradingview.com/us/scan", {
       method: "POST",
       headers: {
@@ -145,7 +147,10 @@ export async function fetchTradingViewTechnicals(
       signal: AbortSignal.timeout(10000),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[technical] TradingView 响应非 200: ${res.status} ${res.statusText}`);
+      return null;
+    }
 
     const json = (await res.json()) as {
       data?: Array<{ s?: string; d?: (number | string | null)[] }>;
@@ -153,7 +158,10 @@ export async function fetchTradingViewTechnicals(
 
     // 取第一个有数据的行（可能 NASDAQ 或 NYSE 命中）
     const row = json.data?.find((r) => r.d && r.d.length > 0);
-    if (!row || !row.d) return null;
+    if (!row || !row.d) {
+      console.warn(`[technical] TradingView 返回空数据, data 行数: ${json.data?.length ?? 0}`);
+      return null;
+    }
 
     // 字段索引映射
     const idx = Object.fromEntries(COLUMNS.map((name, i) => [name, i]));
@@ -162,12 +170,15 @@ export async function fetchTradingViewTechnicals(
     const recommendMA = row.d[idx["Recommend.MA"]] as number | null;
     const recommendOther = row.d[idx["Recommend.Other"]] as number | null;
 
-    return {
+    const result = {
       overall: recommendToSignal(recommendAll),
       movingAverages: recommendToSignal(recommendMA),
       oscillators: recommendToSignal(recommendOther),
     };
-  } catch {
+    console.log(`[technical] 成功 (${Date.now() - startTime}ms):`, result);
+    return result;
+  } catch (err) {
+    console.error(`[technical] 失败 (${Date.now() - startTime}ms):`, err instanceof Error ? err.message : err);
     return null;
   }
 }
