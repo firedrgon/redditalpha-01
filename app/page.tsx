@@ -696,11 +696,32 @@ function AnalysisModal({
           : analysis.overallVerdict === "fail"
             ? "❌ 未通过"
             : "❓ 数据缺失";
-      const upsideText =
-        analysis.targetUpside != null
-          ? ` | 目标价上涨空间 ${(analysis.targetUpside * 100).toFixed(1)}%`
-          : "";
-      text = `📊 $${item.ticker} 股票概览\n\n总判定：${verdictText}${upsideText}\n\nvia Reddit Alpha`;
+      const lines: string[] = [`📊 $${item.ticker} 股票概览`];
+      lines.push("");
+      lines.push(`总判定：${verdictText}`);
+
+      // 价格与目标价区间
+      if (analysis.currentPrice != null) {
+        lines.push(`当前价：$${analysis.currentPrice.toFixed(2)}`);
+      }
+      if (analysis.targetLowPrice != null && analysis.targetHighPrice != null) {
+        lines.push(`目标价区间：$${analysis.targetLowPrice.toFixed(2)} - $${analysis.targetHighPrice.toFixed(2)}`);
+      } else if (analysis.targetMeanPrice != null) {
+        lines.push(`目标均价：$${analysis.targetMeanPrice.toFixed(2)}`);
+      }
+      if (analysis.targetUpside != null) {
+        const pct = (analysis.targetUpside * 100).toFixed(1);
+        lines.push(`上涨空间：${analysis.targetUpside >= 0 ? "+" : ""}${pct}%`);
+      }
+
+      // 综合技术信号
+      if (analysis.technicalSignals?.overall) {
+        lines.push(`综合技术信号：${SIGNAL_LABELS[analysis.technicalSignals.overall]}`);
+      }
+
+      lines.push("");
+      lines.push("via Reddit Alpha");
+      text = lines.join("\n");
     } else if (activeTab === "metrics") {
       const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
       text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过\n\nvia Reddit Alpha`;
