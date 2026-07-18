@@ -60,7 +60,23 @@ export async function getAnalysis(
       where: { ticker: upper },
     });
     return row ? mapAnalysis(row) : null;
-  } catch {
+  } catch (firstErr) {
+    // 若 technicalSignals 列不存在（schema 未同步），回退到 raw SQL 查询（不含该列）
+    const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    if (errMsg.includes("technicalSignals") || errMsg.includes("does not exist") || errMsg.includes("Unknown argument")) {
+      try {
+        const rows = await prisma.$queryRawUnsafe<PrismaAnalysisCache[]>(
+          `SELECT * FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`,
+          upper
+        );
+        if (!rows.length) return null;
+        // 手动补一个 undefined 的 technicalSignals，避免 mapAnalysis 报错
+        const row = { ...rows[0], technicalSignals: undefined as unknown as string | null };
+        return mapAnalysis(row);
+      } catch {
+        return null;
+      }
+    }
     return null;
   }
 }
@@ -76,62 +92,65 @@ export async function saveAnalysis(analysis: StockAnalysis): Promise<void> {
 
   // 数据库已配置时必须真正落库。失败让错误向上抛，由调用方捕获并提示用户，
   // 避免静默降级导致下次读取仍是旧数据。
-  await prisma.analysisCache.upsert({
-    where: { ticker: upper },
-    update: {
-      name: analysis.name,
-      metrics: JSON.stringify(analysis.metrics),
-      overallVerdict: analysis.overallVerdict,
-      overallSummary: analysis.overallSummary,
-      currentPrice: analysis.currentPrice,
-      targetMeanPrice: analysis.targetMeanPrice,
-      targetHighPrice: analysis.targetHighPrice,
-      targetLowPrice: analysis.targetLowPrice,
-      targetMedianPrice: analysis.targetMedianPrice,
-      targetUpside: analysis.targetUpside,
-      numberOfAnalysts: analysis.numberOfAnalysts,
-      recommendationMean: analysis.recommendationMean,
-      llmNarrative: analysis.llmNarrative,
-      llmProvider: analysis.llmProvider,
-      llmError: analysis.llmError,
-      strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
-      dataSource: analysis.dataSource,
-      warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
-      industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
-      industry: analysis.industry ?? null,
-      sector: analysis.sector ?? null,
-      news: analysis.news ? JSON.stringify(analysis.news) : null,
-      technicalSignals: analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : null,
-      fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
-    },
-    create: {
-      ticker: upper,
-      name: analysis.name,
-      metrics: JSON.stringify(analysis.metrics),
-      overallVerdict: analysis.overallVerdict,
-      overallSummary: analysis.overallSummary,
-      currentPrice: analysis.currentPrice,
-      targetMeanPrice: analysis.targetMeanPrice,
-      targetHighPrice: analysis.targetHighPrice,
-      targetLowPrice: analysis.targetLowPrice,
-      targetMedianPrice: analysis.targetMedianPrice,
-      targetUpside: analysis.targetUpside,
-      numberOfAnalysts: analysis.numberOfAnalysts,
-      recommendationMean: analysis.recommendationMean,
-      llmNarrative: analysis.llmNarrative,
-      llmProvider: analysis.llmProvider,
-      llmError: analysis.llmError,
-      strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
-      dataSource: analysis.dataSource,
-      warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
-      industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
-      industry: analysis.industry ?? null,
-      sector: analysis.sector ?? null,
-      news: analysis.news ? JSON.stringify(analysis.news) : null,
-      technicalSignals: analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : null,
-      fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
-    },
-  });
+  //
+  // 注意：technicalSignals 是新增字段，若数据库 schema 尚未同步（列不存在），
+  // 整个 upsert 会失败。因此先尝试完整写入，失败后回退到不含 technicalSignals 的写入。
+  const baseData = {
+    name: analysis.name,
+    metrics: JSON.stringify(analysis.metrics),
+    overallVerdict: analysis.overallVerdict,
+    overallSummary: analysis.overallSummary,
+    currentPrice: analysis.currentPrice,
+    targetMeanPrice: analysis.targetMeanPrice,
+    targetHighPrice: analysis.targetHighPrice,
+    targetLowPrice: analysis.targetLowPrice,
+    targetMedianPrice: analysis.targetMedianPrice,
+    targetUpside: analysis.targetUpside,
+    numberOfAnalysts: analysis.numberOfAnalysts,
+    recommendationMean: analysis.recommendationMean,
+    llmNarrative: analysis.llmNarrative,
+    llmProvider: analysis.llmProvider,
+    llmError: analysis.llmError,
+    strategyIdsUsed: JSON.stringify(analysis.strategyIdsUsed),
+    dataSource: analysis.dataSource,
+    warnings: analysis.warnings ? JSON.stringify(analysis.warnings) : null,
+    industryRank: analysis.industryRank ? JSON.stringify(analysis.industryRank) : null,
+    industry: analysis.industry ?? null,
+    sector: analysis.sector ?? null,
+    news: analysis.news ? JSON.stringify(analysis.news) : null,
+    fetchedAt: analysis.fetchedAt ? new Date(analysis.fetchedAt) : null,
+  };
+
+  try {
+    await prisma.analysisCache.upsert({
+      where: { ticker: upper },
+      update: {
+        ...baseData,
+        technicalSignals: analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : null,
+      },
+      create: {
+        ticker: upper,
+        ...baseData,
+        technicalSignals: analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : null,
+      },
+    });
+  } catch (firstErr) {
+    // 若因 technicalSignals 列不存在而失败，回退到不含该字段的写入
+    const errMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    if (errMsg.includes("technicalSignals") || errMsg.includes("does not exist") || errMsg.includes("Unknown argument")) {
+      console.warn("[analysis-cache] technicalSignals column not found, saving without it");
+      await prisma.analysisCache.upsert({
+        where: { ticker: upper },
+        update: baseData,
+        create: {
+          ticker: upper,
+          ...baseData,
+        },
+      });
+    } else {
+      throw firstErr;
+    }
+  }
 }
 
 /** 删除某 ticker 的分析记录 */

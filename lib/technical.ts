@@ -87,15 +87,13 @@ const UA =
 
 /**
  * 将美股 ticker 转换为 TradingView 格式。
- * 输入 "NFLX" → "NASDAQ:NFLX"
- * 输入 "NASDAQ:NFLX" → 不变
- * 输入 "NYSE:JNJ" → 不变
+ * 输入 "NFLX" → ["NASDAQ:NFLX", "NYSE:NFLX"]（不确定交易所时两个都试）
+ * 输入 "NASDAQ:NFLX" → ["NASDAQ:NFLX"]
  */
-function toTVTicker(ticker: string): string {
-  if (ticker.includes(":")) return ticker;
-  // 默认使用 NASDAQ（大部分美股在 NASDAQ 或 NYSE，TradingView 都接受）
-  // 尝试根据常见前缀判断
-  return `NASDAQ:${ticker}`;
+function toTVTickers(ticker: string): string[] {
+  if (ticker.includes(":")) return [ticker];
+  // 不确定交易所，同时尝试 NASDAQ 和 NYSE
+  return [`NASDAQ:${ticker}`, `NYSE:${ticker}`];
 }
 
 /**
@@ -129,7 +127,7 @@ function recommendToSignal(value: number | null | undefined): Signal {
 export async function fetchTradingViewTechnicals(
   ticker: string
 ): Promise<TechnicalSignals | null> {
-  const tvTicker = toTVTicker(ticker);
+  const tvTickers = toTVTickers(ticker);
 
   try {
     const res = await fetch("https://scanner.tradingview.com/us/scan", {
@@ -141,7 +139,7 @@ export async function fetchTradingViewTechnicals(
         Referer: "https://www.tradingview.com/",
       },
       body: JSON.stringify({
-        symbols: { tickers: [tvTicker] },
+        symbols: { tickers: tvTickers },
         columns: COLUMNS,
       }),
       signal: AbortSignal.timeout(10000),
@@ -153,7 +151,8 @@ export async function fetchTradingViewTechnicals(
       data?: Array<{ s?: string; d?: (number | string | null)[] }>;
     };
 
-    const row = json.data?.[0];
+    // 取第一个有数据的行（可能 NASDAQ 或 NYSE 命中）
+    const row = json.data?.find((r) => r.d && r.d.length > 0);
     if (!row || !row.d) return null;
 
     // 字段索引映射

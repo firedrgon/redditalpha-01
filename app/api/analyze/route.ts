@@ -62,6 +62,13 @@ function withTimeout<T>(
  */
 async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
   const upper = ticker.toUpperCase();
+  const isUS = detectMarket(upper) !== "CN";
+
+  // 美股时：TradingView 技术信号与财务数据并行获取，避免串行超时
+  // （财务 20s + TradingView 10s + LLM 35s = 65s > maxDuration 60s）
+  const tvPromise = isUS
+    ? fetchTradingViewTechnicals(upper).catch(() => null)
+    : Promise.resolve(null);
 
   const metrics = await withTimeout(
     fetchFinancialMetrics(upper),
@@ -104,10 +111,10 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
     thsVisualUrl: metrics.thsVisualUrl,
   };
 
-  // 美股：获取 TradingView 技术信号（与财务数据并行会更快，但为简化流程此处串行调用）
-  if (detectMarket(upper) !== "CN") {
+  // 等待 TradingView 结果（已在后台并行执行）
+  if (isUS) {
     try {
-      analysis.technicalSignals = await fetchTradingViewTechnicals(upper);
+      analysis.technicalSignals = await tvPromise;
     } catch {
       // 技术信号获取失败不影响主分析流程
     }
