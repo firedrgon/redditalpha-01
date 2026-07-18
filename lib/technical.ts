@@ -132,7 +132,7 @@ export async function fetchTradingViewTechnicals(
 
   try {
     console.log(`[technical] 请求 TradingView: ${tvTickers.join(", ")}`);
-    const res = await fetch("https://scanner.tradingview.com/us/scan", {
+    const res = await fetch("https://scanner.tradingview.com/america/scan", {
       method: "POST",
       headers: {
         "User-Agent": UA,

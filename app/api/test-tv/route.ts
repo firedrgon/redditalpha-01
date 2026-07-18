@@ -105,35 +105,50 @@ export async function GET(request: Request) {
   const prisma = getPrisma();
   if (prisma) {
     try {
-      const rows = await prisma.$queryRawUnsafe<
-        Array<{ ticker: string; technical_signals: string | null; updated_at: Date }>
-      >(
-        `SELECT ticker, technical_signals, updated_at FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`,
-        ticker
+      // 先测试基本连接
+      await prisma.$queryRawUnsafe<{ one: number }[]>(`SELECT 1 as one`);
+      results.dbConnection = "OK";
+
+      // 检查 AnalysisCache 表是否存在
+      const tableCheck = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+        `SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_name = 'AnalysisCache'`
       );
-      if (rows.length > 0) {
-        results.db = {
-          found: true,
-          technicalSignals: rows[0].technical_signals
-            ? JSON.parse(rows[0].technical_signals)
-            : null,
-          updatedAt: rows[0].updated_at,
-        };
+      results.tableExists = Number(tableCheck[0]?.cnt ?? 0) > 0;
+
+      if (results.tableExists) {
+        // 检查列
+        const colCheck = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+          `SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_name = 'AnalysisCache' AND column_name = 'technicalSignals'`
+        );
+        results.hasTechnicalSignals = Number(colCheck[0]?.cnt ?? 0) > 0;
+
+        // 尝试查询数据
+        try {
+          const rows = await prisma.$queryRawUnsafe<
+            Array<{ ticker: string; technical_signals: string | null; updated_at: Date }>
+          >(
+            `SELECT ticker, "technicalSignals" as technical_signals, updated_at FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`,
+            ticker
+          );
+          if (rows.length > 0) {
+            results.db = {
+              found: true,
+              technicalSignals: rows[0].technical_signals
+                ? JSON.parse(rows[0].technical_signals)
+                : null,
+              updatedAt: rows[0].updated_at,
+            };
+          } else {
+            results.db = { found: false };
+          }
+        } catch (qErr) {
+          results.db = { error: qErr instanceof Error ? qErr.message : String(qErr) };
+        }
       } else {
-        results.db = { found: false };
+        results.db = { error: "AnalysisCache 表不存在" };
       }
-    } catch {
-      try {
-        const rows = await prisma.$queryRawUnsafe<
-          Array<{ ticker: string; updated_at: Date }>
-        >(`SELECT ticker, updated_at FROM "AnalysisCache" WHERE ticker = $1 LIMIT 1`, ticker);
-        results.db = {
-          found: rows.length > 0,
-          note: "technicalSignals 列不存在，需访问 /api/db-sync 同步",
-        };
-      } catch {
-        results.db = { error: "查询失败" };
-      }
+    } catch (err) {
+      results.db = { error: err instanceof Error ? err.message : String(err) };
     }
   } else {
     results.db = { error: "数据库未配置" };
