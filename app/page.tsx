@@ -631,12 +631,7 @@ function AnalysisModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [sharing, setSharing] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "metrics" | "ai">("overview");
-  const shareRef = useRef<HTMLDivElement>(null);
-  const overviewRef = useRef<HTMLDivElement>(null);
-  const metricsRef = useRef<HTMLDivElement>(null);
-  const aiRef = useRef<HTMLDivElement>(null);
   const fetchCounterRef = useRef(0);
   const analysisRef = useRef<StockAnalysis | null>(null);
 
@@ -689,73 +684,31 @@ function AnalysisModal({
     fetchAnalysis(true);
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
     if (!analysis) return;
 
-    // 根据当前 Tab 选择截图目标
-    const tabRefMap = {
-      overview: overviewRef,
-      metrics: metricsRef,
-      ai: aiRef,
-    };
-    const targetRef = tabRefMap[activeTab];
-    if (!targetRef.current) return;
-
-    setSharing(true);
-    try {
-      const { toPng } = await import("html-to-image");
-      const dataUrl = await toPng(targetRef.current, {
-        cacheBust: true,
-        pixelRatio: 2,
-        backgroundColor: "#09090b",
-        filter: (node) => {
-          if (node instanceof HTMLElement) {
-            return !node.hasAttribute("data-share-ignore");
-          }
-          return true;
-        },
-      });
-
-      // 下载图片到本地
-      const date = new Date().toISOString().slice(0, 10);
-      const tabLabels: Record<typeof activeTab, string> = {
-        overview: "概览",
-        metrics: "指标详解",
-        ai: "AI点评",
-      };
-      const link = document.createElement("a");
-      link.download = `${item.ticker}-${tabLabels[activeTab]}-${date}.png`;
-      link.href = dataUrl;
-      link.click();
-
-      // 根据 Tab 生成不同分享文案
-      let text = "";
-      if (activeTab === "overview") {
-        const verdictText =
-          analysis.overallVerdict === "pass"
-            ? "✅ 通过"
-            : analysis.overallVerdict === "fail"
-              ? "❌ 未通过"
-              : "❓ 数据缺失";
-        const upsideText =
-          analysis.targetUpside != null
-            ? ` | 目标价上涨空间 ${(analysis.targetUpside * 100).toFixed(1)}%`
-            : "";
-        text = `📊 $${item.ticker} 股票概览\n\n总判定：${verdictText}${upsideText}\n\nvia Reddit Alpha`;
-      } else if (activeTab === "metrics") {
-        const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
-        text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过\n\nvia Reddit Alpha`;
-      } else {
-        text = `🤖 $${item.ticker} AI 分析点评\n\nvia Reddit Alpha`;
-      }
-      const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-      window.open(xUrl, "_blank");
-    } catch (err) {
-      console.error("生成分享图片失败:", err);
-      alert("生成分享图片失败，请重试");
-    } finally {
-      setSharing(false);
+    // 根据 Tab 生成不同分享文案
+    let text = "";
+    if (activeTab === "overview") {
+      const verdictText =
+        analysis.overallVerdict === "pass"
+          ? "✅ 通过"
+          : analysis.overallVerdict === "fail"
+            ? "❌ 未通过"
+            : "❓ 数据缺失";
+      const upsideText =
+        analysis.targetUpside != null
+          ? ` | 目标价上涨空间 ${(analysis.targetUpside * 100).toFixed(1)}%`
+          : "";
+      text = `📊 $${item.ticker} 股票概览\n\n总判定：${verdictText}${upsideText}\n\nvia Reddit Alpha`;
+    } else if (activeTab === "metrics") {
+      const passCount = analysis.metrics.filter((m) => m.verdict === "pass").length;
+      text = `📈 $${item.ticker} 财务指标详解\n\n共 ${analysis.metrics.length} 项指标，${passCount} 项通过\n\nvia Reddit Alpha`;
+    } else {
+      text = `🤖 $${item.ticker} AI 分析点评\n\nvia Reddit Alpha`;
     }
+    const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+    window.open(xUrl, "_blank");
   };
 
   return (
@@ -764,14 +717,12 @@ function AnalysisModal({
       onClick={onClose}
     >
       <div
-        ref={shareRef}
         className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
-          data-share-ignore
           className="absolute top-3 right-3 rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
           aria-label="关闭"
         >
@@ -793,7 +744,6 @@ function AnalysisModal({
                 type="button"
                 onClick={handleReanalyze}
                 disabled={isRefreshing}
-                data-share-ignore
                 className="shrink-0 rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-60 disabled:cursor-not-allowed"
                 title={analysis?.llmNarrative ? "重新调用大模型生成 AI 分析（财务数据已自动刷新）" : "调用大模型生成 AI 分析"}
               >
@@ -893,7 +843,7 @@ function AnalysisModal({
 
             {/* ==================== 概览 Tab ==================== */}
             {activeTab === "overview" && (
-              <div ref={overviewRef} className="space-y-4">
+              <div className="space-y-4">
             {/* 总判定 */}
             <div className="flex items-center gap-3 rounded-lg border border-zinc-700 bg-zinc-800/40 p-3">
               <VerdictBadge verdict={analysis.overallVerdict} />
@@ -1108,7 +1058,7 @@ function AnalysisModal({
 
             {/* ==================== 指标详解 Tab ==================== */}
             {activeTab === "metrics" && (
-              <div ref={metricsRef} className="space-y-2">
+              <div className="space-y-2">
                 {analysis.metrics.length > 0 ? (
                   analysis.metrics.map((m) => (
                     <div
@@ -1152,7 +1102,7 @@ function AnalysisModal({
 
             {/* ==================== AI 点评 Tab ==================== */}
             {activeTab === "ai" && (
-              <div ref={aiRef} className="space-y-3">
+              <div className="space-y-3">
             {/* LLM 叙述（完整内容：公司概览/指标判定/消息面分析/行业前景/总评） */}
             {(analysis.llmNarrative || (isRefreshing && analysis)) && (
               <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4">
@@ -1348,29 +1298,17 @@ function AnalysisModal({
             </div>
 
             {/* 分享到 X */}
-            <div className="flex justify-end pt-1" data-share-ignore>
+            <div className="flex justify-end pt-1">
               <button
                 type="button"
                 onClick={handleShare}
-                disabled={sharing}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:bg-zinc-800 disabled:opacity-50"
-                title="生成当前 Tab 内容图片并分享到 X"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:bg-zinc-800"
+                title="分享当前 Tab 内容到 X"
               >
-                {sharing ? (
-                  <>
-                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                    </svg>
-                    正在生成图片...
-                  </>
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
-                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                    </svg>
-                    分享{activeTab === "overview" ? "概览" : activeTab === "metrics" ? "指标" : "AI点评"}
-                  </>
-                )}
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+                分享{activeTab === "overview" ? "概览" : activeTab === "metrics" ? "指标" : "AI点评"}
               </button>
             </div>
           </div>
