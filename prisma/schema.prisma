@@ -8,34 +8,34 @@ datasource db {
 }
 
 model AnalysisCache {
-  id            String   @id @default(cuid())
-  ticker        String   @unique
-  name          String?
-  metrics       String   // JSON 字符串：MetricResult[]
-  overallVerdict String   // pass / fail / unknown
-  overallSummary String
-  currentPrice      Float?
-  targetMeanPrice   Float?
-  targetHighPrice   Float?
-  targetLowPrice    Float?
-  targetMedianPrice Float?
-  targetUpside      Float?
-  numberOfAnalysts  Int?
+  id                 String    @id @default(cuid())
+  ticker             String    @unique
+  name               String?
+  metrics            String
+  overallVerdict     String
+  overallSummary     String
+  currentPrice       Float?
+  targetMeanPrice    Float?
+  targetHighPrice    Float?
+  targetLowPrice     Float?
+  targetMedianPrice  Float?
+  targetUpside       Float?
+  numberOfAnalysts   Int?
   recommendationMean Float?
-  llmNarrative String?
-  llmProvider  String?
-  llmError     String?
-  strategyIdsUsed String // JSON 字符串：string[]
-  dataSource   String?
-  warnings     String?  // JSON 字符串：string[]
-  industryRank String?  // JSON 字符串：行业百分位排名
-  industry     String?
-  sector       String?
-  news         String?  // JSON 字符串：新闻列表
-  technicalSignals String? // JSON 字符串：TradingView 技术信号
-  fetchedAt    DateTime? // 实际数据抓取时间
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  llmNarrative       String?
+  llmProvider        String?
+  llmError           String?
+  strategyIdsUsed    String
+  dataSource         String?
+  warnings           String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  industry           String?
+  industryRank       String?
+  sector             String?
+  fetchedAt          DateTime?
+  news               String?
+  technicalSignals   String?
 }
 
 model StrategyCategory {
@@ -45,9 +45,9 @@ model StrategyCategory {
   order       Int
   isDefault   Boolean    @default(false)
   color       String?
-  strategies  Strategy[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  strategies  Strategy[]
 }
 
 model Strategy {
@@ -55,31 +55,31 @@ model Strategy {
   name        String
   description String
   categoryId  String
-  category    StrategyCategory @relation(fields: [categoryId], references: [id])
   metricField String
   operator    String
   threshold   Float
-  format      String  // percent / number / ratio
-  enabled     Boolean @default(true)
-  isDefault   Boolean @default(false)
+  format      String
+  enabled     Boolean          @default(true)
+  isDefault   Boolean          @default(false)
   order       Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  category    StrategyCategory @relation(fields: [categoryId], references: [id])
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String     @id @default(cuid())
   name          String?
-  email         String?   @unique
+  email         String?    @unique
   passwordHash  String?
   emailVerified DateTime?
   image         String?
-  isAdmin       Boolean   @default(false)
+  isAdmin       Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
   accounts      Account[]
-  sessions      Session[]
   favorites     Favorite[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
 }
 
 model Account {
@@ -103,9 +103,9 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
@@ -117,18 +117,18 @@ model VerificationToken {
 }
 
 model Favorite {
-  id        String   @id @default(cuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(cuid())
   ticker    String
   name      String?
   note      String?
-  tags      String?  // JSON 字符串：string[]
-  pinned    Boolean  @default(false) // 是否置顶
-  pinnedAt  DateTime? // 置顶时间，用于置顶项之间的排序
-  starred   Boolean  @default(false) // 是否重点关注
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tags      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  pinned    Boolean   @default(false)
+  pinnedAt  DateTime?
+  starred   Boolean   @default(false)
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, ticker])
   @@index([userId])
@@ -136,49 +136,49 @@ model Favorite {
 
 model AppSetting {
   key       String   @id
-  value     String   // JSON 字符串
+  value     String
   updatedAt DateTime @updatedAt
 }
 
 model LlmModelCache {
-  id            String   @id @default(cuid())
-  platform      String   // "openrouter" | "groq" | "gemini"
-  providerId    String   // 对应 LLM_PROVIDERS 的 id，如 "openrouter-1"
-  modelSlug     String   // 模型标识符，如 "nvidia/nemotron-3-ultra-550b-a55b:free"
-  modelName     String   // 人类可读名称，如 "Nemotron 3 Ultra 550B"
-  sortOrder     Int      // 排序顺序
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default(cuid())
+  platform   String
+  providerId String
+  modelSlug  String
+  modelName  String
+  sortOrder  Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([platform, providerId])
   @@index([platform])
 }
 
 model FinanceSnapshot {
-  id              String   @id @default(cuid())
-  ticker          String   @unique
-  snapshotDate    DateTime @default(now())
-  price           Float?
-  marketCap       Float?
-  trailingPE      Float?
-  forwardPE       Float?
-  pegRatio        Float?
-  priceToBook     Float?
-  roe             Float?
-  returnOnEquity5yAvg Float?
-  revenueGrowthYoY    Float?
+  id                     String   @id @default(cuid())
+  ticker                 String   @unique
+  snapshotDate           DateTime @default(now())
+  price                  Float?
+  marketCap              Float?
+  trailingPE             Float?
+  forwardPE              Float?
+  pegRatio               Float?
+  priceToBook            Float?
+  roe                    Float?
+  returnOnEquity5yAvg    Float?
+  revenueGrowthYoY       Float?
   quarterlyRevenueGrowth Float?
-  grossMargin     Float?
-  profitMargin    Float?
-  quickRatio      Float?
-  currentRatio    Float?
-  debtToEquity    Float?
-  industry        String?
-  sector          String?
-  industryPE      Float?
-  targetMeanPrice Float?
-  targetUpside    Float?
-  recommendationMean Float?
-  dataSource      String?
-  rawJson         String?  // 完整 FinancialMetrics 的 JSON 备份
+  grossMargin            Float?
+  profitMargin           Float?
+  quickRatio             Float?
+  currentRatio           Float?
+  debtToEquity           Float?
+  industry               String?
+  sector                 String?
+  industryPE             Float?
+  targetMeanPrice        Float?
+  targetUpside           Float?
+  recommendationMean     Float?
+  dataSource             String?
+  rawJson                String?
 }
