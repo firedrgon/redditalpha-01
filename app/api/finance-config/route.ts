@@ -6,6 +6,7 @@ import {
   setTiingoApiKey,
   setFinnhubApiKey,
 } from "@/lib/finance-config";
+import { requireAdmin } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 
@@ -37,6 +38,9 @@ function buildResponse(config: {
 
 /** GET /api/finance-config：读取财务数据源配置（不返回明文 Key，只返回脱敏） */
 export async function GET() {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
   const config = await readFinanceConfig();
   return NextResponse.json(buildResponse(config));
 }
@@ -50,6 +54,9 @@ interface PatchBody {
 
 /** PATCH /api/finance-config：更新 API Key */
 export async function PATCH(request: NextRequest) {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
   let body: PatchBody;
   try {
     body = (await request.json()) as PatchBody;

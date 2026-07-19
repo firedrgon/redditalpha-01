@@ -21,16 +21,16 @@ export async function GET(request: Request) {
   // 完整的振荡指标 + 移动均线字段
   const allColumns = [
     // 推荐汇总
-    "Recommend.All", "Recommend.MA", "Recommend.Other",
+    "Recommend.All|1W", "Recommend.MA|1W", "Recommend.Other|1W",
     // 振荡指标
-    "RSI", "RSI[1]", "Stoch.K", "Stoch.D", "CCI20", "ADX", "ADX+DI", "ADX-DI",
-    "AO", "Mom", "MACD.macd", "MACD.signal", "StochRSI.K", "W.R", "BBPower", "UO",
+    "RSI|1W", "RSI[1]|1W", "Stoch.K|1W", "Stoch.D|1W", "CCI20|1W", "ADX|1W", "ADX+DI|1W", "ADX-DI|1W",
+    "AO|1W", "Mom|1W", "MACD.macd|1W", "MACD.signal|1W", "StochRSI.K|1W", "W.R|1W", "BBPower|1W", "UO|1W",
     // 移动均线
-    "EMA10", "EMA20", "EMA30", "EMA50", "EMA100", "EMA200",
-    "SMA10", "SMA20", "SMA30", "SMA50", "SMA100", "SMA200",
-    "VWMA", "HullMA9", "Ichimoku.BLine",
+    "EMA10|1W", "EMA20|1W", "EMA30|1W", "EMA50|1W", "EMA100|1W", "EMA200|1W",
+    "SMA10|1W", "SMA20|1W", "SMA30|1W", "SMA50|1W", "SMA100|1W", "SMA200|1W",
+    "VWMA|1W", "HullMA9|1W", "Ichimoku.BLine|1W",
     // 价格
-    "close", "change",
+    "close|1W", "change|1W",
   ];
 
   const results: Record<string, unknown> = { ticker, timestamp: new Date().toISOString() };
@@ -68,9 +68,9 @@ export async function GET(request: Request) {
 
         // 解析 Recommend 值
         results.recommend = {
-          all: row.d[allColumns.indexOf("Recommend.All")],
-          MA: row.d[allColumns.indexOf("Recommend.MA")],
-          Other: row.d[allColumns.indexOf("Recommend.Other")],
+          all: row.d[allColumns.indexOf("Recommend.All|1W")],
+          MA: row.d[allColumns.indexOf("Recommend.MA|1W")],
+          Other: row.d[allColumns.indexOf("Recommend.Other|1W")],
         };
       }
     }

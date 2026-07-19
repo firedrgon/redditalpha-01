@@ -11,6 +11,7 @@
  */
 import { NextResponse } from "next/server";
 import { refreshOpenRouterModels, refreshGroqModels, refreshGeminiModels } from "@/lib/llm";
+import { requireAdmin } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -28,6 +29,9 @@ export async function POST() {
 }
 
 async function runRefresh() {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
   const now = Date.now();
   const errors: string[] = [];
 

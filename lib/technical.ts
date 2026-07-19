@@ -38,14 +38,14 @@ export const SIGNAL_LABELS: Record<Signal, string> = {
 /* TradingView 字段列表                                                */
 /* ------------------------------------------------------------------ */
 
-/** 请求 scanner API 的字段列表（TradingView 官方 Recommend 值 + 价格） */
+/** 请求 scanner API 的字段列表（TradingView 官方 Recommend 值 + 价格，使用周线数据 1W） */
 const COLUMNS: string[] = [
-  // TradingView 官方推荐值（-1 到 1，与网站显示一致）
-  "Recommend.All",    // 综合信号
-  "Recommend.MA",     // 移动均线信号
-  "Recommend.Other",  // 振荡指标信号
-  // 价格（用于日志）
-  "close",
+  // TradingView 官方推荐值（-1 到 1，与网站显示一致，周线）
+  "Recommend.All|1W",    // 综合信号
+  "Recommend.MA|1W",     // 移动均线信号
+  "Recommend.Other|1W",  // 振荡指标信号
+  // 价格（用于日志，周线）
+  "close|1W",
 ];
 
 /* ------------------------------------------------------------------ */
@@ -135,7 +135,9 @@ export async function fetchTradingViewTechnicals(
     const idx = Object.fromEntries(COLUMNS.map((name, i) => [name, i]));
     const v: Record<string, number | null> = {};
     for (const col of COLUMNS) {
-      v[col] = num(row.d[idx[col]]);
+      // 移除 |1W 后缀，这样后面访问时用原始字段名
+      const key = col.replace("|1W", "");
+      v[key] = num(row.d[idx[col]]);
     }
 
     const price = v["close"];
