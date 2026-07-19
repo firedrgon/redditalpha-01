@@ -3,6 +3,7 @@ import type { Favorite as PrismaFavorite } from "@prisma/client";
 
 export interface Favorite {
   id: string;
+  userId?: string | null;
   ticker: string;
   name?: string | null;
   note?: string | null;
@@ -14,11 +15,20 @@ export interface Favorite {
   updatedAt: number;
 }
 
-const memoryFavorites: Map<string, Favorite> = new Map();
+const memoryFavoritesByUser: Map<string, Map<string, Favorite>> = new Map();
+
+function getMemoryStore(userId: string): Map<string, Favorite> {
+  const store = memoryFavoritesByUser.get(userId);
+  if (store) return store;
+  const next = new Map<string, Favorite>();
+  memoryFavoritesByUser.set(userId, next);
+  return next;
+}
 
 function mapFavorite(r: PrismaFavorite): Favorite {
   return {
     id: r.id,
+    userId: r.userId,
     ticker: r.ticker,
     name: r.name,
     note: r.note,
@@ -46,37 +56,41 @@ function sortFavorites(list: Favorite[]): Favorite[] {
   });
 }
 
-function getMemoryAll(): Favorite[] {
-  return sortFavorites(Array.from(memoryFavorites.values()));
+function getMemoryAll(userId: string): Favorite[] {
+  return sortFavorites(Array.from(getMemoryStore(userId).values()));
 }
 
-export async function listFavorites(): Promise<Favorite[]> {
+export async function listFavorites(userId: string): Promise<Favorite[]> {
   const prisma = getPrisma();
-  if (!prisma) return getMemoryAll();
+  if (!prisma) return getMemoryAll(userId);
 
   try {
     const rows = await prisma.favorite.findMany({
+      where: { userId },
       orderBy: [{ pinned: "desc" }, { pinnedAt: "desc" }, { createdAt: "desc" }],
     });
     return sortFavorites(rows.map(mapFavorite));
   } catch {
-    return getMemoryAll();
+    return getMemoryAll(userId);
   }
 }
 
 export async function addFavorite(
+  userId: string,
   ticker: string,
   data?: { name?: string; note?: string; tags?: string[] }
 ): Promise<Favorite> {
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
+  const memoryStore = getMemoryStore(userId);
   if (!prisma) {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     const now = Date.now();
     const fav: Favorite = existing
       ? { ...existing, name: data?.name ?? existing.name, note: data?.note ?? existing.note, tags: data?.tags ?? existing.tags, updatedAt: now }
       : {
           id: `fav-${now}-${Math.random().toString(36).slice(2, 6)}`,
+          userId,
           ticker: upper,
           name: data?.name ?? null,
           note: data?.note ?? null,
@@ -87,19 +101,20 @@ export async function addFavorite(
           createdAt: now,
           updatedAt: now,
         };
-    memoryFavorites.set(upper, fav);
+    memoryStore.set(upper, fav);
     return fav;
   }
 
   try {
     const row = await prisma.favorite.upsert({
-      where: { ticker: upper },
+      where: { userId_ticker: { userId, ticker: upper } },
       update: {
         name: data?.name,
         note: data?.note,
         tags: data?.tags ? JSON.stringify(data.tags) : undefined,
       },
       create: {
+        userId,
         ticker: upper,
         name: data?.name,
         note: data?.note,
@@ -108,12 +123,13 @@ export async function addFavorite(
     });
     return mapFavorite(row);
   } catch {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     const now = Date.now();
     const fav: Favorite = existing
       ? { ...existing, name: data?.name ?? existing.name, note: data?.note ?? existing.note, tags: data?.tags ?? existing.tags, updatedAt: now }
       : {
           id: `fav-${now}-${Math.random().toString(36).slice(2, 6)}`,
+          userId,
           ticker: upper,
           name: data?.name ?? null,
           note: data?.note ?? null,
@@ -124,7 +140,7 @@ export async function addFavorite(
           createdAt: now,
           updatedAt: now,
         };
-    memoryFavorites.set(upper, fav);
+    memoryStore.set(upper, fav);
     return fav;
   }
 }
@@ -134,13 +150,15 @@ export async function addFavorite(
  * 置顶时记录 pinnedAt（用于置顶项之间的排序），取消置顶时清空
  */
 export async function setPinned(
+  userId: string,
   ticker: string,
   pinned: boolean
 ): Promise<Favorite> {
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
+  const memoryStore = getMemoryStore(userId);
   if (!prisma) {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     if (!existing) throw new Error("收藏不存在");
     const now = Date.now();
     const updated: Favorite = {
@@ -149,13 +167,13 @@ export async function setPinned(
       pinnedAt: pinned ? now : null,
       updatedAt: now,
     };
-    memoryFavorites.set(upper, updated);
+    memoryStore.set(upper, updated);
     return updated;
   }
 
   try {
     const row = await prisma.favorite.update({
-      where: { ticker: upper },
+      where: { userId_ticker: { userId, ticker: upper } },
       data: {
         pinned,
         pinnedAt: pinned ? new Date() : null,
@@ -163,7 +181,7 @@ export async function setPinned(
     });
     return mapFavorite(row);
   } catch {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     if (!existing) throw new Error("收藏不存在");
     const now = Date.now();
     const updated: Favorite = {
@@ -172,7 +190,7 @@ export async function setPinned(
       pinnedAt: pinned ? now : null,
       updatedAt: now,
     };
-    memoryFavorites.set(upper, updated);
+    memoryStore.set(upper, updated);
     return updated;
   }
 }
@@ -181,47 +199,50 @@ export async function setPinned(
  * 设置收藏项的关注状态
  */
 export async function setStarred(
+  userId: string,
   ticker: string,
   starred: boolean
 ): Promise<Favorite> {
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
+  const memoryStore = getMemoryStore(userId);
   if (!prisma) {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     if (!existing) throw new Error("收藏不存在");
     const updated: Favorite = {
       ...existing,
       starred,
       updatedAt: Date.now(),
     };
-    memoryFavorites.set(upper, updated);
+    memoryStore.set(upper, updated);
     return updated;
   }
 
   try {
     const row = await prisma.favorite.update({
-      where: { ticker: upper },
+      where: { userId_ticker: { userId, ticker: upper } },
       data: { starred },
     });
     return mapFavorite(row);
   } catch {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     if (!existing) throw new Error("收藏不存在");
     const updated: Favorite = {
       ...existing,
       starred,
       updatedAt: Date.now(),
     };
-    memoryFavorites.set(upper, updated);
+    memoryStore.set(upper, updated);
     return updated;
   }
 }
 
-export async function removeFavorite(ticker: string): Promise<number> {
+export async function removeFavorite(userId: string, ticker: string): Promise<number> {
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
+  const memoryStore = getMemoryStore(userId);
   if (!prisma) {
-    const existed = memoryFavorites.delete(upper);
+    const existed = memoryStore.delete(upper);
     return existed ? 1 : 0;
   }
 
@@ -229,7 +250,7 @@ export async function removeFavorite(ticker: string): Promise<number> {
   // 而非抛 P2025，让调用方明确知道是否真的删除了记录。
   try {
     const result = await prisma.favorite.deleteMany({
-      where: { ticker: upper },
+      where: { userId, ticker: upper },
     });
     return result.count;
   } catch (err) {
@@ -239,22 +260,24 @@ export async function removeFavorite(ticker: string): Promise<number> {
 }
 
 export async function updateFavorite(
+  userId: string,
   ticker: string,
   data: { name?: string; note?: string; tags?: string[] }
 ): Promise<Favorite> {
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
+  const memoryStore = getMemoryStore(userId);
   if (!prisma) {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     if (!existing) throw new Error("收藏不存在");
     const updated = { ...existing, ...data, updatedAt: Date.now() };
-    memoryFavorites.set(upper, updated);
+    memoryStore.set(upper, updated);
     return updated;
   }
 
   try {
     const row = await prisma.favorite.update({
-      where: { ticker: upper },
+      where: { userId_ticker: { userId, ticker: upper } },
       data: {
         name: data.name,
         note: data.note,
@@ -263,25 +286,25 @@ export async function updateFavorite(
     });
     return mapFavorite(row);
   } catch {
-    const existing = memoryFavorites.get(upper);
+    const existing = memoryStore.get(upper);
     if (!existing) throw new Error("收藏不存在");
     const updated = { ...existing, ...data, updatedAt: Date.now() };
-    memoryFavorites.set(upper, updated);
+    memoryStore.set(upper, updated);
     return updated;
   }
 }
 
-export async function isFavorite(ticker: string): Promise<boolean> {
+export async function isFavorite(userId: string, ticker: string): Promise<boolean> {
   const upper = ticker.toUpperCase();
   const prisma = getPrisma();
-  if (!prisma) return memoryFavorites.has(upper);
+  if (!prisma) return getMemoryStore(userId).has(upper);
 
   try {
     const count = await prisma.favorite.count({
-      where: { ticker: upper },
+      where: { userId, ticker: upper },
     });
     return count > 0;
   } catch {
-    return memoryFavorites.has(upper);
+    return getMemoryStore(userId).has(upper);
   }
 }

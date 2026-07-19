@@ -7,6 +7,7 @@ import {
 } from "@/lib/llm-config";
 import { LLM_PROVIDERS } from "@/lib/llm-providers";
 import { refreshProviderStatuses, testProvider } from "@/lib/llm";
+import { requireAdmin } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,6 +17,9 @@ export const revalidate = 0;
 
 /** GET /api/llm-providers：列出所有 provider 及状态，按 激活→可用→不可用 排序 */
 export async function GET() {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
   const config = await readConfig();
   const list = LLM_PROVIDERS.map((p) => {
     const status = config.providers[p.id] ?? {
@@ -77,6 +81,9 @@ interface PatchBody {
 
 /** PATCH /api/llm-providers：更新单个 provider 的 Key/启用状态/活跃 */
 export async function PATCH(request: NextRequest) {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
   let body: PatchBody;
   try {
     body = (await request.json()) as PatchBody;
@@ -124,6 +131,9 @@ interface PostBody {
 
 /** POST /api/llm-providers：测试 provider 可用性，结果写回本地配置文件 */
 export async function POST(request: NextRequest) {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
   let body: PostBody = {};
   try {
     body = (await request.json()) as PostBody;
