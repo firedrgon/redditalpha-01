@@ -22,7 +22,7 @@ function buildNote(signals: TechnicalSignals): string {
 }
 
 async function processStarredStock(
-  prisma: Awaited<ReturnType<typeof getPrisma>>,
+  prisma: NonNullable<Awaited<ReturnType<typeof getPrisma>>>,
   userId: string,
   ticker: string,
   name: string | null
