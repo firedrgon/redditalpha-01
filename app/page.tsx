@@ -3328,6 +3328,7 @@ export default function Home() {
   // 市场筛选：全部 / 美股 / A股
   const [marketFilter, setMarketFilter] = useState<"all" | "us" | "cn">("all");
   const [showAuth, setShowAuth] = useState(false);
+  const [signalCount, setSignalCount] = useState(0);
   const isAuthenticated = sessionStatus === "authenticated";
   const isAdmin = !!session?.user?.isAdmin;
 
@@ -3343,18 +3344,26 @@ export default function Home() {
       if (sessionStatus !== "authenticated") {
         if (!cancelled) {
           setFavorites([]);
+          setSignalCount(0);
         }
         return;
       }
       try {
-        const res = await fetch("/api/favorites");
-        const json = await res.json();
+        const [favRes, sigRes] = await Promise.all([
+          fetch("/api/favorites"),
+          fetch("/api/signals?limit=0"),
+        ]);
+        const favJson = await favRes.json();
+        const sigJson = await sigRes.json();
         if (cancelled) return;
-        if (json.favorites && Array.isArray(json.favorites)) {
-          setFavorites(json.favorites.map(mapFavoriteFromApi));
+        if (favJson.favorites && Array.isArray(favJson.favorites)) {
+          setFavorites(favJson.favorites.map(mapFavoriteFromApi));
+        }
+        if (sigJson.total != null) {
+          setSignalCount(sigJson.total);
         }
       } catch (err) {
-        console.error("Failed to load favorites:", err);
+        console.error("Failed to load favorites/signals:", err);
       }
     }
     load();
@@ -3971,32 +3980,54 @@ export default function Home() {
                     : "登录后，可保存和查看你的个人收藏"}
                 </p>
               </div>
-              {isAuthenticated && favorites.length > 0 && (
-                <div className="flex gap-1.5">
-                  {(["all", "starred", "pinned"] as const).map((f) => {
-                    const labels = { all: "全部", starred: "重点关注", pinned: "置顶" };
-                    const counts = {
-                      all: favorites.length,
-                      starred: favorites.filter((x) => x.starred).length,
-                      pinned: favorites.filter((x) => x.pinned).length,
-                    };
-                    return (
-                      <button
-                        key={f}
-                        type="button"
-                        onClick={() => setFavFilter(f)}
-                        className={`rounded-lg border px-3 py-1 text-xs font-medium transition-all ${
-                          favFilter === f
-                            ? "border-orange-500/50 bg-orange-500/15 text-orange-400"
-                            : "border-zinc-700 text-zinc-400 hover:border-orange-500/30 hover:text-zinc-300"
-                        }`}
-                      >
-                        {labels[f]} ({counts[f]})
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {isAuthenticated && (
+                  <a
+                    href="/signals"
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+                      signalCount > 0
+                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-400"
+                        : "border-zinc-700 text-zinc-400 hover:border-cyan-500/30 hover:text-cyan-300"
+                    }`}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                    信号提醒
+                    {signalCount > 0 && (
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500 text-[10px] font-bold text-white">
+                        {signalCount}
+                      </span>
+                    )}
+                  </a>
+                )}
+                {isAuthenticated && favorites.length > 0 && (
+                  <div className="flex gap-1.5">
+                    {(["all", "starred", "pinned"] as const).map((f) => {
+                      const labels = { all: "全部", starred: "重点关注", pinned: "置顶" };
+                      const counts = {
+                        all: favorites.length,
+                        starred: favorites.filter((x) => x.starred).length,
+                        pinned: favorites.filter((x) => x.pinned).length,
+                      };
+                      return (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => setFavFilter(f)}
+                          className={`rounded-lg border px-3 py-1 text-xs font-medium transition-all ${
+                            favFilter === f
+                              ? "border-orange-500/50 bg-orange-500/15 text-orange-400"
+                              : "border-zinc-700 text-zinc-400 hover:border-orange-500/30 hover:text-zinc-300"
+                          }`}
+                        >
+                          {labels[f]} ({counts[f]})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
             {!isAuthenticated ? (
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 text-center">

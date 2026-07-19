@@ -3,6 +3,10 @@
     {
       "path": "/api/llm-providers/refresh-models",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/signals",
+      "schedule": "0 14 * * 1-5"
     }
   ]
 }
