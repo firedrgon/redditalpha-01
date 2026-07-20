@@ -217,3 +217,22 @@ model TechnicalSignalSnapshot {
 
   @@index([fetchedAt])
 }
+
+/// 定时任务执行历史。供 /admin 或运维排查"cron 到底跑没跑、跑了多少、失败多少"。
+model CronRun {
+  id          String    @id @default(cuid())
+  jobName     String    @db.VarChar(60)
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  status      String    @default("running") @db.VarChar(20)
+  total       Int       @default(0)
+  processed   Int       @default(0)
+  skipped     Int       @default(0)
+  errorCount  Int       @default(0)
+  /// JSON: [{ticker, error, phase}, ...]
+  errors      String?
+  /// 顶层异常信息（cron 本身抛错时记录）
+  errorMessage String?  @db.Text
+
+  @@index([jobName, startedAt])
+}
