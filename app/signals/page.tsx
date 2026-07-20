@@ -23,9 +23,9 @@ const SIGNAL_COLORS: Record<Signal, string> = {
 };
 
 const SIGNAL_TYPE_LABELS: Record<SignalType, string> = {
-  buy: "买入信号",
-  sell: "卖出信号",
-  neutral: "中性信号",
+  buy: "建仓",
+  sell: "平仓",
+  neutral: "今日已检查",
 };
 
 const SIGNAL_TYPE_COLORS: Record<SignalType, string> = {
@@ -319,7 +319,7 @@ export default function SignalsPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">信号提醒</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            基于 TradingView 技术分析信号，每天自动获取重点关注股票的买卖提醒
+            基于 TradingView 技术分析信号，只在状态反转时提醒建仓/平仓
           </p>
         </div>
         <button
@@ -381,15 +381,15 @@ export default function SignalsPage() {
 
       <div className="mb-6 flex gap-3">
         <div className="flex-1 rounded-lg border border-green-500/30 bg-green-500/5 p-3">
-          <div className="text-xs text-green-400/70">买入信号</div>
+          <div className="text-xs text-green-400/70">建仓</div>
           <div className="mt-1 text-2xl font-bold text-green-400">{buyCount}</div>
         </div>
         <div className="flex-1 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-          <div className="text-xs text-red-400/70">卖出信号</div>
+          <div className="text-xs text-red-400/70">平仓</div>
           <div className="mt-1 text-2xl font-bold text-red-400">{sellCount}</div>
         </div>
         <div className="flex-1 rounded-lg border border-zinc-500/30 bg-zinc-500/5 p-3">
-          <div className="text-xs text-zinc-400/70">总信号</div>
+          <div className="text-xs text-zinc-400/70">总记录</div>
           <div className="mt-1 text-2xl font-bold text-zinc-300">{signals.length}</div>
         </div>
       </div>
@@ -404,11 +404,11 @@ export default function SignalsPage() {
         <LoadingSkeleton />
       ) : signals.length === 0 ? (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-8 text-center">
-          <div className="text-zinc-500">暂无信号提醒</div>
+          <div className="text-zinc-500">暂无建仓/平仓信号</div>
           <p className="mt-2 text-xs text-zinc-600">
-            重点关注的股票会在每天美股开盘前自动获取技术分析信号。
+            系统只在状态反转时提醒。
             <br />
-            没等到可以点右上角「立即获取」手动跑一次。
+            重点关注的股票出现买入信号时空仓会建仓，出现卖出信号时持仓会平仓。
           </p>
         </div>
       ) : (
