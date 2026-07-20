@@ -163,6 +163,29 @@ async function processStarredStock(
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("Authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    // 诊断：401 也写一条 CronRun，方便排查 CRON_SECRET 不匹配问题
+    // 默认开启；诊断完毕后可在 Vercel 设 CRON_LOG_AUTH_FAILURES=false 关闭
+    if (process.env.CRON_LOG_AUTH_FAILURES !== "false") {
+      try {
+        const runId = await startCronRun({ jobName: `${JOB_NAME}:auth-fail` });
+        await finishCronRun(runId, {
+          status: "error",
+          total: 0,
+          processed: 0,
+          skipped: 0,
+          errorCount: 1,
+          errorMessage: `Unauthorized: header_present=${Boolean(
+            authHeader
+          )}, env_CRON_SECRET_present=${Boolean(
+            process.env.CRON_SECRET
+          )}, env_CRON_SECRET_len=${
+            process.env.CRON_SECRET?.length ?? 0
+          }, header_len=${authHeader?.length ?? 0}`,
+        });
+      } catch (e) {
+        console.error("[cron/signals] 写 auth-fail 记录失败:", e);
+      }
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
