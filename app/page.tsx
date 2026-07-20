@@ -92,6 +92,19 @@ function mapFavoriteFromApi(f: {
   };
 }
 
+/**
+ * 客户端排序：重点关注 > 置顶 > 添加时间倒序
+ * 与 lib/db/favorites.ts 中 sortFavorites 保持一致，
+ * 用于乐观更新（togglePin/toggleStar/remove）后立即重排。
+ */
+function sortFavoritesClient(list: FavoriteItem[]): FavoriteItem[] {
+  return [...list].sort((a, b) => {
+    if (!!a.starred !== !!b.starred) return a.starred ? -1 : 1;
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    return b.addedAt - a.addedAt;
+  });
+}
+
 // ============================================================
 // 分析相关类型
 // ============================================================
@@ -171,6 +184,21 @@ const SIGNAL_COLORS: Record<Signal, string> = {
   buy: "text-green-400",
   strong_buy: "text-green-600",
 };
+
+// 后端 TechnicalSignalSnapshot 行（与 /api/technical-snapshots 返回的字段一致）
+interface TechnicalSnapshotRow {
+  ticker: string;
+  tickerName: string | null;
+  oscillators: Signal;
+  movingAverages: Signal;
+  overall: Signal;
+  price: number | null;
+  fetchedAt: number;
+  updatedAt: number;
+}
+
+// 24h 之内的 snapshot 视为「新鲜」不需要重新拉取
+const SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
 
 // ============================================================
 // LLM Provider 类型
@@ -419,18 +447,111 @@ function TickerCard({
   );
 }
 
+/**
+ * 综合技术信号徽章
+ * - 美股 + 有 snapshot：显示综合信号（hover 展开详细）
+ * - 美股 + 无 snapshot：显示「加载中」（同时触发懒刷新）
+ * - A 股：显示「不支持」占位
+ */
+function SignalBadge({
+  snapshot,
+  isUS,
+}: {
+  snapshot?: TechnicalSnapshotRow;
+  isUS: boolean;
+}) {
+  // Hooks 必须无条件在最前调用，避免 rules-of-hooks 违规
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!snapshot) return;
+    // 每 60s 刷新"X 分钟前"。初始值由 useState 提供，无需 effect 同步 setState
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [snapshot]);
+
+  if (!isUS) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-600">
+        信号不支持
+      </span>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-500 animate-pulse">
+        加载信号…
+      </span>
+    );
+  }
+
+  const sig = snapshot.overall;
+  const minutesAgo = Math.max(0, Math.floor((now - snapshot.fetchedAt) / 60000));
+  const timeLabel =
+    minutesAgo < 1
+      ? "刚刚"
+      : minutesAgo < 60
+        ? `${minutesAgo} 分钟前`
+        : minutesAgo < 60 * 24
+          ? `${Math.floor(minutesAgo / 60)} 小时前`
+          : `${Math.floor(minutesAgo / 60 / 24)} 天前`;
+
+  const bgClass =
+    sig === "strong_buy" || sig === "buy"
+      ? "bg-green-500/10 text-green-400"
+      : sig === "strong_sell" || sig === "sell"
+        ? "bg-red-500/10 text-red-400"
+        : "bg-zinc-500/15 text-zinc-400";
+
+  return (
+    <span
+      className={`group/sig relative inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${bgClass}`}
+      title={SIGNAL_LABELS[sig]}
+    >
+      <span aria-hidden>●</span>
+      <span>综合 {SIGNAL_LABELS[sig]}</span>
+      {/* hover 展开详细 */}
+      <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-52 rounded-md border border-zinc-700 bg-zinc-950 p-2 text-[10px] text-zinc-300 shadow-xl group-hover/sig:block">
+        <div className="flex items-center justify-between">
+          <span className="text-zinc-500">综合</span>
+          <span className={SIGNAL_COLORS[sig]}>{SIGNAL_LABELS[sig]}</span>
+        </div>
+        <div className="mt-1 flex items-center justify-between">
+          <span className="text-zinc-500">振荡</span>
+          <span className={SIGNAL_COLORS[snapshot.oscillators]}>
+            {SIGNAL_LABELS[snapshot.oscillators]}
+          </span>
+        </div>
+        <div className="mt-1 flex items-center justify-between">
+          <span className="text-zinc-500">均线</span>
+          <span className={SIGNAL_COLORS[snapshot.movingAverages]}>
+            {SIGNAL_LABELS[snapshot.movingAverages]}
+          </span>
+        </div>
+        <div className="mt-1.5 border-t border-zinc-800 pt-1 text-[9px] text-zinc-600">
+          {timeLabel}更新 · TradingView 周线
+        </div>
+      </span>
+    </span>
+  );
+}
+
 function FavoriteCard({
   item,
   onRemove,
   onAnalyze,
   onTogglePin,
   onToggleStar,
+  signalSnapshot,
+  onRequestRefreshSnapshot,
 }: {
   item: FavoriteItem;
   onRemove: (ticker: string) => void;
   onAnalyze: (item: FavoriteItem) => void;
   onTogglePin: (ticker: string, pinned: boolean) => void;
   onToggleStar: (ticker: string, starred: boolean) => void;
+  signalSnapshot?: TechnicalSnapshotRow;
+  onRequestRefreshSnapshot?: (ticker: string) => void;
 }) {
   // A 股标题跳百度股市通，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
@@ -438,6 +559,7 @@ function FavoriteCard({
     : `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
+  const isUS = !isCNTicker(item.ticker);
 
   // A 股图解 URL：卡片挂载时自动获取
   const [visualUrl, setVisualUrl] = useState<string | null>(null);
@@ -452,6 +574,16 @@ function FavoriteCard({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [item.ticker]);
+
+  // 美股：snapshot 缺失或 > 24h 时触发一次懒刷新（服务端会再次 5 分钟去重）
+  useEffect(() => {
+    if (!isUS || !onRequestRefreshSnapshot) return;
+    const stale =
+      !signalSnapshot || Date.now() - signalSnapshot.fetchedAt > SNAPSHOT_STALE_MS;
+    if (stale) {
+      onRequestRefreshSnapshot(item.ticker);
+    }
+  }, [isUS, signalSnapshot, onRequestRefreshSnapshot, item.ticker]);
 
   return (
     <div
@@ -503,6 +635,7 @@ function FavoriteCard({
                   重点关注
                 </span>
               )}
+              <SignalBadge snapshot={signalSnapshot} isUS={isUS} />
             </div>
             {item.name && (
               <div className="mt-0.5 text-sm text-zinc-400 truncate">{item.name}</div>
@@ -3329,6 +3462,12 @@ export default function Home() {
   const [marketFilter, setMarketFilter] = useState<"all" | "us" | "cn">("all");
   const [showAuth, setShowAuth] = useState(false);
   const [signalCount, setSignalCount] = useState(0);
+  // ticker -> 最新技术信号快照（来自 /api/technical-snapshots）
+  const [signalSnapshots, setSignalSnapshots] = useState<
+    Record<string, TechnicalSnapshotRow>
+  >({});
+  // 正在刷新的 ticker（用于 UI 节流，避免同一 ticker 重复请求）
+  const refreshingRef = useRef<Set<string>>(new Set());
   const isAuthenticated = sessionStatus === "authenticated";
   const isAdmin = !!session?.user?.isAdmin;
 
@@ -3357,7 +3496,12 @@ export default function Home() {
         const sigJson = await sigRes.json();
         if (cancelled) return;
         if (favJson.favorites && Array.isArray(favJson.favorites)) {
-          setFavorites(favJson.favorites.map(mapFavoriteFromApi));
+          // 服务端已按 starred > pinned > addedAt 排序，客户端再排一次兜底
+          setFavorites(
+            sortFavoritesClient(
+              favJson.favorites.map(mapFavoriteFromApi)
+            )
+          );
         }
         if (sigJson.total != null) {
           setSignalCount(sigJson.total);
@@ -3371,6 +3515,59 @@ export default function Home() {
       cancelled = true;
     };
   }, [sessionStatus]);
+
+  // 加载/刷新技术信号快照：每次收藏变化时批量取一次
+  useEffect(() => {
+    if (favorites.length === 0) return;
+    let cancelled = false;
+    const tickers = Array.from(new Set(favorites.map((f) => f.ticker.toUpperCase())));
+    fetch(`/api/technical-snapshots?tickers=${encodeURIComponent(tickers.join(","))}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json.snapshots) return;
+        const map: Record<string, TechnicalSnapshotRow> = {};
+        for (const row of json.snapshots as TechnicalSnapshotRow[]) {
+          map[row.ticker.toUpperCase()] = row;
+        }
+        setSignalSnapshots(map);
+      })
+      .catch((err) => console.warn("[technical-snapshots] 加载失败:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [favorites]);
+
+  /**
+   * 懒刷新：snapshot 缺失或 > 24h 时调用 /api/technical-snapshots/refresh
+   * - 仅美股（非美股服务端 400，前端跳过）
+   * - 同 ticker 5 分钟内只能请求一次（ref 节流）
+   * - 服务端也会做 5 分钟内的去重保护
+   */
+  const requestRefreshSnapshot = useCallback(async (ticker: string) => {
+    const upper = ticker.toUpperCase();
+    if (refreshingRef.current.has(upper)) return;
+    refreshingRef.current.add(upper);
+    try {
+      const res = await fetch("/api/technical-snapshots/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: upper }),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.snapshot) {
+        const row = json.snapshot as TechnicalSnapshotRow;
+        setSignalSnapshots((prev) => ({
+          ...prev,
+          [row.ticker.toUpperCase()]: row,
+        }));
+      }
+    } catch (err) {
+      console.warn("[technical-snapshots/refresh] 失败:", err);
+    } finally {
+      refreshingRef.current.delete(upper);
+    }
+  }, []);
 
   // 注册 Service Worker (PWA)
   useEffect(() => {
@@ -3484,11 +3681,8 @@ export default function Home() {
         const updated = prev.map((f) =>
           f.ticker.toUpperCase() === upper ? { ...f, pinned } : f
         );
-        // 客户端按 pinned 优先 + addedAt 降序重排
-        return [...updated].sort((a, b) => {
-          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-          return b.addedAt - a.addedAt;
-        });
+        // 客户端按 starred > pinned > addedAt 重排
+        return sortFavoritesClient(updated);
       });
       try {
         await fetch("/api/favorites", {
@@ -3519,11 +3713,13 @@ export default function Home() {
         return;
       }
       const upper = ticker.trim().toUpperCase();
-      setFavorites((prev) =>
-        prev.map((f) =>
+      setFavorites((prev) => {
+        const updated = prev.map((f) =>
           f.ticker.toUpperCase() === upper ? { ...f, starred } : f
-        )
-      );
+        );
+        // 重点关注切换后立即重排（重点项上浮）
+        return sortFavoritesClient(updated);
+      });
       try {
         await fetch("/api/favorites", {
           method: "PATCH",
@@ -3760,7 +3956,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
-        <div className="mx-auto max-w-6xl px-4 py-4">
+        <div className="mx-auto max-w-screen-2xl px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-red-600">
@@ -3857,7 +4053,7 @@ export default function Home() {
       </header>
 
       <nav className="border-b border-zinc-800 bg-zinc-950">
-        <div className="mx-auto max-w-6xl px-4">
+        <div className="mx-auto max-w-screen-2xl px-4">
           <div className="flex gap-1 overflow-x-auto py-3 scrollbar-hide">
             {/* 收藏 Tab 放在最前面 */}
             <button
@@ -3901,7 +4097,7 @@ export default function Home() {
         </div>
       </nav>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <main className="mx-auto max-w-screen-2xl px-4 py-6">
         {view === "subreddit" ? (
           <>
             <div className="mb-6 flex items-center justify-between">
@@ -4138,7 +4334,7 @@ export default function Home() {
                 </div>
 
                 {favorites.length > 0 ? (
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                     {favorites
                       .filter((item) =>
                         favFilter === "all" ? true :
@@ -4158,6 +4354,8 @@ export default function Home() {
                           onAnalyze={handleAnalyze}
                           onTogglePin={togglePinFavorite}
                           onToggleStar={toggleStarFavorite}
+                          signalSnapshot={signalSnapshots[item.ticker.toUpperCase()]}
+                          onRequestRefreshSnapshot={requestRefreshSnapshot}
                         />
                       ))}
                   </div>

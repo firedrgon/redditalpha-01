@@ -54,3 +54,6 @@ prisma/dev.db-journal
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# WorkBuddy 本地数据（memory / skills / plan，不入仓）
+.workbuddy-ai/

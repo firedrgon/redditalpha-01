@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
 import { fetchTradingViewTechnicals, SIGNAL_LABELS } from "@/lib/technical";
 import { detectMarket } from "@/lib/market";
+import { upsertTechnicalSnapshot } from "@/lib/db/technical-snapshot";
 import type { Signal, TechnicalSignals } from "@/lib/technical";
 
 export const runtime = "nodejs";
@@ -43,6 +44,7 @@ async function processStarredStock(
     const signalType = determineSignalType(signals.overall);
     const note = buildNote(signals);
 
+    // 1) 写 SignalAlert（事件存档，用于 /signals 页面历史流）
     await prisma.signalAlert.create({
       data: {
         userId,
@@ -57,8 +59,18 @@ async function processStarredStock(
       },
     });
 
+    // 2) 同步写入 TechnicalSignalSnapshot（高频读缓存，Card 渲染直接查这里）
+    await upsertTechnicalSnapshot({
+      ticker,
+      tickerName: name,
+      oscillators: signals.oscillators,
+      movingAverages: signals.movingAverages,
+      overall: signals.overall,
+      price: null,
+    });
+
     console.log(
-      `[cron/signals] 创建信号提醒: ${ticker} -> ${signalType} (${signals.overall})`
+      `[cron/signals] 创建信号提醒 + snapshot: ${ticker} -> ${signalType} (${signals.overall})`
     );
     return { processed: true, signal: signals };
   } catch (err) {

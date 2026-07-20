@@ -42,15 +42,18 @@ function mapFavorite(r: PrismaFavorite): Favorite {
 }
 
 /**
- * 排序：置顶项优先（按 pinnedAt 降序，null 在后），非置顶项按 createdAt 降序
+ * 排序：重点关注 (starred) > 置顶 (pinned) > 添加时间
+ *
+ * 重点关注是用户主动标记的「核心股票」，应始终排在最前；
+ * 置顶是临时性的置顶（不受 starred 影响的次级排序）；
+ * 同级内按添加时间倒序。
  */
 function sortFavorites(list: Favorite[]): Favorite[] {
   return [...list].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    if (a.pinned && b.pinned) {
-      const aT = a.pinnedAt ?? 0;
-      const bT = b.pinnedAt ?? 0;
-      return bT - aT;
+    if (!!a.starred !== !!b.starred) return a.starred ? -1 : 1;
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    if ((a.starred && b.starred) || (a.pinned && b.pinned)) {
+      return b.createdAt - a.createdAt;
     }
     return b.createdAt - a.createdAt;
   });
@@ -67,7 +70,12 @@ export async function listFavorites(userId: string): Promise<Favorite[]> {
   try {
     const rows = await prisma.favorite.findMany({
       where: { userId },
-      orderBy: [{ pinned: "desc" }, { pinnedAt: "desc" }, { createdAt: "desc" }],
+      orderBy: [
+        { starred: "desc" },
+        { pinned: "desc" },
+        { pinnedAt: "desc" },
+        { createdAt: "desc" },
+      ],
     });
     return sortFavorites(rows.map(mapFavorite));
   } catch {

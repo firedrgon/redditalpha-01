@@ -202,3 +202,18 @@ model SignalAlert {
   @@index([userId, ticker])
   @@index([userId, createdAt])
 }
+
+/// 每个 ticker 最新一次的技术信号快照（高频读，单 ticker 唯一）。
+/// 由 cron 或用户进入收藏页时 lazy refresh 写入；Card 渲染时直接读取。
+model TechnicalSignalSnapshot {
+  ticker         String   @id
+  tickerName     String?
+  oscillators    String   @db.VarChar(20)
+  movingAverages String   @db.VarChar(20)
+  overall        String   @db.VarChar(20)
+  price          Float?
+  fetchedAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([fetchedAt])
+}
