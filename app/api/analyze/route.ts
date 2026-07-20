@@ -14,7 +14,7 @@ import { getAnalysis, saveAnalysis } from "@/lib/db";
 import { recordFinanceSnapshot } from "@/lib/db";
 import { getDbInitError } from "@/lib/db/prisma";
 import { detectMarket, normalizeCNTicker } from "@/lib/market";
-import { fetchTradingViewTechnicals } from "@/lib/technical";
+import { getTechnicalSnapshot, refreshTechnicalSnapshot } from "@/lib/db/technical-snapshot";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -64,12 +64,6 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
   const upper = ticker.toUpperCase();
   const isUS = detectMarket(upper) !== "CN";
 
-  // 美股时：TradingView 技术信号与财务数据并行获取，避免串行超时
-  // （财务 20s + TradingView 10s + LLM 35s = 65s > maxDuration 60s）
-  const tvPromise = isUS
-    ? fetchTradingViewTechnicals(upper).catch(() => null)
-    : Promise.resolve(null);
-
   const metrics = await withTimeout(
     fetchFinancialMetrics(upper),
     FETCH_TIMEOUT_MS,
@@ -79,6 +73,25 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
   if (!metrics.name) {
     const name = await resolveTickerName(upper);
     metrics.name = name;
+  }
+
+  // 美股时：技术信号统一从 TechnicalSignalSnapshot 表取（与 Card 同一数据源）
+  // - 若 snapshot 缺失，触发 refresh（fetchTradingViewTechnicals + upsert）
+  // - 这样 Card 徽章和分析弹窗始终显示同一份数据，避免「卡上是旧值 / 弹窗是新值」
+  // - A 股直接返回 null（TradingView scanner 不支持）
+  let technicalSignals: Awaited<ReturnType<typeof getTechnicalSnapshot>> = null;
+  if (isUS) {
+    try {
+      const existing = await getTechnicalSnapshot(upper);
+      if (existing) {
+        technicalSignals = existing;
+      } else {
+        // snapshot 缺失：拉一次并写库
+        technicalSignals = await refreshTechnicalSnapshot(upper, metrics.name);
+      }
+    } catch (err) {
+      console.warn(`[analyze] ${upper} snapshot 获取失败:`, err);
+    }
   }
 
   const strategies = await getEnabledStrategies();
@@ -109,17 +122,20 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
     industry: metrics.industry,
     sector: metrics.sector,
     thsVisualUrl: metrics.thsVisualUrl,
+    // 技术信号直接用上面已 fetch 好的结果（与 Card 同源 TechnicalSignalSnapshot）
+    technicalSignals: technicalSignals
+      ? {
+          oscillators: technicalSignals.oscillators,
+          movingAverages: technicalSignals.movingAverages,
+          overall: technicalSignals.overall,
+        }
+      : null,
   };
 
-  // 等待 TradingView 结果（已在后台并行执行）
-  if (isUS) {
-    try {
-      analysis.technicalSignals = await tvPromise;
-      console.log(`[analyze] ${upper} 技术信号:`, analysis.technicalSignals ? JSON.stringify(analysis.technicalSignals) : "null");
-    } catch {
-      // 技术信号获取失败不影响主分析流程
-    }
-  }
+  console.log(
+    `[analyze] ${upper} 技术信号:`,
+    technicalSignals ? JSON.stringify(technicalSignals) : "null"
+  );
 
   // 每次重新生成都会调用 LLM（用户点击「重新生成 AI 分析」即期望拿到新叙述）
   try {
@@ -202,7 +218,12 @@ export async function GET(request: NextRequest) {
   if (force) {
     try {
       const analysis = await regenerateAnalysis(upper);
-      return NextResponse.json(analysis);
+      // 顺手返回最新 snapshot（force=true 时可能刷新过），前端可同步更新 Card 徽章
+      const latestSnapshot = await getTechnicalSnapshot(upper);
+      return NextResponse.json({
+        ...analysis,
+        latestSnapshot: latestSnapshot ?? null,
+      });
     } catch (err) {
       // 重新生成失败时，若数据库已有旧记录则返回旧记录并附带错误信息，
       // 否则返回错误。避免用户点了一次重新生成失败后看不到任何数据。

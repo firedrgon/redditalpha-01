@@ -756,9 +756,18 @@ function formatCountdown(seconds: number): string {
 // ============================================================
 function AnalysisModal({
   item,
+  signalSnapshot,
+  onSnapshotUpdated,
   onClose,
 }: {
   item: FavoriteItem;
+  /**
+   * 父组件持有的最新 snapshot（与 Card 徽章同源）。
+   * 优先用这个显示，避免 modal 和 Card 数据源不同导致不一致。
+   */
+  signalSnapshot?: TechnicalSnapshotRow;
+  /** 强制刷新后，API 返回了 latestSnapshot，父组件可同步更新 Card */
+  onSnapshotUpdated?: (snapshot: TechnicalSnapshotRow) => void;
   onClose: () => void;
 }) {
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
@@ -792,9 +801,13 @@ function AnalysisModal({
         const errText = await res.text().catch(() => "");
         throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
       }
-      const json: StockAnalysis = await res.json();
+      // force=true 时响应里会带 latestSnapshot（与 Card 徽章同源），用于同步父组件
+      const json: StockAnalysis & { latestSnapshot?: TechnicalSnapshotRow | null } = await res.json();
       if (myId === fetchCounterRef.current) {
         setAnalysis(json);
+        if (force && json.latestSnapshot && onSnapshotUpdated) {
+          onSnapshotUpdated(json.latestSnapshot);
+        }
       }
     } catch (err) {
       if (myId === fetchCounterRef.current) {
@@ -806,7 +819,7 @@ function AnalysisModal({
         setIsRefreshing(false);
       }
     }
-  }, [item.ticker]);
+  }, [item.ticker, onSnapshotUpdated]);
 
   useEffect(() => {
     fetchAnalysis(false);
@@ -841,15 +854,16 @@ function AnalysisModal({
         lines.push(`上涨空间：${analysis.targetUpside >= 0 ? "+" : ""}${pct}%`);
       }
 
-      // 综合技术信号
-      if (analysis.technicalSignals?.overall) {
-        lines.push(`综合技术信号：${SIGNAL_LABELS[analysis.technicalSignals.overall]}`);
+      // 综合技术信号（与 Card 同源 snapshot 优先）
+      const sigOverall = signalSnapshot?.overall ?? analysis.technicalSignals?.overall;
+      if (sigOverall) {
+        lines.push(`综合技术信号：${SIGNAL_LABELS[sigOverall]}`);
       }
 
-      // 末尾点评：综合上涨空间与技术信号给出一句结论
+      // 末尾点评：综合上涨空间与技术信号给出一句结论（与 Card 同源 snapshot 优先）
       lines.push("");
       const upside = analysis.targetUpside;
-      const sig = analysis.technicalSignals?.overall;
+      const sig = signalSnapshot?.overall ?? analysis.technicalSignals?.overall;
       let comment = "";
       if (upside != null && sig) {
         const bullish = upside > 0.1 && (sig === "buy" || sig === "strong_buy");
@@ -1250,8 +1264,10 @@ function AnalysisModal({
               </div>
             )}
 
-            {/* TradingView 技术信号（仅美股）——概览 Tab 内部 */}
-            {analysis.technicalSignals && (
+            {/* TradingView 技术信号（仅美股）——概览 Tab 内部
+               * 优先用父组件传来的最新 snapshot（与 Card 徽章同源），保证两边一致；
+               * snapshot 缺失时回退到 analysis.technicalSignals（AnalysisCache 旧值）。 */}
+            {(signalSnapshot || analysis.technicalSignals) && (
               <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <svg viewBox="0 0 24 24" className="h-4 w-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -1259,20 +1275,41 @@ function AnalysisModal({
                   </svg>
                   <span className="text-sm font-medium text-cyan-300">技术信号</span>
                   <span className="text-[10px] text-zinc-500">TradingView</span>
+                  {signalSnapshot?.fetchedAt && (
+                    <span className="ml-auto text-[10px] text-zinc-500">
+                      {new Date(signalSnapshot.fetchedAt).toLocaleString("zh-CN", {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}{" "}
+                      更新
+                    </span>
+                  )}
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: "综合", signal: analysis.technicalSignals.overall },
-                    { label: "振荡指标", signal: analysis.technicalSignals.oscillators },
-                    { label: "移动均线", signal: analysis.technicalSignals.movingAverages },
-                  ].map(({ label, signal }) => (
-                    <div key={label} className="flex flex-col items-center gap-1 rounded-md bg-zinc-800/50 p-2">
-                      <span className="text-[10px] text-zinc-500">{label}</span>
-                      <span className={`text-xs font-medium ${SIGNAL_COLORS[signal]}`}>
-                        ● {SIGNAL_LABELS[signal]}
-                      </span>
-                    </div>
-                  ))}
+                  {(() => {
+                    // 数据源优先级：snapshot（最新，与 Card 同源）> analysis.technicalSignals
+                    const sigSource = signalSnapshot
+                      ? {
+                          overall: signalSnapshot.overall,
+                          oscillators: signalSnapshot.oscillators,
+                          movingAverages: signalSnapshot.movingAverages,
+                        }
+                      : analysis.technicalSignals!;
+                    return [
+                      { label: "综合", signal: sigSource.overall },
+                      { label: "振荡指标", signal: sigSource.oscillators },
+                      { label: "移动均线", signal: sigSource.movingAverages },
+                    ].map(({ label, signal }) => (
+                      <div key={label} className="flex flex-col items-center gap-1 rounded-md bg-zinc-800/50 p-2">
+                        <span className="text-[10px] text-zinc-500">{label}</span>
+                        <span className={`text-xs font-medium ${SIGNAL_COLORS[signal]}`}>
+                          ● {SIGNAL_LABELS[signal]}
+                        </span>
+                      </div>
+                    ));
+                  })()}
                 </div>
               </div>
             )}
@@ -4381,6 +4418,11 @@ export default function Home() {
       {analyzingItem && (
         <AnalysisModal
           item={analyzingItem}
+          signalSnapshot={signalSnapshots[analyzingItem.ticker.toUpperCase()]}
+          onSnapshotUpdated={(snapshot) => {
+            const key = snapshot.ticker.toUpperCase();
+            setSignalSnapshots((prev) => ({ ...prev, [key]: snapshot }));
+          }}
           onClose={() => setAnalyzingItem(null)}
         />
       )}
