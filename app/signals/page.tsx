@@ -47,6 +47,28 @@ interface SignalAlert {
   createdAt: string;
 }
 
+interface RunResultItem {
+  processed: boolean;
+  skipped: boolean;
+  phase?: string;
+  error?: string;
+  overall?: Signal;
+}
+
+interface RunResponse {
+  success?: boolean;
+  runId?: string;
+  total: number;
+  processed: number;
+  skipped: number;
+  errorCount: number;
+  errors?: { ticker: string; error: string; phase?: string }[];
+  results?: RunResultItem[];
+  message?: string;
+  error?: string;
+  retryAfterSec?: number;
+}
+
 interface SignalsResponse {
   signals: SignalAlert[];
   total: number;
@@ -161,6 +183,19 @@ export default function SignalsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
 
+  // 手动触发状态
+  const [running, setRunning] = useState(false);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [cooldownSec, setCooldownSec] = useState(0);
+
+  // Cooldown 倒计时
+  useEffect(() => {
+    if (cooldownSec <= 0) return;
+    const t = setTimeout(() => setCooldownSec((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldownSec]);
+
   const fetchSignals = useCallback(async (fetchOffset = 0) => {
     if (!session?.user) return;
 
@@ -210,6 +245,46 @@ export default function SignalsPage() {
     fetchSignals(offset);
   };
 
+  const handleManualRun = async () => {
+    if (running || cooldownSec > 0) return;
+    setRunning(true);
+    setRunError(null);
+    setRunMessage(null);
+    try {
+      const res = await fetch("/api/signals/run", { method: "POST" });
+      const data: RunResponse = await res.json();
+
+      if (res.status === 429 && data.retryAfterSec) {
+        setCooldownSec(data.retryAfterSec);
+        setRunError(data.error ?? "操作太频繁");
+        return;
+      }
+
+      if (!res.ok) {
+        setRunError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+
+      const parts: string[] = [];
+      parts.push(`处理 ${data.total} 只`);
+      parts.push(`成功 ${data.processed}`);
+      if (data.errorCount > 0) parts.push(`失败 ${data.errorCount}`);
+      if (data.skipped > 0) parts.push(`跳过 ${data.skipped}`);
+      setRunMessage(parts.join("，"));
+
+      // 60 秒 cooldown
+      setCooldownSec(60);
+
+      // 刷新列表
+      await fetchSignals(0);
+    } catch (err) {
+      console.error("[signals] 手动触发失败:", err);
+      setRunError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const buyCount = signals.filter((s) => s.signalType === "buy").length;
   const sellCount = signals.filter((s) => s.signalType === "sell").length;
 
@@ -240,12 +315,69 @@ export default function SignalsPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">信号提醒</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          基于 TradingView 技术分析信号，每天自动获取重点关注股票的买卖提醒
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">信号提醒</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            基于 TradingView 技术分析信号，每天自动获取重点关注股票的买卖提醒
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleManualRun}
+          disabled={running || cooldownSec > 0}
+          className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-2 text-sm font-medium text-orange-400 transition-all hover:bg-orange-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {running ? (
+            <>
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5 animate-spin"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4v4m0 0a8 8 0 100 8 8 8 0 000-8z"
+                />
+              </svg>
+              获取中…
+            </>
+          ) : cooldownSec > 0 ? (
+            `等待 ${cooldownSec}s`
+          ) : (
+            <>
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              立即获取
+            </>
+          )}
+        </button>
       </div>
+
+      {runMessage && (
+        <div className="mb-4 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400">
+          {runMessage}
+        </div>
+      )}
+      {runError && (
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+          {runError}
+        </div>
+      )}
 
       <div className="mb-6 flex gap-3">
         <div className="flex-1 rounded-lg border border-green-500/30 bg-green-500/5 p-3">
@@ -274,7 +406,9 @@ export default function SignalsPage() {
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-8 text-center">
           <div className="text-zinc-500">暂无信号提醒</div>
           <p className="mt-2 text-xs text-zinc-600">
-            重点关注的股票会在每天美股开盘前自动获取技术分析信号
+            重点关注的股票会在每天美股开盘前自动获取技术分析信号。
+            <br />
+            没等到可以点右上角「立即获取」手动跑一次。
           </p>
         </div>
       ) : (
