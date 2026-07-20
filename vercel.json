@@ -7,10 +7,6 @@
     {
       "path": "/api/cron/signals",
       "schedule": "0 14 * * 1-5"
-    },
-    {
-      "path": "/api/cron/signals-health",
-      "schedule": "*/2 * * * *"
     }
   ]
 }
