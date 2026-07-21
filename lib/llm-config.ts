@@ -91,16 +91,36 @@ function readEnvKeys(): Record<string, string> {
     const v = process.env[alias];
     if (v && v.trim() && !out[providerId]) out[providerId] = v.trim();
   }
-  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() || process.env.LLM_API_KEY_OPENROUTER_FREE?.trim();
+  // OpenRouter 系列共用同一 Key
+  // 统一环境变量 LLM_API_KEY_OPENROUTER，兼容 OPENROUTER_API_KEY / LLM_API_KEY_OPENROUTER_FREE
+  const openRouterKey =
+    process.env.LLM_API_KEY_OPENROUTER?.trim() ||
+    process.env.OPENROUTER_API_KEY?.trim() ||
+    process.env.LLM_API_KEY_OPENROUTER_FREE?.trim();
   if (openRouterKey) {
     for (const id of OPENROUTER_PROVIDER_IDS) {
       if (!out[id]) out[id] = openRouterKey;
     }
   }
-  const geminiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim();
+  // Gemini 系列共用同一 Key
+  // 统一环境变量 LLM_API_KEY_GEMINI，兼容 GEMINI_API_KEY / GOOGLE_API_KEY
+  const geminiKey =
+    process.env.LLM_API_KEY_GEMINI?.trim() ||
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim();
   if (geminiKey) {
     for (const id of GEMINI_PROVIDER_IDS) {
       if (!out[id]) out[id] = geminiKey;
+    }
+  }
+  // Groq 系列共用同一 Key
+  // 统一环境变量 LLM_API_KEY_GROQ，兼容 GROQ_API_KEY
+  const groqKey =
+    process.env.LLM_API_KEY_GROQ?.trim() ||
+    process.env.GROQ_API_KEY?.trim();
+  if (groqKey) {
+    for (const id of GROQ_PROVIDER_IDS) {
+      if (!out[id]) out[id] = groqKey;
     }
   }
   return out;
