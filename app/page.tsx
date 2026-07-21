@@ -628,15 +628,16 @@ function FavoriteCard({
     return () => { cancelled = true; };
   }, [item.ticker]);
 
-  // 美股：snapshot 缺失或 > 24h 时触发一次懒刷新（服务端会再次 5 分钟去重）
+  // 美股 + A 股：snapshot 缺失或 > 24h 时触发懒刷新
+  // 美股刷新 TradingView 技术信号，A 股刷新同花顺筹码状态
   useEffect(() => {
-    if (!isUS || !onRequestRefreshSnapshot) return;
+    if (!onRequestRefreshSnapshot) return;
     const stale =
       !signalSnapshot || Date.now() - signalSnapshot.fetchedAt > SNAPSHOT_STALE_MS;
     if (stale) {
       onRequestRefreshSnapshot(item.ticker);
     }
-  }, [isUS, signalSnapshot, onRequestRefreshSnapshot, item.ticker]);
+  }, [signalSnapshot, onRequestRefreshSnapshot, item.ticker]);
 
   return (
     <div
@@ -3629,7 +3630,7 @@ export default function Home() {
 
   /**
    * 懒刷新：snapshot 缺失或 > 24h 时调用 /api/technical-snapshots/refresh
-   * - 仅美股（非美股服务端 400，前端跳过）
+   * - 美股刷新 TradingView 技术信号，A 股刷新同花顺筹码状态
    * - 同 ticker 5 分钟内只能请求一次（ref 节流）
    * - 服务端也会做 5 分钟内的去重保护
    */
