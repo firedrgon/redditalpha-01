@@ -31,12 +31,13 @@
  *
  * 边界：
  *   - 非美股 / TV 拉取失败：写一条 neutral alert 但**不动 state**（用户能看到"今日已检查"）
+ *   - A 股：获取筹码状态写入 snapshot，写 neutral alert 不动 state
  *   - HOLD+BUY、OUT+SELL、任意+NEUTRAL 都不写 alert（避免噪音）
- *   - snapshot（高频读缓存）只在拉到真实信号时写
+ *   - snapshot（高频读缓存）只在拉到真实信号或筹码状态时写
  */
 
 import { getPrisma } from "@/lib/db/prisma";
-import { fetchTradingViewTechnicals, SIGNAL_LABELS } from "@/lib/technical";
+import { fetchTradingViewTechnicals, fetchChipSituation, SIGNAL_LABELS } from "@/lib/technical";
 import { detectMarket, type Market } from "@/lib/market";
 import { upsertTechnicalSnapshot } from "@/lib/db/technical-snapshot";
 import {
@@ -51,13 +52,15 @@ type PrismaClient = NonNullable<Awaited<ReturnType<typeof getPrisma>>>;
 export type PositionState = "OUT" | "HOLD";
 export type SignalClass = "BUY" | "SELL" | "NEUTRAL";
 
-/** 决策表的结果：进入 / 退出 / 持仓不动 / 观望不动 / 非美股 / 拉取失败 */
+/** 决策表的结果：进入 / 退出 / 持仓不动 / 观望不动 / 非美股 / A股筹码 / 拉取失败 */
 export type ProcessPhase =
   | "enter"
   | "exit"
   | "hold"
   | "stay_out"
   | "non_us"
+  | "cn_chip"
+  | "cn_chip_empty"
   | "fetch_empty"
   | "fetch_error";
 
@@ -163,7 +166,47 @@ export async function processStarredStock(
 ): Promise<ProcessResult> {
   const market: Market = detectMarket(ticker);
 
-  // 1) 非美股：写 neutral 占位，不动 state
+  // 1) A 股：获取筹码状态并写入 snapshot；写 neutral 占位 alert
+  if (market === "CN") {
+    let chipDesc: string | null = null;
+    try {
+      chipDesc = await fetchChipSituation(ticker);
+    } catch (err) {
+      console.error(`[signals-runner] A 股筹码获取失败: ${ticker}`, err);
+    }
+
+    if (chipDesc) {
+      // 筹码状态获取成功 → 写入 snapshot
+      await upsertTechnicalSnapshot({
+        ticker,
+        tickerName: name,
+        oscillators: "neutral",
+        movingAverages: "neutral",
+        overall: "neutral",
+        chipSituation: chipDesc,
+        price: null,
+      });
+      console.log(`[signals-runner] A 股筹码写入: ${ticker} -> ${chipDesc.slice(0, 40)}…`);
+    }
+
+    try {
+      await writeNeutralAlert(
+        prisma,
+        userId,
+        ticker,
+        name,
+        chipDesc
+          ? `A 股筹码状态: ${chipDesc.slice(0, 80)}；今日已检查`
+          : `A 股不支持 TradingView 周线技术信号，筹码数据未获取；今日已检查`
+      );
+    } catch (err) {
+      console.error(`[signals-runner] 写 A 股占位失败: ${ticker}`, err);
+    }
+
+    return { processed: false, skipped: true, phase: chipDesc ? "cn_chip" : "cn_chip_empty" };
+  }
+
+  // 2) 非美股 & 非 A 股：写 neutral 占位，不动 state
   if (market !== "US") {
     try {
       await writeNeutralAlert(
@@ -180,7 +223,7 @@ export async function processStarredStock(
     return { processed: false, skipped: true, phase: "non_us" };
   }
 
-  // 2) 美股：拉取 TV 信号
+  // 3) 美股：拉取 TV 信号
   let signals: TechnicalSignals | null = null;
   let fetchError: string | null = null;
   try {
@@ -212,7 +255,7 @@ export async function processStarredStock(
     };
   }
 
-  // 3) 应用状态机决策表
+  // 4) 应用状态机决策表
   const today = classifySignal(signals.overall);
   const state = await getCurrentState(prisma, userId, ticker);
   const phase = decide(state, today);
@@ -221,17 +264,18 @@ export async function processStarredStock(
     `[signals-runner] ${ticker} state=${state} today=${today} → ${phase}`
   );
 
-  // 4) 写 snapshot（高频读缓存，与 alert 独立；只要拉到信号就更新）
+  // 5) 写 snapshot（高频读缓存，与 alert 独立；只要拉到信号就更新）
   await upsertTechnicalSnapshot({
     ticker,
     tickerName: name,
     oscillators: signals.oscillators,
     movingAverages: signals.movingAverages,
     overall: signals.overall,
+    chipSituation: null, // 美股无筹码状态
     price: null,
   });
 
-  // 5) 根据 phase 决定是否写 alert
+  // 6) 根据 phase 决定是否写 alert
   if (phase === "enter" || phase === "exit") {
     const signalType: "buy" | "sell" = phase === "enter" ? "buy" : "sell";
     const actionLabel = phase === "enter" ? "建仓" : "平仓";

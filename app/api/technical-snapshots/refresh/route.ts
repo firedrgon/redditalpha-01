@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { refreshTechnicalSnapshot, getTechnicalSnapshot } from "@/lib/db/technical-snapshot";
+import { refreshTechnicalSnapshot, refreshChipSituationSnapshot, getTechnicalSnapshot } from "@/lib/db/technical-snapshot";
 import { detectMarket } from "@/lib/market";
 
 export const runtime = "nodejs";
@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
  * POST /api/technical-snapshots/refresh
  * Body: { ticker: "AAPL", tickerName?: "Apple", force?: boolean }
  *
- * 按需拉取最新 TradingView 信号并写入 snapshot。
- * 仅美股；非美股返回 400。
+ * 按需拉取最新信号并写入 snapshot：
+ * - 美股：TradingView 技术信号
+ * - A 股：同花顺筹码状态
  *
  * 用于：
  * 1. 客户端 Card 懒刷新（snapshot 缺失或 > 24h）
@@ -31,9 +32,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "缺少 ticker" }, { status: 400 });
   }
 
-  if (detectMarket(ticker) !== "US") {
+  const market = detectMarket(ticker);
+
+  // 仅支持美股和 A 股
+  if (market !== "US" && market !== "CN") {
     return NextResponse.json(
-      { error: "技术信号仅支持美股", market: detectMarket(ticker) },
+      { error: "技术信号仅支持美股，筹码状态仅支持 A 股", market },
       { status: 400 }
     );
   }
@@ -47,7 +51,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const row = await refreshTechnicalSnapshot(ticker, body.tickerName);
+    const row = market === "CN"
+      ? await refreshChipSituationSnapshot(ticker, body.tickerName)
+      : await refreshTechnicalSnapshot(ticker, body.tickerName);
+
     if (!row) {
       return NextResponse.json(
         { snapshot: null, refreshed: false, reason: "fetch_failed" },

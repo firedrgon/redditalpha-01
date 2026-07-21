@@ -1,11 +1,8 @@
 /**
- * 美股技术指标（TradingView Scanner API）
+ * 美股技术指标（TradingView Scanner API） + A 股筹码状态（同花顺）
  *
- * 直接使用 TradingView 的 Recommend 值（Recommend.Other / Recommend.MA /
- * Recommend.All），确保与 TradingView 网站显示的信号完全一致。
- * 这些值由 TradingView 官方计算，范围为 -1（强烈卖出）到 1（强烈买入）。
- *
- * 仅用于美股，A 股不调用。
+ * TradingView 部分：仅用于美股，A 股不调用。
+ * 同花顺筹码状态：仅用于 A 股，从 chip_situation.desc 获取。
  */
 
 /* ------------------------------------------------------------------ */
@@ -164,4 +161,86 @@ export async function fetchTradingViewTechnicals(
     console.error(`[technical] 失败 (${Date.now() - startTime}ms):`, err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* A 股筹码状态（同花顺 API）                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 从同花顺获取 A 股筹码状态描述。
+ *
+ * API: https://basic.10jqka.com.cn/api/stockph/research/{code}/stock/
+ * 取 data.user_action.chip_situation.desc，去除 HTML 标签后返回纯文本。
+ *
+ * @param ticker A 股 ticker，如 "600276.SH"
+ * @returns 筹码状态纯文本描述（如 "当前个股近120天的平均成本为54.45元…筹码状态高度密集…可继续关注。"），失败返回 null
+ */
+export async function fetchChipSituation(ticker: string): Promise<string | null> {
+  const code = ticker.match(/^(\d{6})\.(SH|SZ)$/)?.[1];
+  if (!code) {
+    console.warn(`[chipSituation] 无法提取股票代码: ${ticker}`);
+    return null;
+  }
+
+  const startTime = Date.now();
+  try {
+    const url = `https://basic.10jqka.com.cn/api/stockph/research/${code}/stock/`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        Referer: "https://basic.10jqka.com.cn/",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      console.warn(`[chipSituation] 同花顺响应非 200: ${res.status} (${ticker})`);
+      return null;
+    }
+
+    const json = await res.json() as {
+      status_code?: number;
+      data?: {
+        user_action?: {
+          chip_situation?: {
+            desc?: string;
+          };
+        };
+      };
+    };
+
+    const desc = json?.data?.user_action?.chip_situation?.desc;
+    if (!desc) {
+      console.warn(`[chipSituation] 无筹码数据: ${ticker}`);
+      return null;
+    }
+
+    // 去除 HTML 标签，保留纯文本
+    const plainText = desc
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    console.log(`[chipSituation] 成功 (${Date.now() - startTime}ms): ${ticker} -> ${plainText.slice(0, 60)}…`);
+    return plainText;
+  } catch (err) {
+    console.error(`[chipSituation] 失败 (${Date.now() - startTime}ms): ${ticker}`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * 从筹码状态纯文本描述中提取状态关键词。
+ *
+ * desc 格式示例: "…筹码状态高度密集，可继续关注。"
+ * 匹配 "筹码状态" 后紧跟的关键词（如 高度密集、较为分散、分散 等）。
+ *
+ * @returns 关键词字符串，如 "高度密集"；未匹配到返回 null
+ */
+export function extractChipKeyword(desc: string | null): string | null {
+  if (!desc) return null;
+  const m = desc.match(/筹码状态[，,\s]*([^\s，,。.]+)/);
+  return m?.[1] ?? null;
 }

@@ -211,6 +211,8 @@ model TechnicalSignalSnapshot {
   oscillators    String   @db.VarChar(20)
   movingAverages String   @db.VarChar(20)
   overall        String   @db.VarChar(20)
+  /// A 股筹码状态描述（来自同花顺 chip_situation.desc），美股为 null
+  chipSituation  String?
   price          Float?
   fetchedAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

@@ -192,6 +192,8 @@ interface TechnicalSnapshotRow {
   oscillators: Signal;
   movingAverages: Signal;
   overall: Signal;
+  /** A 股筹码状态描述（来自同花顺 chip_situation.desc），美股为 null */
+  chipSituation: string | null;
   price: number | null;
   fetchedAt: number;
   updatedAt: number;
@@ -469,10 +471,61 @@ function SignalBadge({
     return () => clearInterval(id);
   }, [snapshot]);
 
+  // ── A 股：显示筹码状态 ──
   if (!isUS) {
+    const chip = snapshot?.chipSituation;
+    if (!chip) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-600">
+          信号不支持
+        </span>
+      );
+    }
+    // 从纯文本提取关键词（后端已去 HTML 标签）
+    // 格式示例："当前个股近120天的平均成本为54.45元…筹码状态高度密集…可继续关注。"
+    const keywordMatch = chip.match(/筹码状态[，,\s]*([^\s，,。.]+)/);
+    const keyword = keywordMatch?.[1]?.trim() || chip.trim().slice(0, 8);
+    // 筹码密集 → 红（A股涨色），分散 → 绿（A股跌色）
+    const isDense = /密集|集中|锁仓/.test(keyword);
+    const isLoose = /分散|发散|松动/.test(keyword);
+    const chipColorClass = isDense
+      ? "bg-red-500/10 text-red-400"
+      : isLoose
+        ? "bg-green-500/10 text-green-400"
+        : "bg-zinc-500/15 text-zinc-400";
+    const chipDotColor = isDense ? "text-red-400" : isLoose ? "text-green-400" : "text-zinc-400";
+    const minutesAgo = snapshot
+      ? Math.max(0, Math.floor((now - snapshot.fetchedAt) / 60000))
+      : 0;
+    const timeLabel =
+      minutesAgo < 1
+        ? "刚刚"
+        : minutesAgo < 60
+          ? `${minutesAgo} 分钟前`
+          : minutesAgo < 60 * 24
+            ? `${Math.floor(minutesAgo / 60)} 小时前`
+            : `${Math.floor(minutesAgo / 60 / 24)} 天前`;
+
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-600">
-        信号不支持
+      <span
+        className={`group/chip relative inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${chipColorClass}`}
+        title="筹码状态"
+      >
+        <span aria-hidden className={chipDotColor}>◆</span>
+        <span>筹码 {keyword}</span>
+        {/* hover 展开完整描述 */}
+        <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-52 rounded-md border border-zinc-700 bg-zinc-950 p-2 text-[10px] text-zinc-300 shadow-xl group-hover/chip:block">
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">筹码状态</span>
+            <span className={chipDotColor}>{keyword}</span>
+          </div>
+          <div className="mt-1 text-[9px] text-zinc-400 leading-relaxed">
+            {chip}
+          </div>
+          <div className="mt-1.5 border-t border-zinc-800 pt-1 text-[9px] text-zinc-600">
+            {timeLabel}更新 · 同花顺
+          </div>
+        </span>
       </span>
     );
   }

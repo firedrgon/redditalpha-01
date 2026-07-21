@@ -10,7 +10,7 @@
  */
 
 import { getPrisma } from "./prisma";
-import { fetchTradingViewTechnicals, type Signal, type TechnicalSignals } from "@/lib/technical";
+import { fetchTradingViewTechnicals, fetchChipSituation, type Signal, type TechnicalSignals } from "@/lib/technical";
 import { detectMarket } from "@/lib/market";
 
 export interface TechnicalSignalSnapshotRow {
@@ -19,6 +19,8 @@ export interface TechnicalSignalSnapshotRow {
   oscillators: Signal;
   movingAverages: Signal;
   overall: Signal;
+  /** A 股筹码状态描述（来自同花顺 chip_situation.desc），美股为 null */
+  chipSituation: string | null;
   price: number | null;
   fetchedAt: number;
   updatedAt: number;
@@ -33,6 +35,7 @@ function toRow(r: {
   oscillators: string;
   movingAverages: string;
   overall: string;
+  chipSituation: string | null;
   price: number | null;
   fetchedAt: Date;
   updatedAt: Date;
@@ -43,6 +46,7 @@ function toRow(r: {
     oscillators: r.oscillators as Signal,
     movingAverages: r.movingAverages as Signal,
     overall: r.overall as Signal,
+    chipSituation: r.chipSituation,
     price: r.price,
     fetchedAt: r.fetchedAt.getTime(),
     updatedAt: r.updatedAt.getTime(),
@@ -54,6 +58,8 @@ export interface UpsertSignalData {
   oscillators: Signal;
   movingAverages: Signal;
   overall: Signal;
+  /** A 股筹码状态描述，美股为 null */
+  chipSituation?: string | null;
   price?: number | null;
   /** 显式指定 fetchedAt（默认 now） */
   fetchedAt?: Date;
@@ -79,6 +85,7 @@ export async function upsertTechnicalSnapshot(
       oscillators: data.oscillators,
       movingAverages: data.movingAverages,
       overall: data.overall,
+      chipSituation: data.chipSituation ?? null,
       price: data.price ?? null,
       fetchedAt: fetchedAt.getTime(),
       updatedAt: now.getTime(),
@@ -95,6 +102,7 @@ export async function upsertTechnicalSnapshot(
       oscillators: data.oscillators,
       movingAverages: data.movingAverages,
       overall: data.overall,
+      chipSituation: data.chipSituation ?? null,
       price: data.price ?? null,
       fetchedAt,
     },
@@ -103,6 +111,7 @@ export async function upsertTechnicalSnapshot(
       oscillators: data.oscillators,
       movingAverages: data.movingAverages,
       overall: data.overall,
+      chipSituation: data.chipSituation ?? null,
       price: data.price ?? null,
       fetchedAt,
     },
@@ -171,7 +180,37 @@ export async function refreshTechnicalSnapshot(
     oscillators: signals.oscillators,
     movingAverages: signals.movingAverages,
     overall: signals.overall,
+    chipSituation: null, // 美股无筹码状态
     price: null, // TradingView scanner 不返回收盘价，保持 null；如需价格再单独拉
+  });
+}
+
+/**
+ * 从同花顺获取 A 股筹码状态并写入 snapshot。
+ * - 仅 A 股；非 A 股直接跳过，返回 null
+ * - 筹码状态拉取失败时返回 null
+ * - 用于 cron 任务与按需懒刷新
+ */
+export async function refreshChipSituationSnapshot(
+  ticker: string,
+  tickerName?: string | null
+): Promise<TechnicalSignalSnapshotRow | null> {
+  const upper = ticker.toUpperCase();
+  const market = detectMarket(upper);
+  if (market !== "CN") return null;
+
+  const chipDesc = await fetchChipSituation(upper);
+  if (!chipDesc) return null;
+
+  // A 股没有 TradingView 信号，用 neutral 占位；筹码状态是核心信息
+  return upsertTechnicalSnapshot({
+    ticker: upper,
+    tickerName: tickerName ?? null,
+    oscillators: "neutral",
+    movingAverages: "neutral",
+    overall: "neutral",
+    chipSituation: chipDesc,
+    price: null,
   });
 }
 
