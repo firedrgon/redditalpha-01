@@ -37,8 +37,6 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   // API 请求一律走网络，绝不经缓存读写。
-  // 否则「重新生成 AI 分析」后，再次点开会命中旧的分析结果缓存，
-  // 导致页面数据看起来没有变化。
   if (url.pathname.startsWith("/api/")) {
     return;
   }
@@ -54,9 +52,7 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match(request).then(
-            (cached) => cached || caches.match(OFFLINE_URL)
-          );
+          return caches.match(request).then((cached) => cached || caches.match(OFFLINE_URL));
         })
     );
     return;
@@ -67,10 +63,7 @@ self.addEventListener("fetch", (event) => {
       if (cached) return cached;
       return fetch(request)
         .then((response) => {
-          if (
-            response.status === 200 &&
-            (response.type === "basic" || response.type === "cors")
-          ) {
+          if (response.status === 200 && (response.type === "basic" || response.type === "cors")) {
             const copy = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, copy);
@@ -81,7 +74,7 @@ self.addEventListener("fetch", (event) => {
         .catch(() => cached);
     })
   );
-}
+});
 
 // ── Web Push ──
 self.addEventListener("push", (event) => {
@@ -92,7 +85,7 @@ self.addEventListener("push", (event) => {
       payload = { ...payload, ...data };
     }
   } catch (e) {
-    // 忽略解析错误，使用默认
+    // 解析失败则使用默认文案
   }
 
   const options = {
@@ -104,9 +97,7 @@ self.addEventListener("push", (event) => {
     renotify: true,
   };
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title, options)
-  );
+  event.waitUntil(self.registration.showNotification(payload.title, options));
 });
 
 self.addEventListener("notificationclick", (event) => {
