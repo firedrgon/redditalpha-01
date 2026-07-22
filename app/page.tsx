@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } fro
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { signIn, signOut, useSession } from "next-auth/react";
+import NotificationBell from "@/app/components/NotificationBell";
 
 const SUBREDDITS = [
   { id: "wallstreetbets", label: "WSB", full: "r/WallStreetBets" },
@@ -4187,6 +4188,7 @@ export default function Home() {
                   <span className="hidden sm:inline">设置</span>
                 </button>
               )}
+              <NotificationBell />
               {isAuthenticated ? (
                 <div className="hidden lg:flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300">
                   <span className="max-w-44 truncate">{session?.user?.email || session?.user?.name || "已登录"}</span>

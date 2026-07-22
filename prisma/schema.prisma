@@ -75,12 +75,18 @@ model User {
   emailVerified DateTime?
   image         String?
   isAdmin       Boolean        @default(false)
+  /// 通知偏好：是否通过邮件推送信号提醒
+  emailNotify   Boolean        @default(false)
+  /// 通知偏好：是否通过 Web Push 推送信号提醒
+  webpushNotify Boolean        @default(false)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   accounts      Account[]
   favorites     Favorite[]
   sessions      Session[]
   signalAlerts  SignalAlert[]
+  notifications Notification[]
+  pushSubscriptions PushSubscription[]
 }
 
 model Account {
@@ -237,4 +243,40 @@ model CronRun {
   errorMessage String?  @db.Text
 
   @@index([jobName, startedAt])
+}
+
+/// 站内通知（信号提醒）。由 signals-runner 在产生 buy/sell alert 时写入。
+/// 前端通知中心读取本表渲染铃铛角标与通知列表。
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  /// 通知类型：signal_buy | signal_sell
+  type       String   @db.VarChar(20)
+  ticker     String
+  tickerName String?
+  title      String
+  body       String?
+  /// 点击通知跳转的站内链接
+  link       String?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+}
+
+/// Web Push 订阅（每个浏览器/设备一条）。VAPID 推送时按 userId 取出全部订阅逐一发送。
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  /// JSON: { p256dh, auth }
+  keys      String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

@@ -44,6 +44,7 @@ import { getPrisma } from "@/lib/db/prisma";
 import { fetchTradingViewTechnicals, fetchCNTradingViewTechnicals, fetchChipSituation, SIGNAL_LABELS } from "@/lib/technical";
 import { detectMarket, type Market } from "@/lib/market";
 import { upsertTechnicalSnapshot } from "@/lib/db/technical-snapshot";
+import { createSignalNotification } from "@/lib/notify";
 import {
   startCronRun,
   finishCronRun,
@@ -160,6 +161,69 @@ async function writeNeutralAlert(
 }
 
 /**
+ * 写 buy/sell alert（同时创建站内通知 + 投递邮件/Web Push）。
+ * 单一出口，美股与 A 股共用，保证通知逻辑一致。
+ * 返回 ok=false 表示写入失败（调用方据此决定是否计入 error）。
+ */
+async function writeSignalAlertAndNotify(
+  prisma: PrismaClient,
+  args: {
+    userId: string;
+    ticker: string;
+    name: string | null;
+    signalType: "buy" | "sell";
+    overall: string;
+    oscillators: string;
+    movingAverages: string;
+    chipDesc?: string | null;
+    state: PositionState;
+    phase: "enter" | "exit";
+  }
+): Promise<{ ok: boolean; error?: string }> {
+  const { userId, ticker, name, signalType, overall, oscillators, movingAverages, chipDesc, state, phase } = args;
+  const actionLabel = phase === "enter" ? "建仓" : "平仓";
+  const note =
+    `${actionLabel}信号（${state} → ${phase === "enter" ? "HOLD" : "OUT"}）; ` +
+    buildAlertNote({ overall, oscillators, movingAverages } as TechnicalSignals) +
+    (chipDesc ? `; 筹码状态: ${chipDesc.slice(0, 60)}` : "");
+
+  try {
+    await prisma.signalAlert.create({
+      data: {
+        userId,
+        ticker,
+        tickerName: name || undefined,
+        signalType,
+        overallSignal: overall,
+        oscillators,
+        movingAverages,
+        price: null,
+        note,
+      },
+    });
+    // 站内通知 + 外部投递（异常内部消化）
+    await createSignalNotification(prisma, {
+      userId,
+      ticker,
+      tickerName: name,
+      signalType,
+      overall,
+      oscillators,
+      movingAverages,
+      chipDesc,
+      state,
+      phase,
+    });
+    console.log(`[signals-runner] ${ticker} ${actionLabel} alert+通知写入, signal=${overall}`);
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[signals-runner] 写 ${actionLabel} alert/通知失败: ${ticker}`, err);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
  * 处理单个收藏（美股技术信号 / A 股筹码状态）
  */
 export async function processStarredStock(
@@ -234,37 +298,26 @@ export async function processStarredStock(
       `[signals-runner] A股 ${ticker} state=${state} today=${today} → ${phase}`
     );
 
-    // 建仓 / 平仓：写 buy/sell alert（与美股一致），note 附筹码状态
+    // 建仓 / 平仓：写 buy/sell alert + 通知（与美股一致），note 附筹码状态
     if (phase === "enter" || phase === "exit") {
       const signalType: "buy" | "sell" = phase === "enter" ? "buy" : "sell";
-      const actionLabel = phase === "enter" ? "建仓" : "平仓";
-      const note = `${actionLabel}信号（${state} → ${
-        phase === "enter" ? "HOLD" : "OUT"
-      }）; ${buildAlertNote(cntv)}${chipDesc ? `; 筹码状态: ${chipDesc.slice(0, 60)}` : ""}`;
-      try {
-        await prisma.signalAlert.create({
-          data: {
-            userId,
-            ticker,
-            tickerName: name || undefined,
-            signalType,
-            overallSignal: cntv.overall,
-            oscillators: cntv.oscillators,
-            movingAverages: cntv.movingAverages,
-            price: null,
-            note,
-          },
-        });
-        console.log(
-          `[signals-runner] A股 ${ticker} ${actionLabel} alert 写入, signal=${cntv.overall}`
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[signals-runner] 写 A股 ${actionLabel} alert 失败: ${ticker}`, err);
+      const r = await writeSignalAlertAndNotify(prisma, {
+        userId,
+        ticker,
+        name,
+        signalType,
+        overall: cntv.overall,
+        oscillators: cntv.oscillators,
+        movingAverages: cntv.movingAverages,
+        chipDesc,
+        state,
+        phase,
+      });
+      if (!r.ok) {
         return {
           processed: false,
           skipped: true,
-          error: msg,
+          error: r.error,
           phase: "fetch_error",
           state,
           today,
@@ -355,37 +408,26 @@ export async function processStarredStock(
     price: null,
   });
 
-  // 6) 根据 phase 决定是否写 alert
+  // 6) 根据 phase 决定是否写 alert + 通知
   if (phase === "enter" || phase === "exit") {
     const signalType: "buy" | "sell" = phase === "enter" ? "buy" : "sell";
-    const actionLabel = phase === "enter" ? "建仓" : "平仓";
-    const note = `${actionLabel}信号（${state} → ${
-      phase === "enter" ? "HOLD" : "OUT"
-    }）; ${buildAlertNote(signals)}`;
-    try {
-      await prisma.signalAlert.create({
-        data: {
-          userId,
-          ticker,
-          tickerName: name || undefined,
-          signalType,
-          overallSignal: signals.overall,
-          oscillators: signals.oscillators,
-          movingAverages: signals.movingAverages,
-          price: signals.overall === "neutral" ? null : undefined,
-          note,
-        },
-      });
-      console.log(
-        `[signals-runner] ${ticker} ${actionLabel} alert 写入, signal=${signals.overall}`
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[signals-runner] 写 ${actionLabel} alert 失败: ${ticker}`, err);
+    const r = await writeSignalAlertAndNotify(prisma, {
+      userId,
+      ticker,
+      name,
+      signalType,
+      overall: signals.overall,
+      oscillators: signals.oscillators,
+      movingAverages: signals.movingAverages,
+      chipDesc: null,
+      state,
+      phase,
+    });
+    if (!r.ok) {
       return {
         processed: false,
         skipped: true,
-        error: msg,
+        error: r.error,
         phase: "fetch_error",
         state,
         today,
