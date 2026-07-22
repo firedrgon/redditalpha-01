@@ -12,6 +12,9 @@
 import { NextResponse } from "next/server";
 import { refreshOpenRouterModels, refreshGroqModels, refreshGeminiModels } from "@/lib/llm";
 import { requireAdmin } from "@/lib/auth-guards";
+import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
+
+const JOB_NAME = "refresh-llm-models";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,6 +35,7 @@ async function runRefresh() {
   const { response } = await requireAdmin();
   if (response) return response;
 
+  const runId = await startCronRun({ jobName: JOB_NAME });
   const now = Date.now();
   const errors: string[] = [];
 
@@ -73,8 +77,19 @@ async function runRefresh() {
     errors.push(`Gemini: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  const ok = errors.length === 0;
+  await finishCronRun(runId, {
+    status: ok ? "success" : "error",
+    total: 3,
+    processed: 3 - errors.length,
+    skipped: 0,
+    errorCount: errors.length,
+    errors: errors.map((e) => ({ ticker: "-", error: e })),
+    errorMessage: ok ? undefined : errors.join("; "),
+  });
+
   return NextResponse.json({
-    ok: errors.length === 0,
+    ok,
     updatedAt: now,
     errors,
     summary: {

@@ -177,3 +177,17 @@ export async function getLatestCronRun(
   });
   return row ? toRow(row) : null;
 }
+
+/**
+ * 列出所有 job 的最近 N 条执行历史（倒序）。
+ * 用于 /admin 监控页（不按 jobName 过滤）。
+ */
+export async function listAllCronRuns(limit = 50): Promise<CronRunRow[]> {
+  const prisma = getPrisma();
+  if (!prisma) return [];
+  const rows = await prisma.cronRun.findMany({
+    orderBy: { startedAt: "desc" },
+    take: limit,
+  });
+  return rows.map(toRow);
+}
