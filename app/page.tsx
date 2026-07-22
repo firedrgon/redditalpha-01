@@ -199,8 +199,48 @@ interface TechnicalSnapshotRow {
   updatedAt: number;
 }
 
+/** 轻量行情（来自 /api/quote，美股 Yahoo / A股 东方财富） */
+interface Quote {
+  ticker: string;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  currency: string;
+  name?: string | null;
+  market: "US" | "CN" | "HK" | "UNKNOWN";
+  ok: boolean;
+}
+
 // 24h 之内的 snapshot 视为「新鲜」不需要重新拉取
 const SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
+
+// 行情展示：中国习惯 涨=红 跌=绿
+function quoteColorClass(q: Quote | undefined): string {
+  if (!q || q.changePercent == null) return "text-zinc-400";
+  return q.changePercent >= 0 ? "text-red-400" : "text-green-400";
+}
+function formatQuotePrice(q: Quote | undefined): string {
+  if (!q || q.price == null) return "—";
+  const sym = q.currency === "CNY" ? "¥" : "$";
+  return `${sym}${q.price.toFixed(2)}`;
+}
+function formatQuoteChange(q: Quote | undefined): string {
+  if (!q || q.changePercent == null) return "";
+  const sign = q.changePercent >= 0 ? "+" : "";
+  return `${sign}${q.changePercent.toFixed(2)}%`;
+}
+/** 行情迷你展示（价格 + 涨跌幅），无数据时返回 null */
+function QuoteMini({ q }: { q?: Quote }) {
+  if (!q || !q.ok || q.price == null) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs">
+      <span className="font-mono text-zinc-200">{formatQuotePrice(q)}</span>
+      <span className={`font-mono ${quoteColorClass(q)}`}>
+        {formatQuoteChange(q)}
+      </span>
+    </span>
+  );
+}
 
 // ============================================================
 // LLM Provider 类型
@@ -363,12 +403,14 @@ function TickerCard({
   subreddit,
   isFavorite,
   onToggleFavorite,
+  quote,
 }: {
   ticker: Ticker;
   maxCount: number;
   subreddit: string;
   isFavorite: boolean;
   onToggleFavorite: (ticker: Ticker) => void;
+  quote?: Quote;
 }) {
   const pct = maxCount > 0 ? (ticker.countPast24h / maxCount) * 100 : 0;
   const t = ticker.ticker;
@@ -385,6 +427,7 @@ function TickerCard({
             {ticker.name && (
               <span className="text-xs text-zinc-400">{ticker.name}</span>
             )}
+            <QuoteMini q={quote} />
           </div>
           <span className="text-sm font-mono text-orange-400 font-semibold">
             {ticker.countPast24h.toLocaleString()}
@@ -597,6 +640,7 @@ function FavoriteCard({
   onToggleStar,
   signalSnapshot,
   onRequestRefreshSnapshot,
+  quote,
 }: {
   item: FavoriteItem;
   onRemove: (ticker: string) => void;
@@ -605,6 +649,7 @@ function FavoriteCard({
   onToggleStar: (ticker: string, starred: boolean) => void;
   signalSnapshot?: TechnicalSnapshotRow;
   onRequestRefreshSnapshot?: (ticker: string) => void;
+  quote?: Quote;
 }) {
   // A 股标题跳百度股市通，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
@@ -691,12 +736,17 @@ function FavoriteCard({
               )}
               <SignalBadge snapshot={signalSnapshot} isUS={isUS} />
             </div>
-            {item.name && (
-              <div className="mt-0.5 text-sm text-zinc-400 truncate">{item.name}</div>
-            )}
-            <div className="mt-1 text-xs text-zinc-500">
-              收藏于 {new Date(item.addedAt).toLocaleDateString("zh-CN")}
-            </div>
+              {item.name && (
+                <div className="mt-0.5 text-sm text-zinc-400 truncate">{item.name}</div>
+              )}
+              {quote?.ok && quote.price != null && (
+                <div className="mt-0.5">
+                  <QuoteMini q={quote} />
+                </div>
+              )}
+              <div className="mt-1 text-xs text-zinc-500">
+                收藏于 {new Date(item.addedAt).toLocaleDateString("zh-CN")}
+              </div>
           </a>
         </div>
       </div>
@@ -3557,10 +3607,32 @@ export default function Home() {
   const [signalSnapshots, setSignalSnapshots] = useState<
     Record<string, TechnicalSnapshotRow>
   >({});
+  // 轻量行情（价格 + 涨跌幅），来自 /api/quote
+  const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   // 正在刷新的 ticker（用于 UI 节流，避免同一 ticker 重复请求）
   const refreshingRef = useRef<Set<string>>(new Set());
   const isAuthenticated = sessionStatus === "authenticated";
   const isAdmin = !!session?.user?.isAdmin;
+
+  // 批量拉取行情（合并进 quotes，不覆盖已有）
+  const loadQuotes = useCallback(async (tickers: string[]) => {
+    const tk = Array.from(
+      new Set(tickers.map((t) => t.trim().toUpperCase()))
+    ).filter(Boolean);
+    if (tk.length === 0) return;
+    try {
+      const res = await fetch(
+        `/api/quote?tickers=${encodeURIComponent(tk.join(","))}`
+      );
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.quotes) {
+        setQuotes((prev) => ({ ...prev, ...json.quotes }));
+      }
+    } catch (err) {
+      console.warn("[quote] 加载失败:", err);
+    }
+  }, []);
 
   const promptSignIn = useCallback(() => {
     setShowAuth(true);
@@ -3627,6 +3699,19 @@ export default function Home() {
       cancelled = true;
     };
   }, [favorites]);
+
+  // 加载行情：每次收藏变化时批量取一次（合并进 quotes）
+  useEffect(() => {
+    if (favorites.length === 0) return;
+    loadQuotes(favorites.map((f) => f.ticker));
+  }, [favorites, loadQuotes]);
+
+  // 加载行情：subreddit 列表里的 ticker（随数据刷新 / 切换板块更新）
+  useEffect(() => {
+    const tk = (data[activeSub]?.tickers || []).map((t) => t.ticker);
+    if (tk.length === 0) return;
+    loadQuotes(tk);
+  }, [data, activeSub, loadQuotes]);
 
   /**
    * 懒刷新：snapshot 缺失或 > 24h 时调用 /api/technical-snapshots/refresh
@@ -4228,6 +4313,7 @@ export default function Home() {
                     subreddit={activeSub}
                     isFavorite={isFavorite(ticker.ticker)}
                     onToggleFavorite={handleToggleFromCard}
+                    quote={quotes[ticker.ticker.toUpperCase()]}
                   />
                 ))}
               </div>
@@ -4447,6 +4533,7 @@ export default function Home() {
                           onToggleStar={toggleStarFavorite}
                           signalSnapshot={signalSnapshots[item.ticker.toUpperCase()]}
                           onRequestRefreshSnapshot={requestRefreshSnapshot}
+                          quote={quotes[item.ticker.toUpperCase()]}
                         />
                       ))}
                   </div>
