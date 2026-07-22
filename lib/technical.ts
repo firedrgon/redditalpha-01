@@ -1,8 +1,10 @@
 /**
- * 美股技术指标（TradingView Scanner API） + A 股筹码状态（同花顺）
+ * 美股技术指标（TradingView Scanner API） + A 股技术指标（TradingView 中国区 Scanner）+ A 股筹码状态（同花顺）
  *
- * TradingView 部分：仅用于美股，A 股不调用。
- * 同花顺筹码状态：仅用于 A 股，从 chip_situation.desc 获取。
+ * TradingView 美股：scanner.tradingview.com/america，symbol 前缀 NASDAQ:/NYSE:
+ * TradingView A 股：scanner.tradingview.com/china，symbol 前缀 SSE:/SZSE:
+ *   - 两者返回完全相同的 Recommend.All/MA/Other 周线值，映射逻辑共用，A 股与美股信号语义一致。
+ * 同花顺筹码状态：仅用于 A 股，从 chip_situation.desc 获取，作为辅助指标展示。
  */
 
 /* ------------------------------------------------------------------ */
@@ -57,6 +59,14 @@ function toTVTickers(ticker: string): string[] {
   return [`NASDAQ:${ticker}`, `NYSE:${ticker}`];
 }
 
+/** A 股 ticker（600276.SH）→ TradingView 中国区 symbol：沪市 SSE:600276 / 深市 SZSE:000001 */
+function toCNTradingViewTickers(ticker: string): string[] {
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return [ticker];
+  const exchange = m[2] === "SZ" ? "SZSE" : "SSE";
+  return [`${exchange}:${m[1]}`];
+}
+
 /** 安全取数值 */
 function num(val: number | string | null | undefined): number | null {
   if (val == null || val === "") return null;
@@ -93,12 +103,34 @@ function recommendToSignal(val: number | null): Signal {
 export async function fetchTradingViewTechnicals(
   ticker: string
 ): Promise<TechnicalSignals | null> {
-  const tvTickers = toTVTickers(ticker);
+  return fetchTradingViewScan("america", toTVTickers(ticker));
+}
+
+/**
+ * 获取 A 股 TradingView 中国区技术信号（与美股完全同构，仅 scanner 分区与 symbol 前缀不同）。
+ *
+ * @param ticker A 股 ticker，如 "600276.SH"
+ * @returns 5 级技术信号；失败返回 null
+ */
+export async function fetchCNTradingViewTechnicals(
+  ticker: string
+): Promise<TechnicalSignals | null> {
+  return fetchTradingViewScan("china", toCNTradingViewTickers(ticker));
+}
+
+/**
+ * 共享核心：请求 TradingView scanner（america / china 等分区），
+ * 用官方 Recommend 周线值映射为 5 级信号。
+ */
+async function fetchTradingViewScan(
+  endpoint: string,
+  tvTickers: string[]
+): Promise<TechnicalSignals | null> {
   const startTime = Date.now();
 
   try {
-    console.log(`[technical] 请求 TradingView: ${tvTickers.join(", ")}`);
-    const res = await fetch("https://scanner.tradingview.com/america/scan", {
+    console.log(`[technical] 请求 TradingView(${endpoint}): ${tvTickers.join(", ")}`);
+    const res = await fetch(`https://scanner.tradingview.com/${endpoint}/scan`, {
       method: "POST",
       headers: {
         "User-Agent": UA,
@@ -114,7 +146,7 @@ export async function fetchTradingViewTechnicals(
     });
 
     if (!res.ok) {
-      console.warn(`[technical] TradingView 响应非 200: ${res.status}`);
+      console.warn(`[technical] TradingView(${endpoint}) 响应非 200: ${res.status}`);
       return null;
     }
 
@@ -124,7 +156,7 @@ export async function fetchTradingViewTechnicals(
 
     const row = json.data?.find((r) => r.d && r.d.length > 0);
     if (!row || !row.d) {
-      console.warn(`[technical] TradingView 返回空数据`);
+      console.warn(`[technical] TradingView(${endpoint}) 返回空数据`);
       return null;
     }
 
@@ -150,7 +182,7 @@ export async function fetchTradingViewTechnicals(
 
     const result = { oscillators, movingAverages, overall };
     console.log(
-      `[technical] 成功 (${Date.now() - startTime}ms): ` +
+      `[technical] 成功(${endpoint}) (${Date.now() - startTime}ms): ` +
       `价格=${price}, ` +
       `振荡=${oscillators}(raw=${v["Recommend.Other"]?.toFixed(4)}), ` +
       `均线=${movingAverages}(raw=${v["Recommend.MA"]?.toFixed(4)}), ` +
@@ -158,7 +190,7 @@ export async function fetchTradingViewTechnicals(
     );
     return result;
   } catch (err) {
-    console.error(`[technical] 失败 (${Date.now() - startTime}ms):`, err instanceof Error ? err.message : err);
+    console.error(`[technical] 失败(${endpoint}) (${Date.now() - startTime}ms):`, err instanceof Error ? err.message : err);
     return null;
   }
 }

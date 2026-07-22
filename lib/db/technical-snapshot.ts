@@ -10,7 +10,7 @@
  */
 
 import { getPrisma } from "./prisma";
-import { fetchTradingViewTechnicals, fetchChipSituation, type Signal, type TechnicalSignals } from "@/lib/technical";
+import { fetchTradingViewTechnicals, fetchCNTradingViewTechnicals, fetchChipSituation, type Signal, type TechnicalSignals } from "@/lib/technical";
 import { detectMarket } from "@/lib/market";
 
 export interface TechnicalSignalSnapshotRow {
@@ -186,29 +186,32 @@ export async function refreshTechnicalSnapshot(
 }
 
 /**
- * 从同花顺获取 A 股筹码状态并写入 snapshot。
+ * 重新从 TradingView 中国区拉取 A 股技术信号 + 同花顺筹码状态并写入 snapshot。
  * - 仅 A 股；非 A 股直接跳过，返回 null
- * - 筹码状态拉取失败时返回 null
+ * - 技术信号与筹码都拉取失败时返回 null（调用方应保留旧 snapshot）
  * - 用于 cron 任务与按需懒刷新
  */
-export async function refreshChipSituationSnapshot(
+export async function refreshCNTradingViewSnapshot(
   ticker: string,
   tickerName?: string | null
 ): Promise<TechnicalSignalSnapshotRow | null> {
   const upper = ticker.toUpperCase();
-  const market = detectMarket(upper);
-  if (market !== "CN") return null;
+  if (detectMarket(upper) !== "CN") return null;
 
-  const chipDesc = await fetchChipSituation(upper);
-  if (!chipDesc) return null;
+  const [cntv, chipDesc] = await Promise.all([
+    fetchCNTradingViewTechnicals(upper),
+    fetchChipSituation(upper),
+  ]);
 
-  // A 股没有 TradingView 信号，用 neutral 占位；筹码状态是核心信息
+  // 两者都失败才返回 null；任一项成功即可更新 snapshot
+  if (!cntv && !chipDesc) return null;
+
   return upsertTechnicalSnapshot({
     ticker: upper,
     tickerName: tickerName ?? null,
-    oscillators: "neutral",
-    movingAverages: "neutral",
-    overall: "neutral",
+    oscillators: cntv?.oscillators ?? "neutral",
+    movingAverages: cntv?.movingAverages ?? "neutral",
+    overall: cntv?.overall ?? "neutral",
     chipSituation: chipDesc,
     price: null,
   });

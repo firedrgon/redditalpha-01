@@ -32,14 +32,16 @@
  * 边界：
  *   - 非美股 / 非 A 股（港股/加密/ETF 等）：不支持信号与筹码状态，
  *     只写中性 snapshot（upsert，不无限增长），**不写 alert**（减少噪音）
- *   - A 股：获取筹码状态写入 snapshot，写 neutral alert 不动 state
+ *   - A 股：获取 TradingView 中国区技术信号 + 同花顺筹码状态，进入同一套状态机
+ *     （与美股一致，仅在建仓/平仓时写 buy/sell alert）；筹码状态写入 snapshot 辅助展示。
+ *     技术信号拉取失败（但筹码成功）：写中性 snapshot + 中性占位 alert。
  *   - TV 拉取失败：写一条 neutral alert 但**不动 state**（用户能看到"今日已检查"）
  *   - HOLD+BUY、OUT+SELL、任意+NEUTRAL 都不写 alert（避免噪音）
  *   - snapshot（高频读缓存）只在拉到真实信号或筹码状态时写
  */
 
 import { getPrisma } from "@/lib/db/prisma";
-import { fetchTradingViewTechnicals, fetchChipSituation, SIGNAL_LABELS } from "@/lib/technical";
+import { fetchTradingViewTechnicals, fetchCNTradingViewTechnicals, fetchChipSituation, SIGNAL_LABELS } from "@/lib/technical";
 import { detectMarket, type Market } from "@/lib/market";
 import { upsertTechnicalSnapshot } from "@/lib/db/technical-snapshot";
 import {
@@ -168,44 +170,116 @@ export async function processStarredStock(
 ): Promise<ProcessResult> {
   const market: Market = detectMarket(ticker);
 
-  // 1) A 股：获取筹码状态并写入 snapshot；写 neutral 占位 alert
+  // 1) A 股：获取 TradingView 中国区技术信号 + 同花顺筹码状态，进入同一套状态机
   if (market === "CN") {
+    let cntv: TechnicalSignals | null = null;
     let chipDesc: string | null = null;
+    try {
+      cntv = await fetchCNTradingViewTechnicals(ticker);
+    } catch (err) {
+      console.error(`[signals-runner] A 股 TradingView 信号获取失败: ${ticker}`, err);
+    }
     try {
       chipDesc = await fetchChipSituation(ticker);
     } catch (err) {
       console.error(`[signals-runner] A 股筹码获取失败: ${ticker}`, err);
     }
 
-    if (chipDesc) {
-      // 筹码状态获取成功 → 写入 snapshot
-      await upsertTechnicalSnapshot({
-        ticker,
-        tickerName: name,
-        oscillators: "neutral",
-        movingAverages: "neutral",
-        overall: "neutral",
-        chipSituation: chipDesc,
-        price: null,
-      });
-      console.log(`[signals-runner] A 股筹码写入: ${ticker} -> ${chipDesc.slice(0, 40)}…`);
+    // 技术信号拉取失败：写中性 snapshot（含筹码，若有）+ 中性占位 alert，不动 state
+    if (!cntv) {
+      if (chipDesc) {
+        await upsertTechnicalSnapshot({
+          ticker,
+          tickerName: name,
+          oscillators: "neutral",
+          movingAverages: "neutral",
+          overall: "neutral",
+          chipSituation: chipDesc,
+          price: null,
+        });
+        console.log(`[signals-runner] A 股筹码写入(信号缺失): ${ticker} -> ${chipDesc.slice(0, 40)}…`);
+      }
+      try {
+        await writeNeutralAlert(
+          prisma,
+          userId,
+          ticker,
+          name,
+          chipDesc
+            ? `A 股 TradingView 信号未获取；筹码状态: ${chipDesc.slice(0, 80)}；今日已检查`
+            : `A 股 TradingView 信号与筹码均未获取；今日已检查`
+        );
+      } catch (err) {
+        console.error(`[signals-runner] 写 A 股占位失败: ${ticker}`, err);
+      }
+      return { processed: false, skipped: true, phase: chipDesc ? "cn_chip" : "cn_chip_empty" };
     }
 
-    try {
-      await writeNeutralAlert(
-        prisma,
-        userId,
-        ticker,
-        name,
-        chipDesc
-          ? `A 股筹码状态: ${chipDesc.slice(0, 80)}；今日已检查`
-          : `A 股不支持 TradingView 周线技术信号，筹码数据未获取；今日已检查`
-      );
-    } catch (err) {
-      console.error(`[signals-runner] 写 A 股占位失败: ${ticker}`, err);
+    // 技术信号成功 → 写 snapshot（含筹码，若有）+ 状态机决策
+    await upsertTechnicalSnapshot({
+      ticker,
+      tickerName: name,
+      oscillators: cntv.oscillators,
+      movingAverages: cntv.movingAverages,
+      overall: cntv.overall,
+      chipSituation: chipDesc,
+      price: null,
+    });
+
+    const today = classifySignal(cntv.overall);
+    const state = await getCurrentState(prisma, userId, ticker);
+    const phase = decide(state, today);
+
+    console.log(
+      `[signals-runner] A股 ${ticker} state=${state} today=${today} → ${phase}`
+    );
+
+    // 建仓 / 平仓：写 buy/sell alert（与美股一致），note 附筹码状态
+    if (phase === "enter" || phase === "exit") {
+      const signalType: "buy" | "sell" = phase === "enter" ? "buy" : "sell";
+      const actionLabel = phase === "enter" ? "建仓" : "平仓";
+      const note = `${actionLabel}信号（${state} → ${
+        phase === "enter" ? "HOLD" : "OUT"
+      }）; ${buildAlertNote(cntv)}${chipDesc ? `; 筹码状态: ${chipDesc.slice(0, 60)}` : ""}`;
+      try {
+        await prisma.signalAlert.create({
+          data: {
+            userId,
+            ticker,
+            tickerName: name || undefined,
+            signalType,
+            overallSignal: cntv.overall,
+            oscillators: cntv.oscillators,
+            movingAverages: cntv.movingAverages,
+            price: null,
+            note,
+          },
+        });
+        console.log(
+          `[signals-runner] A股 ${ticker} ${actionLabel} alert 写入, signal=${cntv.overall}`
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[signals-runner] 写 A股 ${actionLabel} alert 失败: ${ticker}`, err);
+        return {
+          processed: false,
+          skipped: true,
+          error: msg,
+          phase: "fetch_error",
+          state,
+          today,
+        };
+      }
     }
 
-    return { processed: false, skipped: true, phase: chipDesc ? "cn_chip" : "cn_chip_empty" };
+    return {
+      processed: phase === "enter" || phase === "exit",
+      skipped: phase === "hold" || phase === "stay_out",
+      phase,
+      signal: cntv,
+      state,
+      today,
+    };
   }
 
   // 2) 非美股 & 非 A 股（港股/加密/ETF 等）：不支持信号与筹码状态。
