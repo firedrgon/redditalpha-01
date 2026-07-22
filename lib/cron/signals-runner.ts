@@ -30,8 +30,10 @@
  *   HOLD   NEUTRAL   ✗         继续持有
  *
  * 边界：
- *   - 非美股 / TV 拉取失败：写一条 neutral alert 但**不动 state**（用户能看到"今日已检查"）
+ *   - 非美股 / 非 A 股（港股/加密/ETF 等）：不支持信号与筹码状态，
+ *     只写中性 snapshot（upsert，不无限增长），**不写 alert**（减少噪音）
  *   - A 股：获取筹码状态写入 snapshot，写 neutral alert 不动 state
+ *   - TV 拉取失败：写一条 neutral alert 但**不动 state**（用户能看到"今日已检查"）
  *   - HOLD+BUY、OUT+SELL、任意+NEUTRAL 都不写 alert（避免噪音）
  *   - snapshot（高频读缓存）只在拉到真实信号或筹码状态时写
  */
@@ -206,19 +208,23 @@ export async function processStarredStock(
     return { processed: false, skipped: true, phase: chipDesc ? "cn_chip" : "cn_chip_empty" };
   }
 
-  // 2) 非美股 & 非 A 股：写 neutral 占位，不动 state
+  // 2) 非美股 & 非 A 股（港股/加密/ETF 等）：不支持信号与筹码状态。
+  //    只写中性 snapshot（upsert，不会无限增长），不写 alert（避免噪音）。
+  //    注意：CN 分支已在上面 return，能走到这里 market 必不为 CN。
   if (market !== "US") {
     try {
-      await writeNeutralAlert(
-        prisma,
-        userId,
+      await upsertTechnicalSnapshot({
         ticker,
-        name,
-        `非美股（${market}）不支持 TradingView 周线技术信号；今日已检查`
-      );
-      console.log(`[signals-runner] 非美股已记录占位: ${ticker} (${market})`);
+        tickerName: name,
+        oscillators: "neutral",
+        movingAverages: "neutral",
+        overall: "neutral",
+        chipSituation: null,
+        price: null,
+      });
+      console.log(`[signals-runner] 非美股/非A股已写中性 snapshot: ${ticker} (${market})`);
     } catch (err) {
-      console.error(`[signals-runner] 写非美股占位失败: ${ticker}`, err);
+      console.error(`[signals-runner] 写中性 snapshot 失败: ${ticker}`, err);
     }
     return { processed: false, skipped: true, phase: "non_us" };
   }
