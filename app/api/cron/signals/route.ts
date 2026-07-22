@@ -46,12 +46,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const starredFavorites = await prisma.favorite.findMany({
-      where: { starred: true },
+    // 所有收藏的股票都更新技术信号（不再限定 starred=true）
+    const allFavorites = await prisma.favorite.findMany({
       select: { userId: true, ticker: true, name: true },
     });
 
-    const validFavorites = starredFavorites.filter(
+    const validFavorites = allFavorites.filter(
       (f): f is { userId: string; ticker: string; name: string | null } =>
         f.userId !== null
     );
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       skipped: result.skipped,
       errorCount: result.errorCount,
       errors: result.errors,
-      message: result.total === 0 ? "没有重点关注的股票" : undefined,
+      message: result.total === 0 ? "没有收藏的股票" : undefined,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

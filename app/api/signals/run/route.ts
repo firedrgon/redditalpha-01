@@ -43,13 +43,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 找当前用户 starred
-  const starredFavorites = await prisma.favorite.findMany({
-    where: { userId: user.id, starred: true },
+  // 找当前用户所有收藏（不再限定 starred=true）
+  const allFavorites = await prisma.favorite.findMany({
+    where: { userId: user.id },
     select: { userId: true, ticker: true, name: true },
   });
 
-  const validFavorites = starredFavorites.filter(
+  const validFavorites = allFavorites.filter(
     (f): f is { userId: string; ticker: string; name: string | null } =>
       f.userId !== null
   );
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
   if (validFavorites.length === 0) {
     return NextResponse.json({
       success: true,
-      message: "你还没有重点关注的股票",
+      message: "你还没有收藏的股票",
       total: 0,
       processed: 0,
       skipped: 0,

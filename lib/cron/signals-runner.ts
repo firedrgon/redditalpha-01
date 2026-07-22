@@ -2,8 +2,8 @@
  * 信号提醒执行器（共享逻辑）
  *
  * 给两条入口共用：
- *  - /api/cron/signals（Vercel cron，全平台所有用户的 starred）
- *  - /api/signals/run（用户手动触发，仅当前用户的 starred）
+ *  - /api/cron/signals（Vercel cron，全平台所有用户的收藏）
+ *  - /api/signals/run（用户手动触发，仅当前用户的收藏）
  *
  * 核心设计：状态机 + 决策表
  *
@@ -156,7 +156,7 @@ async function writeNeutralAlert(
 }
 
 /**
- * 处理单个 starred 收藏
+ * 处理单个收藏（美股技术信号 / A 股筹码状态）
  */
 export async function processStarredStock(
   prisma: PrismaClient,
@@ -342,10 +342,10 @@ export interface RunSignalsResult {
 }
 
 /**
- * 执行一整轮信号提醒：处理每个 starred，写 CronRun 记录。
+ * 执行一整轮信号提醒：处理每个收藏，写 CronRun 记录。
  *
- * 注意：本函数**假定**传入的 favorites 数组已经过滤好（cron 传全部 starred，
- * 手动传单用户 starred）。函数本身不做范围过滤。
+ * 注意：本函数**假定**传入的 favorites 数组已经过滤好（cron 传全部收藏，
+ * 手动传单用户收藏）。函数本身不做范围过滤。
  */
 export async function runSignalsJob({
   jobName,
