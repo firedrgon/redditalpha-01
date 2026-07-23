@@ -149,41 +149,6 @@ export default function AdminCronPage() {
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-zinc-400">
-        加载中…
-      </div>
-    );
-  }
-
-  if (!session?.user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-white">请登录</h2>
-          <button
-            onClick={() => signIn()}
-            className="mt-4 rounded-lg border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-400 hover:bg-orange-500/20"
-          >
-            登录
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!(session.user as { isAdmin?: boolean }).isAdmin) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center text-zinc-400">
-          <h2 className="text-xl font-bold text-white">无权限</h2>
-          <p className="mt-2 text-sm">仅管理员可访问此页面</p>
-        </div>
-      </div>
-    );
-  }
-
   // 每个基础任务的"上次运行"摘要
   const jobSummary = useMemo(() => {
     const map = new Map<
@@ -220,6 +185,41 @@ export default function AdminCronPage() {
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     });
   }, [runs]);
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-zinc-400">
+        加载中…
+      </div>
+    );
+  }
+
+  if (!session?.user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-bold text-white">请登录</h2>
+          <button
+            onClick={() => signIn()}
+            className="mt-4 rounded-lg border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-400 hover:bg-orange-500/20"
+          >
+            登录
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!(session.user as { isAdmin?: boolean }).isAdmin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center text-zinc-400">
+          <h2 className="text-xl font-bold text-white">无权限</h2>
+          <p className="mt-2 text-sm">仅管理员可访问此页面</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
