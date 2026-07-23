@@ -53,6 +53,11 @@ function jobMeta(name: string) {
   return JOB_DEFS[base] ?? null;
 }
 
+/** 是否是「认证失败」记录（外部未授权请求被 401 拒绝，非定时任务逻辑错误） */
+function isAuthFail(name: string): boolean {
+  return name.endsWith(":auth-fail");
+}
+
 /** 绝对时间：YYYY-MM-DD HH:mm:ss（按浏览器本地时区） */
 function fmtAbs(ts: number): string {
   const d = new Date(ts);
@@ -150,16 +155,31 @@ export default function AdminCronPage() {
   }, [cooldown]);
 
   // 每个基础任务的"上次运行"摘要
+  // 注意：认证失败（:auth-fail）是安全事件，不算作任务逻辑失败，单独计数
   const jobSummary = useMemo(() => {
     const map = new Map<
       string,
-      { last: CronRunRow | null; count: number; errors: number }
+      {
+        last: CronRunRow | null;
+        count: number;
+        errors: number;
+        authFails: number;
+      }
     >();
     for (const r of runs) {
       const base = r.jobName.split(":")[0];
-      const cur = map.get(base) ?? { last: null, count: 0, errors: 0 };
+      const cur = map.get(base) ?? {
+        last: null,
+        count: 0,
+        errors: 0,
+        authFails: 0,
+      };
       cur.count += 1;
-      if (r.errorCount > 0) cur.errors += 1;
+      if (isAuthFail(r.jobName)) {
+        cur.authFails += 1;
+      } else if (r.errorCount > 0) {
+        cur.errors += 1;
+      }
       if (!cur.last || r.startedAt > cur.last.startedAt) cur.last = r;
       map.set(base, cur);
     }
@@ -319,6 +339,12 @@ export default function AdminCronPage() {
                       {sum.errors > 0 && (
                         <span className="text-red-400"> · {sum.errors} 次失败</span>
                       )}
+                      {sum.authFails > 0 && (
+                        <span className="text-amber-400">
+                          {" "}
+                          · {sum.authFails} 次认证失败
+                        </span>
+                      )}
                     </span>
                   </div>
                 )}
@@ -365,8 +391,10 @@ export default function AdminCronPage() {
                 </div>
                 <div className="space-y-2">
                   {arr.map((r) => {
+                    const isAuth = isAuthFail(r.jobName);
                     const hasErrors =
-                      r.errorCount > 0 || !!r.errorMessage;
+                      (!isAuth && (r.errorCount > 0 || !!r.errorMessage)) ||
+                      isAuth;
                     const duration =
                       r.endedAt != null
                         ? r.endedAt - r.startedAt
@@ -374,7 +402,11 @@ export default function AdminCronPage() {
                     return (
                       <div
                         key={r.id}
-                        className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3"
+                        className={`rounded-xl border bg-zinc-900/60 p-3 ${
+                          isAuth
+                            ? "border-amber-500/30"
+                            : "border-zinc-800"
+                        }`}
                       >
                         <button
                           type="button"
@@ -389,7 +421,13 @@ export default function AdminCronPage() {
                         >
                           {/* 第一行：状态 + 时间 */}
                           <div className="flex flex-wrap items-center gap-2">
-                            {statusBadge(r.status)}
+                            {isAuth ? (
+                              <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
+                                <span aria-hidden>🔒</span> 认证失败
+                              </span>
+                            ) : (
+                              statusBadge(r.status)
+                            )}
                             <span className="font-mono text-sm font-semibold text-zinc-100">
                               {fmtAbs(r.startedAt)}
                             </span>
@@ -445,10 +483,25 @@ export default function AdminCronPage() {
                         </button>
                         {hasErrors && expanded === r.id && (
                           <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs">
-                            {r.errorMessage && (
-                              <div className="mb-2 text-red-400">
-                                ⚠ {r.errorMessage}
+                            {isAuth ? (
+                              <div className="text-amber-400">
+                                🔒 <b>这是安全事件，不是定时任务逻辑错误。</b>
+                                <br />
+                                有人/程序在未携带正确 <code>Authorization</code>{" "}
+                                头的情况下请求了 cron 端点（外部调用、手动测试或扫描器），
+                                已被拒绝。Vercel 调度器调用时会自动带上正确的头，
+                                所以真正的定时任务不受影响。
+                                <br />
+                                <span className="text-zinc-500">
+                                  原始诊断：{r.errorMessage}
+                                </span>
                               </div>
+                            ) : (
+                              r.errorMessage && (
+                                <div className="mb-2 text-red-400">
+                                  ⚠ {r.errorMessage}
+                                </div>
+                              )
                             )}
                             {r.errors && r.errors.length > 0 && (
                               <ul className="space-y-1">
