@@ -206,6 +206,23 @@ export default function AdminCronPage() {
     });
   }, [runs]);
 
+  // 全局统计（认证失败为安全噪声，单独计，不计入成功率分母）
+  const totals = useMemo(() => {
+    let errors = 0;
+    let authFails = 0;
+    for (const r of runs) {
+      if (isAuthFail(r.jobName)) authFails += 1;
+      else if (r.errorCount > 0 || r.status === "error") errors += 1;
+    }
+    const realRuns = runs.length - authFails;
+    const success = realRuns - errors;
+    const rate = realRuns > 0 ? Math.round((success / realRuns) * 100) : 100;
+    return { runs: runs.length, errors, authFails, rate };
+  }, [runs]);
+
+  const health: "ok" | "error" =
+    totals.errors > 0 ? "error" : "ok";
+
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center text-zinc-400">
@@ -243,26 +260,94 @@ export default function AdminCronPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">定时任务监控</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            查看所有 cron 任务的执行历史、成功率与错误明细
-            <span className="ml-1 text-zinc-600">（时间按浏览器本地时区显示）</span>
-          </p>
+      {/* ── 顶部：健康概览 ── */}
+      <div className="relative mb-6 overflow-hidden rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 via-zinc-900 to-orange-500/5 p-5">
+        <div
+          className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-orange-500/10 blur-3xl"
+          aria-hidden
+        />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">定时任务监控</h1>
+              <p className="text-xs text-zinc-500">
+                执行历史 · 成功率 · 错误明细（按浏览器本地时区）
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+                health === "ok"
+                  ? "border-green-500/30 bg-green-500/10 text-green-400"
+                  : "border-red-500/30 bg-red-500/10 text-red-400"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  health === "ok" ? "bg-green-400" : "animate-pulse bg-red-400"
+                }`}
+              />
+              {health === "ok" ? "运行正常" : "存在失败任务"}
+            </span>
+            <button
+              onClick={() => {
+                if (cooldown > 0) return;
+                setCooldown(15);
+                setLoading(true);
+                load();
+              }}
+              disabled={cooldown > 0}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-50"
+            >
+              {cooldown > 0 ? `刷新 ${cooldown}s` : "刷新"}
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => {
-            if (cooldown > 0) return;
-            setCooldown(15);
-            setLoading(true);
-            load();
-          }}
-          disabled={cooldown > 0}
-          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400 disabled:opacity-50"
-        >
-          {cooldown > 0 ? `刷新 ${cooldown}s` : "刷新"}
-        </button>
+
+        {/* 统计条 */}
+        <div className="relative mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: "总运行", value: String(totals.runs), tone: "text-zinc-100" },
+            {
+              label: "成功率",
+              value: `${totals.rate}%`,
+              tone: totals.rate >= 90 ? "text-green-400" : "text-amber-400",
+            },
+            {
+              label: "失败",
+              value: String(totals.errors),
+              tone: totals.errors > 0 ? "text-red-400" : "text-zinc-400",
+            },
+            {
+              label: "认证失败",
+              value: String(totals.authFails),
+              tone: totals.authFails > 0 ? "text-amber-400" : "text-zinc-400",
+            },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3"
+            >
+              <div className="text-[11px] text-zinc-500">{s.label}</div>
+              <div className={`mt-1 text-2xl font-bold tabular-nums ${s.tone}`}>
+                {s.value}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {error && (
@@ -276,78 +361,130 @@ export default function AdminCronPage() {
         {Object.entries(JOB_DEFS).map(([key, def]) => {
           const sum = jobSummary.get(key);
           const last = sum?.last ?? null;
+          const iconCls =
+            key === "signals"
+              ? "bg-orange-500/15 text-orange-400"
+              : "bg-sky-500/15 text-sky-400";
+          const gradCls =
+            key === "signals" ? "from-orange-500/15" : "from-sky-500/15";
+          const icon =
+            key === "signals" ? (
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 17l5-5 4 4 8-8"
+                />
+              </svg>
+            ) : (
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 7h16M4 12h16M4 17h10"
+                />
+              </svg>
+            );
           return (
             <div
               key={key}
-              className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
+              className="group relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900"
             >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-base font-semibold text-zinc-100">
-                    {def.label}
-                  </h3>
-                  <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
-                    {def.desc}
-                  </p>
+              <div
+                className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${gradCls} to-transparent opacity-60`}
+                aria-hidden
+              />
+              <div className="relative">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg ${iconCls}`}
+                    >
+                      {icon}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-zinc-100">
+                        {def.label}
+                      </h3>
+                      <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
+                        {def.desc}
+                      </p>
+                    </div>
+                  </div>
+                  {last ? statusBadge(last.status) : null}
                 </div>
-                {last ? statusBadge(last.status) : null}
-              </div>
 
-              <div className="mt-3 space-y-1.5 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="w-14 shrink-0 text-zinc-600">计划</span>
-                  <span className="text-zinc-300">{def.beijing}</span>
-                  <span className="text-zinc-600">· {def.schedule}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-14 shrink-0 text-zinc-600">上次运行</span>
-                  {last ? (
-                    <>
-                      <span className="font-mono text-zinc-300">
-                        {fmtAbs(last.startedAt)}
-                      </span>
-                      <span className="text-zinc-500">
-                        （{timeAgo(last.startedAt, now)}）
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-zinc-500">从未运行</span>
-                  )}
-                </div>
-                {last && (
+                <div className="mt-4 space-y-1.5 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="w-14 shrink-0 text-zinc-600">耗时</span>
-                    <span className="text-zinc-300">
-                      {fmtDuration(
-                        last.endedAt != null
-                          ? last.endedAt - last.startedAt
-                          : null
-                      )}
-                    </span>
-                    {last.errorCount > 0 && (
-                      <span className="text-red-400">
-                        · {last.errorCount} 个错误
-                      </span>
+                    <span className="w-14 shrink-0 text-zinc-600">计划</span>
+                    <span className="text-zinc-300">{def.beijing}</span>
+                    <span className="text-zinc-600">· {def.schedule}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-14 shrink-0 text-zinc-600">上次运行</span>
+                    {last ? (
+                      <>
+                        <span className="font-mono text-zinc-300">
+                          {fmtAbs(last.startedAt)}
+                        </span>
+                        <span className="text-zinc-500">
+                          （{timeAgo(last.startedAt, now)}）
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-zinc-500">从未运行</span>
                     )}
                   </div>
-                )}
-                {sum && (
-                  <div className="flex items-center gap-2">
-                    <span className="w-14 shrink-0 text-zinc-600">近 50 次</span>
-                    <span className="text-zinc-400">
-                      共 {sum.count} 次
-                      {sum.errors > 0 && (
-                        <span className="text-red-400"> · {sum.errors} 次失败</span>
-                      )}
-                      {sum.authFails > 0 && (
-                        <span className="text-amber-400">
-                          {" "}
-                          · {sum.authFails} 次认证失败
+                  {last && (
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 shrink-0 text-zinc-600">耗时</span>
+                      <span className="text-zinc-300">
+                        {fmtDuration(
+                          last.endedAt != null
+                            ? last.endedAt - last.startedAt
+                            : null
+                        )}
+                      </span>
+                      {last.errorCount > 0 && (
+                        <span className="text-red-400">
+                          · {last.errorCount} 个错误
                         </span>
                       )}
-                    </span>
-                  </div>
-                )}
+                    </div>
+                  )}
+                  {sum && (
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 shrink-0 text-zinc-600">近 50 次</span>
+                      <span className="text-zinc-400">
+                        共 {sum.count} 次
+                        {sum.errors > 0 && (
+                          <span className="text-red-400">
+                            {" "}
+                            · {sum.errors} 次失败
+                          </span>
+                        )}
+                        {sum.authFails > 0 && (
+                          <span className="text-amber-400">
+                            {" "}
+                            · {sum.authFails} 次认证失败
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -355,31 +492,52 @@ export default function AdminCronPage() {
       </div>
 
       {/* ── 执行历史列表 ── */}
-      <h2 className="mb-3 text-sm font-medium text-zinc-400">
-        执行历史（{runs.length} 条）
-      </h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-zinc-400">
+          <span className="h-3.5 w-1 rounded-full bg-orange-500/70" />
+          执行历史
+          <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-normal text-zinc-400">
+            {runs.length} 条
+          </span>
+        </h2>
+      </div>
 
       {loading ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="h-20 animate-pulse rounded-xl border border-zinc-800 bg-zinc-900/40"
+              className="h-[88px] animate-pulse rounded-xl border border-zinc-800 bg-zinc-900/40"
             />
           ))}
         </div>
       ) : runs.length === 0 ? (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-8 text-center text-zinc-500">
+        <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 p-10 text-center text-zinc-500">
+          <svg
+            viewBox="0 0 24 24"
+            className="mx-auto mb-2 h-8 w-8 text-zinc-700"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
           暂无执行记录
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {grouped.map(([base, arr]) => {
             const meta = JOB_DEFS[base];
+            const accent = base === "signals" ? "bg-orange-500" : "bg-sky-500";
             return (
               <div key={base}>
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="text-xs font-semibold text-zinc-300">
+                <div className="mb-2.5 flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-sm ${accent}`} />
+                  <span className="text-xs font-semibold text-zinc-200">
                     {meta ? meta.label : base}
                   </span>
                   <span className="font-mono text-[10px] text-zinc-600">
@@ -389,23 +547,33 @@ export default function AdminCronPage() {
                     · {arr.length} 条
                   </span>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {arr.map((r) => {
                     const isAuth = isAuthFail(r.jobName);
                     const hasErrors =
                       (!isAuth && (r.errorCount > 0 || !!r.errorMessage)) ||
                       isAuth;
                     const duration =
-                      r.endedAt != null
-                        ? r.endedAt - r.startedAt
-                        : null;
+                      r.endedAt != null ? r.endedAt - r.startedAt : null;
+                    const barColor = isAuth
+                      ? "border-l-amber-500/70"
+                      : r.status === "error"
+                      ? "border-l-red-500/70"
+                      : r.status === "running"
+                      ? "border-l-blue-500/70"
+                      : "border-l-green-500/70";
+                    const dotColor = isAuth
+                      ? "bg-amber-400"
+                      : r.status === "error"
+                      ? "bg-red-400"
+                      : r.status === "running"
+                      ? "bg-blue-400"
+                      : "bg-green-400";
                     return (
                       <div
                         key={r.id}
-                        className={`rounded-xl border bg-zinc-900/60 p-3 ${
-                          isAuth
-                            ? "border-amber-500/30"
-                            : "border-zinc-800"
+                        className={`relative overflow-hidden rounded-xl border border-l-2 bg-zinc-900/60 p-3 transition-colors hover:bg-zinc-900 ${barColor} ${
+                          isAuth ? "border-amber-500/20" : "border-zinc-800"
                         }`}
                       >
                         <button
@@ -421,6 +589,11 @@ export default function AdminCronPage() {
                         >
                           {/* 第一行：状态 + 时间 */}
                           <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor} ${
+                                r.status === "running" ? "animate-pulse" : ""
+                              }`}
+                            />
                             {isAuth ? (
                               <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
                                 <span aria-hidden>🔒</span> 认证失败
@@ -435,17 +608,11 @@ export default function AdminCronPage() {
                               {timeAgo(r.startedAt, now)}
                             </span>
                           </div>
-                          {/* 第二行：起止 + 耗时 + 计数 */}
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-400">
-                            <span>
-                              <span className="text-zinc-600">开始 </span>
-                              {fmtAbs(r.startedAt)}
-                            </span>
+                          {/* 第二行：结束 + 耗时 */}
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-3.5 text-xs text-zinc-400">
                             <span>
                               <span className="text-zinc-600">结束 </span>
-                              {r.endedAt != null
-                                ? fmtAbs(r.endedAt)
-                                : "—"}
+                              {r.endedAt != null ? fmtAbs(r.endedAt) : "—"}
                             </span>
                             <span>
                               <span className="text-zinc-600">耗时 </span>
@@ -455,7 +622,7 @@ export default function AdminCronPage() {
                             </span>
                           </div>
                           {/* 第三行：计数 */}
-                          <div className="flex flex-wrap items-center gap-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-3 pl-3.5 text-xs">
                             <span className="text-zinc-400">
                               总计 <span className="text-zinc-200">{r.total}</span>
                             </span>
@@ -476,13 +643,13 @@ export default function AdminCronPage() {
                             </span>
                             {hasErrors && (
                               <span className="text-[10px] text-zinc-600">
-                                点击展开错误 ▾
+                                点击展开 ▾
                               </span>
                             )}
                           </div>
                         </button>
                         {hasErrors && expanded === r.id && (
-                          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs">
+                          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 pl-5 text-xs">
                             {isAuth ? (
                               <div className="text-amber-400">
                                 🔒 <b>这是安全事件，不是定时任务逻辑错误。</b>

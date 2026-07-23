@@ -186,6 +186,24 @@ const SIGNAL_COLORS: Record<Signal, string> = {
   strong_buy: "text-green-600",
 };
 
+// 信号对应的背景色（用于强度条段），与 SIGNAL_COLORS 语义一致
+const SIGNAL_BG: Record<Signal, string> = {
+  strong_sell: "bg-red-600",
+  sell: "bg-red-400",
+  neutral: "bg-zinc-500",
+  buy: "bg-green-400",
+  strong_buy: "bg-green-600",
+};
+
+// 强度刻度顺序（从最空到最多）
+const SIGNAL_ORDER: Signal[] = [
+  "strong_sell",
+  "sell",
+  "neutral",
+  "buy",
+  "strong_buy",
+];
+
 // 后端 TechnicalSignalSnapshot 行（与 /api/technical-snapshots 返回的字段一致）
 interface TechnicalSnapshotRow {
   ticker: string;
@@ -534,39 +552,57 @@ function SignalBadge({
           ? `${Math.floor(minutesAgo / 60)} 小时前`
           : `${Math.floor(minutesAgo / 60 / 24)} 天前`;
 
-  const bgClass =
-    sig === "strong_buy" || sig === "buy"
-      ? "bg-green-500/10 text-green-400"
-      : sig === "strong_sell" || sig === "sell"
-        ? "bg-red-500/10 text-red-400"
-        : "bg-zinc-500/15 text-zinc-400";
+  const isBull = sig === "strong_buy" || sig === "buy";
+  const isBear = sig === "strong_sell" || sig === "sell";
+  const tone = isBull
+    ? {
+        bg: "bg-green-500/10",
+        text: "text-green-400",
+        ring: "ring-1 ring-green-500/25",
+        dot: "bg-green-400",
+        glow: "shadow-[0_0_12px_-3px_rgba(34,197,94,0.55)]",
+      }
+    : isBear
+    ? {
+        bg: "bg-red-500/10",
+        text: "text-red-400",
+        ring: "ring-1 ring-red-500/25",
+        dot: "bg-red-400",
+        glow: "shadow-[0_0_12px_-3px_rgba(239,68,68,0.55)]",
+      }
+    : {
+        bg: "bg-zinc-500/15",
+        text: "text-zinc-400",
+        ring: "ring-1 ring-zinc-500/25",
+        dot: "bg-zinc-400",
+        glow: "",
+      };
 
   // 技术信号徽章（美股 / A 股通用）
   const techBadge = (
     <span
-      className={`group/sig relative inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${bgClass}`}
+      className={`group/sig relative inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text} ${tone.ring} ${tone.glow}`}
       title={SIGNAL_LABELS[sig]}
     >
-      <span aria-hidden>●</span>
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
       <span>综合 {SIGNAL_LABELS[sig]}</span>
       {/* hover 展开详细 */}
-      <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-52 rounded-md border border-zinc-700 bg-zinc-950 p-2 text-[10px] text-zinc-300 shadow-xl group-hover/sig:block">
-        <div className="flex items-center justify-between">
-          <span className="text-zinc-500">综合</span>
-          <span className={SIGNAL_COLORS[sig]}>{SIGNAL_LABELS[sig]}</span>
-        </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-zinc-500">振荡</span>
-          <span className={SIGNAL_COLORS[snapshot.oscillators]}>
-            {SIGNAL_LABELS[snapshot.oscillators]}
-          </span>
-        </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-zinc-500">均线</span>
-          <span className={SIGNAL_COLORS[snapshot.movingAverages]}>
-            {SIGNAL_LABELS[snapshot.movingAverages]}
-          </span>
-        </div>
+      <span className="pointer-events-none absolute left-0 top-full z-20 mt-1.5 hidden w-56 rounded-lg border border-zinc-700 bg-zinc-950/95 p-3 text-[10px] text-zinc-300 shadow-2xl backdrop-blur group-hover/sig:block">
+        {(
+          [
+            ["综合", sig],
+            ["振荡", snapshot.oscillators],
+            ["均线", snapshot.movingAverages],
+          ] as const
+        ).map(([lbl, s]) => (
+          <div
+            key={lbl}
+            className="flex items-center justify-between py-0.5"
+          >
+            <span className="text-zinc-500">{lbl}</span>
+            <span className={SIGNAL_COLORS[s]}>{SIGNAL_LABELS[s]}</span>
+          </div>
+        ))}
         <div className="mt-1.5 border-t border-zinc-800 pt-1 text-[9px] text-zinc-600">
           {timeLabel}更新 · TradingView 周线
         </div>
@@ -586,25 +622,24 @@ function SignalBadge({
     // 筹码密集 → 红（A股涨色），分散 → 绿（A股跌色）
     const isDense = /密集|集中|锁仓/.test(keyword);
     const isLoose = /分散|发散|松动/.test(keyword);
-    const chipColorClass = isDense
-      ? "bg-red-500/10 text-red-400"
+    const chipStyle = isDense
+      ? { bg: "bg-red-500/10", text: "text-red-400", ring: "ring-1 ring-red-500/25", dot: "bg-red-400" }
       : isLoose
-        ? "bg-green-500/10 text-green-400"
-        : "bg-zinc-500/15 text-zinc-400";
-    const chipDotColor = isDense ? "text-red-400" : isLoose ? "text-green-400" : "text-zinc-400";
+      ? { bg: "bg-green-500/10", text: "text-green-400", ring: "ring-1 ring-green-500/25", dot: "bg-green-400" }
+      : { bg: "bg-zinc-500/15", text: "text-zinc-400", ring: "ring-1 ring-zinc-500/25", dot: "bg-zinc-400" };
 
     const chipBadge = (
       <span
-        className={`group/chip relative inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${chipColorClass}`}
+        className={`group/chip relative inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[10px] font-semibold ${chipStyle.bg} ${chipStyle.text} ${chipStyle.ring}`}
         title="筹码状态"
       >
-        <span aria-hidden className={chipDotColor}>◆</span>
+        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${chipStyle.dot}`} />
         <span>筹码 {keyword}</span>
         {/* hover 展开完整描述 */}
-        <span className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-52 rounded-md border border-zinc-700 bg-zinc-950 p-2 text-[10px] text-zinc-300 shadow-xl group-hover/chip:block">
-          <div className="flex items-center justify-between">
+        <span className="pointer-events-none absolute left-0 top-full z-20 mt-1.5 hidden w-56 rounded-lg border border-zinc-700 bg-zinc-950/95 p-3 text-[10px] text-zinc-300 shadow-2xl backdrop-blur group-hover/chip:block">
+          <div className="flex items-center justify-between py-0.5">
             <span className="text-zinc-500">筹码状态</span>
-            <span className={chipDotColor}>{keyword}</span>
+            <span className={chipStyle.text}>{keyword}</span>
           </div>
           <div className="mt-1 text-[9px] text-zinc-400 leading-relaxed">
             {chip}
@@ -1366,52 +1401,113 @@ function AnalysisModal({
             {/* TradingView 技术信号（仅美股）——概览 Tab 内部
                * 优先用父组件传来的最新 snapshot（与 Card 徽章同源），保证两边一致；
                * snapshot 缺失时回退到 analysis.technicalSignals（AnalysisCache 旧值）。 */}
-            {(signalSnapshot || analysis.technicalSignals) && (
-              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                  </svg>
-                  <span className="text-sm font-medium text-cyan-300">技术信号</span>
-                  <span className="text-[10px] text-zinc-500">TradingView</span>
-                  {signalSnapshot?.fetchedAt && (
-                    <span className="ml-auto text-[10px] text-zinc-500">
-                      {new Date(signalSnapshot.fetchedAt).toLocaleString("zh-CN", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}{" "}
-                      更新
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  {(() => {
-                    // 数据源优先级：snapshot（最新，与 Card 同源）> analysis.technicalSignals
-                    const sigSource = signalSnapshot
-                      ? {
-                          overall: signalSnapshot.overall,
-                          oscillators: signalSnapshot.oscillators,
-                          movingAverages: signalSnapshot.movingAverages,
-                        }
-                      : analysis.technicalSignals!;
-                    return [
-                      { label: "综合", signal: sigSource.overall },
-                      { label: "振荡指标", signal: sigSource.oscillators },
-                      { label: "移动均线", signal: sigSource.movingAverages },
-                    ].map(({ label, signal }) => (
-                      <div key={label} className="flex flex-col items-center gap-1 rounded-md bg-zinc-800/50 p-2">
-                        <span className="text-[10px] text-zinc-500">{label}</span>
-                        <span className={`text-xs font-medium ${SIGNAL_COLORS[signal]}`}>
-                          ● {SIGNAL_LABELS[signal]}
+            {(signalSnapshot || analysis.technicalSignals) &&
+              (() => {
+                // 数据源优先级：snapshot（最新，与 Card 同源）> analysis.technicalSignals
+                const sigSource = signalSnapshot
+                  ? {
+                      overall: signalSnapshot.overall,
+                      oscillators: signalSnapshot.oscillators,
+                      movingAverages: signalSnapshot.movingAverages,
+                    }
+                  : analysis.technicalSignals!;
+                // 段位背景色（固定刻度语义：强卖红 → 强买绿），复用 SIGNAL_BG
+                const SEG_BG = SIGNAL_ORDER.map((s) => SIGNAL_BG[s]);
+                const renderBar = (signal: Signal) => {
+                  const cur = SIGNAL_ORDER.indexOf(signal);
+                  return (
+                    <div className="flex gap-1">
+                      {SIGNAL_ORDER.map((s, i) => (
+                        <div
+                          key={s}
+                          className={`h-1.5 flex-1 rounded-full ${
+                            i <= cur ? SEG_BG[i] : "bg-zinc-800"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  );
+                };
+                return (
+                  <div className="relative overflow-hidden rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 to-zinc-900/40 p-4">
+                    <div
+                      className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-cyan-500/10 blur-2xl"
+                      aria-hidden
+                    />
+                    <div className="relative">
+                      <div className="mb-3 flex items-center gap-2">
+                        <svg
+                          viewBox="0 0 24 24"
+                          className="h-4 w-4 text-cyan-400"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={1.8}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
+                          />
+                        </svg>
+                        <span className="text-sm font-medium text-cyan-300">
+                          技术信号
                         </span>
+                        <span className="rounded border border-cyan-500/30 px-1.5 py-0.5 text-[9px] text-cyan-400/80">
+                          TradingView
+                        </span>
+                        {signalSnapshot?.fetchedAt && (
+                          <span className="ml-auto text-[10px] text-zinc-500">
+                            {new Date(
+                              signalSnapshot.fetchedAt
+                            ).toLocaleString("zh-CN", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}{" "}
+                            更新
+                          </span>
+                        )}
                       </div>
-                    ));
-                  })()}
-                </div>
-              </div>
-            )}
+
+                      {/* 综合信号：大标题 + 强度条 */}
+                      <div className="mb-3">
+                        <div className="flex items-end justify-between">
+                          <span className="text-[10px] text-zinc-500">
+                            综合建议
+                          </span>
+                          <span
+                            className={`text-lg font-bold leading-none ${SIGNAL_COLORS[sigSource.overall]}`}
+                          >
+                            {SIGNAL_LABELS[sigSource.overall]}
+                          </span>
+                        </div>
+                        <div className="mt-2">{renderBar(sigSource.overall)}</div>
+                      </div>
+
+                      {/* 振荡 / 均线 */}
+                      <div className="space-y-2.5">
+                        {[
+                          { label: "振荡指标", signal: sigSource.oscillators },
+                          { label: "移动均线", signal: sigSource.movingAverages },
+                        ].map(({ label, signal }) => (
+                          <div key={label}>
+                            <div className="mb-1 flex items-center justify-between text-[10px]">
+                              <span className="text-zinc-500">{label}</span>
+                              <span
+                                className={`font-medium ${SIGNAL_COLORS[signal]}`}
+                              >
+                                {SIGNAL_LABELS[signal]}
+                              </span>
+                            </div>
+                            {renderBar(signal)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               </div>
             )}
 
