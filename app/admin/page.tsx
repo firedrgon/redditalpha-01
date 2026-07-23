@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { signIn, useSession } from "next-auth/react";
 
 type CronRunStatus = "running" | "success" | "error";
@@ -268,6 +269,25 @@ export default function AdminCronPage() {
         />
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
+                />
+              </svg>
+              返回
+            </Link>
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
               <svg
                 viewBox="0 0 24 24"
