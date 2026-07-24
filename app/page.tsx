@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { signIn, signOut, useSession } from "next-auth/react";
 import NotificationBell from "@/app/components/NotificationBell";
+import HotStocksPanel from "@/app/components/HotStocksPanel";
 
 const SUBREDDITS = [
   { id: "wallstreetbets", label: "WSB", full: "r/WallStreetBets" },
@@ -3667,7 +3668,7 @@ function AuthModal({ onClose }: { onClose: () => void }) {
 export default function Home() {
   const { data: session, status: sessionStatus } = useSession();
   const [activeSub, setActiveSub] = useState("wallstreetbets");
-  const [view, setView] = useState<"subreddit" | "favorites">("subreddit");
+  const [view, setView] = useState<"subreddit" | "favorites" | "hot">("subreddit");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
@@ -4352,6 +4353,20 @@ export default function Home() {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setView("hot")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all flex items-center gap-1.5 ${
+                view === "hot"
+                  ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.25 8.25 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z" />
+              </svg>
+              热榜
+            </button>
             <div className="mx-1 self-center text-zinc-700">|</div>
             {SUBREDDITS.map((sub) => (
               <button
@@ -4443,6 +4458,8 @@ export default function Home() {
               {" "}· 每10分钟自动刷新
             </div>
           </>
+        ) : view === "hot" ? (
+          <HotStocksPanel />
         ) : (
           <>
             <div className="mb-6 flex items-center justify-between">
