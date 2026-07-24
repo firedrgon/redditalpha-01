@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession, signIn } from "next-auth/react";
 
 interface HotStock {
   id: string;
@@ -20,6 +21,12 @@ interface HotStocksResponse {
   count: number;
   stocks: HotStock[];
   error?: string;
+}
+
+/** 由热榜股票推导收藏系统用的 ticker（600519.SH） */
+function tickerOf(stock: HotStock): string {
+  const board = stock.board ? stock.board.toUpperCase() : "";
+  return board ? `${stock.code}.${board}` : stock.code;
 }
 
 /** 热度值格式化：354998 → 35.5万 */
@@ -43,7 +50,35 @@ function tradingViewUrl(board: string | null, code: string): string {
   return `https://cn.tradingview.com/symbols/${prefix}-${code}/`;
 }
 
-function HotStockCard({ stock }: { stock: HotStock }) {
+function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={1.8}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
+      />
+    </svg>
+  );
+}
+
+function HotStockCard({
+  stock,
+  isFavorited,
+  favBusy,
+  onToggleFavorite,
+}: {
+  stock: HotStock;
+  isFavorited: boolean;
+  favBusy: boolean;
+  onToggleFavorite: () => void;
+}) {
   const tags = stock.conceptTags
     ? stock.conceptTags.split(",").filter(Boolean)
     : [];
@@ -105,14 +140,32 @@ function HotStockCard({ stock }: { stock: HotStock }) {
           </div>
         </div>
 
-        <div className="shrink-0 text-right">
-          <div className={`text-base font-bold ${changeColor(stock.changePct)}`}>
-            {stock.changePct == null
-              ? "-"
-              : `${stock.changePct > 0 ? "+" : ""}${stock.changePct.toFixed(2)}%`}
-          </div>
-          <div className="mt-0.5 text-[10px] text-zinc-500">
-            热度 {formatHeat(stock.heat)}
+        <div className="flex shrink-0 items-center gap-2">
+          {/* 收藏 */}
+          <button
+            type="button"
+            onClick={onToggleFavorite}
+            disabled={favBusy}
+            title={isFavorited ? "取消收藏" : "加入收藏"}
+            aria-label={isFavorited ? "取消收藏" : "加入收藏"}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all ${
+              isFavorited
+                ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-400"
+                : "border-zinc-700 text-zinc-500 hover:border-yellow-500/30 hover:text-yellow-400"
+            } disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            <StarIcon filled={isFavorited} className="h-4 w-4" />
+          </button>
+
+          <div className="text-right">
+            <div className={`text-base font-bold ${changeColor(stock.changePct)}`}>
+              {stock.changePct == null
+                ? "-"
+                : `${stock.changePct > 0 ? "+" : ""}${stock.changePct.toFixed(2)}%`}
+            </div>
+            <div className="mt-0.5 text-[10px] text-zinc-500">
+              热度 {formatHeat(stock.heat)}
+            </div>
           </div>
         </div>
       </div>
@@ -133,16 +186,34 @@ function LoadingSkeleton() {
   );
 }
 
+interface HotStocksPanelProps {
+  /** 布局：grid（首页多列）| list（/hot 单列）。默认 grid */
+  variant?: "grid" | "list";
+  /** 复用宿主页已有的收藏系统（首页）；不传则组件自带 next-auth 自包含收藏 */
+  isFavorite?: (ticker: string) => boolean;
+  toggleFavorite?: (ticker: string, name?: string | null) => void;
+}
+
 /**
- * 首页内嵌的 A 股热榜面板（自包含：自行 fetch /api/hot-stocks）。
- * 由首页 nav 的「热榜」标签切换显示。
+ * A 股热榜面板（自包含：自行 fetch /api/hot-stocks）。
+ * - 首页使用时传入 isFavorite / toggleFavorite，收藏状态与首页「收藏」标签实时同步。
+ * - /hot 等独立页不传时，组件用 next-auth 自行判定登录并调用 /api/favorites。
  */
-export default function HotStocksPanel() {
+export default function HotStocksPanel({
+  variant = "grid",
+  isFavorite,
+  toggleFavorite,
+}: HotStocksPanelProps) {
+  const { status } = useSession();
   const [stocks, setStocks] = useState<HotStock[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // 自包含模式（未传入宿主收藏回调）下的本地收藏集合
+  const [localFav, setLocalFav] = useState<Set<string>>(new Set());
+  const [favBusy, setFavBusy] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,6 +235,27 @@ export default function HotStocksPanel() {
     }
   }, []);
 
+  // 自包含模式：登录后拉取已收藏集合
+  useEffect(() => {
+    if (toggleFavorite || status !== "authenticated") return;
+    let cancelled = false;
+    fetch("/api/favorites", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (cancelled || !json?.favorites) return;
+        const set = new Set<string>(
+          (json.favorites as { ticker: string }[]).map((f) =>
+            f.ticker.toUpperCase()
+          )
+        );
+        setLocalFav(set);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [toggleFavorite, status]);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -180,6 +272,68 @@ export default function HotStocksPanel() {
       setRefreshing(false);
     }
   };
+
+  const favStateOf = useCallback(
+    (stock: HotStock): boolean => {
+      const tk = tickerOf(stock).toUpperCase();
+      return isFavorite ? isFavorite(tk) : localFav.has(tk);
+    },
+    [isFavorite, localFav]
+  );
+
+  const handleToggleFavorite = useCallback(
+    async (stock: HotStock) => {
+      const tk = tickerOf(stock);
+      const upper = tk.toUpperCase();
+      // 宿主模式：直接委托首页收藏系统（含登录校验 / 乐观更新 / 计数同步）
+      if (toggleFavorite) {
+        toggleFavorite(tk, stock.name);
+        return;
+      }
+      // 自包含模式
+      if (status !== "authenticated") {
+        signIn();
+        return;
+      }
+      const willAdd = !localFav.has(upper);
+      setLocalFav((prev) => {
+        const next = new Set(prev);
+        if (willAdd) next.add(upper);
+        else next.delete(upper);
+        return next;
+      });
+      setFavBusy((prev) => new Set(prev).add(upper));
+      try {
+        if (willAdd) {
+          await fetch("/api/favorites", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ticker: tk, name: stock.name }),
+          });
+        } else {
+          await fetch(`/api/favorites?ticker=${encodeURIComponent(tk)}`, {
+            method: "DELETE",
+          });
+        }
+      } catch (err) {
+        console.error("[hot] 收藏操作失败:", err);
+        // 回滚
+        setLocalFav((prev) => {
+          const next = new Set(prev);
+          if (willAdd) next.delete(upper);
+          else next.add(upper);
+          return next;
+        });
+      } finally {
+        setFavBusy((prev) => {
+          const next = new Set(prev);
+          next.delete(upper);
+          return next;
+        });
+      }
+    },
+    [toggleFavorite, status, localFav]
+  );
 
   return (
     <>
@@ -285,9 +439,21 @@ export default function HotStocksPanel() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          className={
+            variant === "list"
+              ? "grid gap-3"
+              : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          }
+        >
           {stocks.map((stock) => (
-            <HotStockCard key={stock.id} stock={stock} />
+            <HotStockCard
+              key={stock.id}
+              stock={stock}
+              isFavorited={favStateOf(stock)}
+              favBusy={favBusy.has(tickerOf(stock).toUpperCase())}
+              onToggleFavorite={() => handleToggleFavorite(stock)}
+            />
           ))}
         </div>
       )}

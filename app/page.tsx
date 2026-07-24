@@ -4459,7 +4459,7 @@ export default function Home() {
             </div>
           </>
         ) : view === "hot" ? (
-          <HotStocksPanel />
+          <HotStocksPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
         ) : (
           <>
             <div className="mb-6 flex items-center justify-between">
