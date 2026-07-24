@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -112,17 +112,56 @@ export default function StockReportPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ReportResp | null>(null);
+  const [needsGenerate, setNeedsGenerate] = useState(false);
 
-  async function run() {
-    const ticker = input.trim();
-    if (!ticker) return;
+  // 读取 URL ?ticker（client-only，避免 useSearchParams 的 Suspense 要求）
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const t = p.get("ticker");
+    if (t) {
+      const up = t.trim().toUpperCase();
+      setInput(up);
+      loadSaved(up);
+    }
+  }, []);
+
+  async function loadSaved(ticker: string) {
     setLoading(true);
     setError(null);
+    setResult(null);
+    setNeedsGenerate(false);
     try {
       const res = await fetch(
         `/api/stock-report?ticker=${encodeURIComponent(ticker)}`,
         { cache: "no-store" }
       );
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json?.error || "加载失败，请稍后重试");
+      } else if (json?.exists === false) {
+        setNeedsGenerate(true);
+      } else {
+        setResult(json as ReportResp);
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generate() {
+    const ticker = input.trim();
+    if (!ticker) return;
+    setLoading(true);
+    setError(null);
+    setNeedsGenerate(false);
+    try {
+      const res = await fetch(`/api/stock-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker }),
+      });
       const json = await res.json();
       if (!res.ok) {
         setError(json?.error || "分析失败，请稍后重试");
@@ -156,13 +195,13 @@ export default function StockReportPage() {
               value={input}
               onChange={(e) => setInput(e.target.value.toUpperCase())}
               onKeyDown={(e) => {
-                if (e.key === "Enter") run();
+                if (e.key === "Enter") generate();
               }}
               placeholder="输入美股代码，如 AAPL / NVDA / CEG"
               className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-orange-500/50"
             />
             <button
-              onClick={run}
+              onClick={generate}
               disabled={loading || !input.trim()}
               className="rounded-md bg-orange-500 px-4 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -184,9 +223,24 @@ export default function StockReportPage() {
             </div>
           )}
 
-          {!loading && !error && !result && (
-            <div className="mt-10 rounded-md border border-zinc-800 bg-zinc-900/50 px-6 py-12 text-center text-sm text-zinc-500">
-              输入一只美股代码，点击「生成报告」即可获取综合分析。
+          {!loading && !result && (
+            <div className="mt-10 rounded-md border border-zinc-800 bg-zinc-900/50 px-6 py-12 text-center">
+              {needsGenerate ? (
+                <>
+                  <p className="text-sm text-zinc-300">该股票尚未生成研报。</p>
+                  <button
+                    onClick={generate}
+                    disabled={loading}
+                    className="mt-4 rounded-md bg-orange-500 px-5 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-orange-400 disabled:opacity-50"
+                  >
+                    {loading ? "生成中…" : "生成研报"}
+                  </button>
+                </>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  输入一只美股代码，点击「生成报告」即可获取综合分析。
+                </p>
+              )}
             </div>
           )}
 

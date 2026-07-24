@@ -24,6 +24,7 @@ import {
 } from "./technical";
 import { fetchQuote } from "./quote";
 import { chatCompletion } from "./llm";
+import { getPrisma } from "@/lib/db/prisma";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -517,10 +518,78 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
     { temperature: 0.3, maxTokens: 4000 }
   );
 
+  // 落库（失败不应阻断返回，仅记录）
+  try {
+    await saveStockReport(clean, data.name, res.text, data);
+  } catch (e) {
+    console.error("[stock-report] 落库失败:", e);
+  }
+
   return {
     ticker: clean,
     report: res.text,
     data,
     generatedAt: new Date().toISOString(),
   };
+}
+
+/* ============================================================
+ * 数据库持久化（StockReport 表）
+ * ============================================================ */
+
+/** 生成后 upsert 保存；同一 ticker 只保留最新一份 */
+export async function saveStockReport(
+  ticker: string,
+  name: string | null | undefined,
+  report: string,
+  data: StockAnalysisData
+): Promise<void> {
+  const prisma = getPrisma();
+  if (!prisma) return; // 未配置数据库时跳过落库
+  const dataJson = JSON.stringify(data);
+  await prisma.stockReport.upsert({
+    where: { ticker },
+    create: { ticker, name: name ?? null, report, dataJson },
+    update: { name: name ?? null, report, dataJson, updatedAt: new Date() },
+  });
+}
+
+/** 读取已保存的报告（含完整 data）；无则返回 null */
+export async function getSavedReport(ticker: string): Promise<StockReport | null> {
+  const prisma = getPrisma();
+  if (!prisma) return null;
+  const row = await prisma.stockReport.findUnique({ where: { ticker } });
+  if (!row) return null;
+  let data: StockAnalysisData = { ticker: row.ticker, name: row.name };
+  try {
+    const parsed = JSON.parse(row.dataJson) as StockAnalysisData;
+    if (parsed && typeof parsed === "object") data = parsed;
+  } catch {
+    // dataJson 损坏时降级为仅 ticker/name
+  }
+  return {
+    ticker: row.ticker,
+    report: row.report,
+    data,
+    generatedAt: row.generatedAt.toISOString(),
+  };
+}
+
+/** 批量判断一组 ticker 是否已生成报告，返回 { ticker: generatedAt } 映射 */
+export async function getReportsExist(
+  tickers: string[]
+): Promise<Record<string, string>> {
+  const clean = Array.from(
+    new Set(tickers.map((t) => t.trim().toUpperCase()).filter(Boolean))
+  );
+  if (clean.length === 0) return {};
+  const prisma = getPrisma();
+  if (!prisma) return {};
+  const rows = await prisma.stockReport.findMany({
+    where: { ticker: { in: clean } },
+    select: { ticker: true, generatedAt: true },
+  });
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.ticker] = r.generatedAt.toISOString();
+  return map;
 }

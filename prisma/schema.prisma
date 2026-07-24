@@ -300,3 +300,17 @@ model PushSubscription {
 
   @@index([userId])
 }
+
+/// 美股 AI 研报缓存（us-stock-analysis 集成）。按 ticker 唯一，重跑会 upsert 覆盖。
+/// report 为 Markdown 正文；dataJson 为抓取到的结构化数据（JSON 字符串），供报告页摘要卡复用。
+model StockReport {
+  id          String   @id @default(cuid())
+  ticker      String   @unique
+  name        String?
+  report      String
+  dataJson    String
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ticker])
+}

@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { signIn, signOut, useSession } from "next-auth/react";
 import NotificationBell from "@/app/components/NotificationBell";
 import HotStocksPanel from "@/app/components/HotStocksPanel";
+import Link from "next/link";
 
 const SUBREDDITS = [
   { id: "wallstreetbets", label: "WSB", full: "r/WallStreetBets" },
@@ -672,6 +673,7 @@ function FavoriteCard({
   signalSnapshot,
   onRequestRefreshSnapshot,
   quote,
+  hasReport,
 }: {
   item: FavoriteItem;
   onRemove: (ticker: string) => void;
@@ -681,6 +683,7 @@ function FavoriteCard({
   signalSnapshot?: TechnicalSnapshotRow;
   onRequestRefreshSnapshot?: (ticker: string) => void;
   quote?: Quote;
+  hasReport?: boolean;
 }) {
   // A 股标题跳百度股市通，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
@@ -831,6 +834,23 @@ function FavoriteCard({
             >
               TradingView
             </a>
+            {hasReport ? (
+              <Link
+                href={`/stock-report?ticker=${encodeURIComponent(item.ticker)}`}
+                className="shrink-0 rounded-md border border-orange-500/40 bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/20"
+                title="查看 AI 研报"
+              >
+                研报
+              </Link>
+            ) : (
+              <Link
+                href={`/stock-report?ticker=${encodeURIComponent(item.ticker)}`}
+                className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+                title="生成 AI 研报"
+              >
+                生成研报
+              </Link>
+            )}
           </>
         )}
         <button
@@ -3682,6 +3702,8 @@ export default function Home() {
 
   // 收藏状态（服务端按登录用户持久化）
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  // 美股研报存在性映射：ticker(大写) -> generatedAt；用于收藏列表「研报/生成研报」按钮
+  const [reportsExist, setReportsExist] = useState<Record<string, string>>({});
   const [manualTicker, setManualTicker] = useState("");
   const [manualName, setManualName] = useState("");
   const [validating, setValidating] = useState(false);
@@ -3776,6 +3798,38 @@ export default function Home() {
       cancelled = true;
     };
   }, [sessionStatus]);
+
+  // 批量检查美股研报是否已生成（收藏列表按钮状态用）
+  useEffect(() => {
+    if (sessionStatus !== "authenticated" || favorites.length === 0) {
+      setReportsExist({});
+      return;
+    }
+    const usTickers = Array.from(
+      new Set(
+        favorites
+          .map((f) => f.ticker.toUpperCase())
+          .filter((t) => !isCNTicker(t))
+      )
+    );
+    if (usTickers.length === 0) {
+      setReportsExist({});
+      return;
+    }
+    let cancelled = false;
+    fetch(
+      `/api/stock-report?exists=1&tickers=${encodeURIComponent(usTickers.join(","))}`,
+      { cache: "no-store" }
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d?.reports) setReportsExist(d.reports as Record<string, string>);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [favorites, sessionStatus]);
 
   // 加载/刷新技术信号快照：每次收藏变化时批量取一次
   useEffect(() => {
@@ -4661,6 +4715,7 @@ export default function Home() {
                           signalSnapshot={signalSnapshots[item.ticker.toUpperCase()]}
                           onRequestRefreshSnapshot={requestRefreshSnapshot}
                           quote={quotes[item.ticker.toUpperCase()]}
+                          hasReport={!!reportsExist[item.ticker.toUpperCase()]}
                         />
                       ))}
                   </div>
