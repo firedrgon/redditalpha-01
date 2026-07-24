@@ -690,10 +690,13 @@ function FavoriteCard({
   const isStarred = !!item.starred;
   const isUS = !isCNTicker(item.ticker);
 
+  // A 股「图解」按钮开关：同花顺财务图解入口已无用，默认隐藏；保留代码，以后需恢复时改 true
+  const SHOW_CN_VISUAL = false;
+
   // A 股图解 URL：卡片挂载时自动获取
   const [visualUrl, setVisualUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!isCNTicker(item.ticker)) return;
+    if (!SHOW_CN_VISUAL || !isCNTicker(item.ticker)) return;
     let cancelled = false;
     fetch(`/api/ths-visual?ticker=${encodeURIComponent(item.ticker)}`)
       .then((r) => r.json())
@@ -795,15 +798,18 @@ function FavoriteCard({
             >
               诊断
             </a>
-            <a
-              href={visualUrl || "#"}
-              target={visualUrl ? "_blank" : undefined}
-              rel={visualUrl ? "noopener noreferrer" : undefined}
-              className={`shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs transition-all ${visualUrl ? "text-zinc-300 hover:border-orange-500/50 hover:text-orange-400" : "text-zinc-600 cursor-not-allowed"}`}
-              title={visualUrl ? "在同花顺查看财务图解" : "加载中..."}
-            >
-              图解
-            </a>
+            {/* 「图解」按钮暂隐藏：A股同花顺财务图解入口已无用；保留代码，以后恢复显示只需把 SHOW_CN_VISUAL 改 true */}
+            {SHOW_CN_VISUAL && (
+              <a
+                href={visualUrl || "#"}
+                target={visualUrl ? "_blank" : undefined}
+                rel={visualUrl ? "noopener noreferrer" : undefined}
+                className={`shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs transition-all ${visualUrl ? "text-zinc-300 hover:border-orange-500/50 hover:text-orange-400" : "text-zinc-600 cursor-not-allowed"}`}
+                title={visualUrl ? "在同花顺查看财务图解" : "加载中..."}
+              >
+                图解
+              </a>
+            )}
           </>
         ) : (
           <>
