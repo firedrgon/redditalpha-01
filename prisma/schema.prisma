@@ -226,6 +226,26 @@ model TechnicalSignalSnapshot {
   @@index([fetchedAt])
 }
 
+/// 同花顺 A股热榜（每日收盘后抓取一份快照）。按 (date, code) 唯一，重跑同日会 upsert 覆盖。
+/// date 为北京时间 YYYY-MM-DD，避免时区导致唯一约束歧义。
+model HotStock {
+  id            String   @id @default(cuid())
+  date          String
+  rank          Int
+  code          String
+  name          String
+  heat          Float?
+  changePct     Float?
+  board         String?
+  conceptTags   String?
+  popularityTag String?
+  fetchedAt     DateTime @default(now())
+
+  @@unique([date, code])
+  @@index([date])
+  @@index([code])
+}
+
 /// 定时任务执行历史。供 /admin 或运维排查"cron 到底跑没跑、跑了多少、失败多少"。
 model CronRun {
   id          String    @id @default(cuid())

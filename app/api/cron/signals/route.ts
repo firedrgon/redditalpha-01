@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
 import { runSignalsJob } from "@/lib/cron/signals-runner";
+import { runHotStocksJob } from "@/lib/cron/hot-stocks-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,6 +72,16 @@ async function handleCron(request: NextRequest) {
       favorites: validFavorites,
     });
 
+    // 顺带刷新同花顺热榜（best-effort，独立 CronRun 记录，失败不影响信号扫描）
+    let hotStocks: { success: boolean; count: number } | null = null;
+    try {
+      const hot = await runHotStocksJob();
+      hotStocks = { success: hot.success, count: hot.count };
+      console.log(`[cron/signals] 热榜刷新: success=${hot.success} count=${hot.count}`);
+    } catch (e) {
+      console.error("[cron/signals] 热榜刷新失败(已忽略):", e);
+    }
+
     return NextResponse.json({
       success: true,
       runId: result.runId,
@@ -79,6 +90,7 @@ async function handleCron(request: NextRequest) {
       skipped: result.skipped,
       errorCount: result.errorCount,
       errors: result.errors,
+      hotStocks,
       message: result.total === 0 ? "没有收藏的股票" : undefined,
     });
   } catch (err) {
