@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { signIn, useSession } from "next-auth/react";
+import SiteHeader from "@/app/components/SiteHeader";
 
 type Signal = "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell";
 type SignalType = "buy" | "sell" | "neutral";
@@ -383,29 +383,12 @@ export default function SignalsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-6">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <Link
-            href="/"
-            className="mt-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-3.5 w-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"
-              />
-            </svg>
-            返回
-          </Link>
-          <div>
+    <>
+      <SiteHeader />
+      <div className="mx-auto max-w-2xl px-4 py-6">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div>
             <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500/15 text-orange-400">
                 <svg
@@ -574,5 +557,6 @@ export default function SignalsPage() {
         </>
       )}
     </div>
+    </>
   );
 }

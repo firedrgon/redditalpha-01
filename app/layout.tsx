@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppProviders } from "./providers";
+import SiteFooter from "./components/SiteFooter";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f97316",
+  themeColor: "#14b8a6",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -49,7 +50,10 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-zinc-950" suppressHydrationWarning>
-        <AppProviders>{children}</AppProviders>
+        <AppProviders>
+          {children}
+          <SiteFooter />
+        </AppProviders>
       </body>
     </html>
   );

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import SiteHeader from "@/app/components/SiteHeader";
 
 interface NotificationItem {
   id: string;
@@ -216,7 +217,9 @@ export default function NotificationsPage() {
   // ── 未登录 ──
   if (status !== "authenticated") {
     return (
-      <main className="mx-auto max-w-screen-xl flex-1 px-4 py-16 text-center">
+      <>
+        <SiteHeader />
+        <main className="mx-auto max-w-screen-xl flex-1 px-4 py-16 text-center">
         <h1 className="text-2xl font-bold">通知中心</h1>
         <p className="mt-3 text-sm text-zinc-400">登录后可查看建仓/平仓信号提醒与推送设置。</p>
         <button
@@ -226,11 +229,14 @@ export default function NotificationsPage() {
           登录 / 注册
         </button>
       </main>
+      </>
     );
   }
 
   return (
-    <main className="mx-auto max-w-screen-xl flex-1 px-4 py-8">
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-screen-xl flex-1 px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">通知中心</h1>
@@ -247,7 +253,7 @@ export default function NotificationsPage() {
       </div>
 
       {/* 通知列表 */}
-      <section className="rounded-xl border border-zinc-800 bg-zinc-950">
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/60">
         {loading ? (
           <div className="px-4 py-10 text-center text-sm text-zinc-500">加载中…</div>
         ) : items.length === 0 ? (
@@ -283,7 +289,7 @@ export default function NotificationsPage() {
       </section>
 
       {/* 通知设置 */}
-      <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-950 p-5">
+      <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
         <h2 className="mb-4 text-sm font-semibold text-zinc-200">通知设置</h2>
         <div className="space-y-4">
           {/* 邮件 */}
@@ -335,5 +341,6 @@ export default function NotificationsPage() {
         </div>
       </section>
     </main>
+    </>
   );
 }

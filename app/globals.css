@@ -1,21 +1,82 @@
 @import "tailwindcss";
 
-:root {
-  --background: #09090b;
-  --foreground: #fafafa;
-}
+/*
+ * 设计系统重写：全面对齐参考站 helpaio.com（shadcn/ui + Tailwind v4 风格）
+ * 做法：直接覆盖 Tailwind 默认调色板（zinc / orange）与圆角，
+ *       使既有组件在不改动 JSX 的情况下整体呈现 helpaio 视觉。
+ *  - zinc-*  -> helpaio 深色灰阶（背景 216 24% 7% / 卡片 222 16% 14% / 边框 222 14% 22%）
+ *  - orange-* -> helpaio 青绿主色（primary 174 66% 50%）
+ *  - 圆角     -> 近直角（helpaio --radius:0，卡片≈4px）
+ *  - 字体     -> 系统字体栈（PingFang SC / Microsoft YaHei）
+ */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", "PingFang SC", "Hiragino Sans GB", monospace;
+
+  /* 圆角：helpaio 近直角风格 */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 2px;
+  --radius-xl: 4px;
+  --radius-2xl: 6px;
+  --radius-3xl: 8px;
+
+  /* zinc-* 映射为 helpaio 深色灰阶 */
+  --color-zinc-50: hsl(220 16% 95%);
+  --color-zinc-100: hsl(220 15% 90%);
+  --color-zinc-200: hsl(220 14% 84%);
+  --color-zinc-300: hsl(220 13% 76%);
+  --color-zinc-400: hsl(220 12% 66%);
+  --color-zinc-500: hsl(220 11% 55%);
+  --color-zinc-600: hsl(222 13% 44%);
+  --color-zinc-700: hsl(222 14% 30%);
+  --color-zinc-800: hsl(222 14% 22%);
+  --color-zinc-900: hsl(222 16% 14%);
+  --color-zinc-950: hsl(216 24% 7%);
+
+  /* orange-* 映射为 helpaio 青绿主色（teal） */
+  --color-orange-50: hsl(174 70% 95%);
+  --color-orange-100: hsl(174 70% 90%);
+  --color-orange-200: hsl(174 70% 80%);
+  --color-orange-300: hsl(174 70% 68%);
+  --color-orange-400: hsl(174 68% 58%);
+  --color-orange-500: hsl(174 66% 50%);
+  --color-orange-600: hsl(174 70% 42%);
+  --color-orange-700: hsl(174 72% 35%);
+  --color-orange-800: hsl(174 74% 28%);
+  --color-orange-900: hsl(174 76% 22%);
+  --color-orange-950: hsl(174 78% 16%);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: hsl(216 24% 7%);
+  color: hsl(220 14% 84%);
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
+  line-height: 1.65;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* helpaio 风格内容容器 */
+.page-gutter {
+  width: 100%;
+  max-width: 72rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+@media (min-width: 640px) {
+  .page-gutter {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
 }
 
 /* Hide scrollbar for tabs */
@@ -25,30 +86,4 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
-}
-@import "tailwindcss";
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
