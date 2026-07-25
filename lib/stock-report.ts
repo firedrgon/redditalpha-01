@@ -27,7 +27,8 @@ import {
 import { fetchQuote } from "./quote";
 import { chatCompletion } from "./llm";
 import { getPrisma } from "@/lib/db/prisma";
-import { fetchCNFinancialMetrics } from "./finance-cn";
+import { fetchCNFinancialMetrics, fetchCNPeers } from "./finance-cn";
+import type { CNPeer } from "./finance-cn";
 import { detectMarket } from "./market";
 
 const UA =
@@ -48,6 +49,7 @@ export interface PeerComparison {
   trailingPE?: number | null;
   forwardPE?: number | null;
   evEbitda?: number | null;
+  pb?: number | null; // 市净率（A 股同业对比常用）
   targetMeanPrice?: number | null;
 }
 
@@ -956,6 +958,25 @@ export async function getCNAnalysisData(
     technical: technical ?? null,
   };
 
+  // 同业对比（A 股：同行业成分股）
+  const rawPeers = await fetchCNPeers(upper, metrics.boardCode ?? null, notes).catch(
+    () => null
+  );
+  if (rawPeers && rawPeers.length > 0) {
+    data.peers = rawPeers.map((p: CNPeer) => ({
+      ticker: p.ticker,
+      name: p.name,
+      price: p.price,
+      changePercent: p.changePercent,
+      marketCap: p.marketCap,
+      trailingPE: p.trailingPE,
+      forwardPE: p.forwardPE,
+      evEbitda: p.evEbitda,
+      pb: p.pb,
+      targetMeanPrice: p.targetMeanPrice,
+    }));
+  }
+
   // 同花顺筹码状态作为辅助技术信号注入 notes（会随 dataJson 传入 prompt）
   if (chip) {
     data.notes = data.notes ?? [];
@@ -991,7 +1012,7 @@ function buildReportPrompt(data: StockAnalysisData): {
 ## 估值分析
 （必须使用 PE、前瞻 PE、EV/EBITDA 或 EV/EBIT、PEG、P/B、P/S 等指标；结合 52 周区间与 YTD 涨跌幅给出相对行业/历史的溢价或折价判断；若提供 forwardEps / 管理层指引相关新闻，可推导 EPS 增速与 PEG；若数据含 targetMeanPrice / targetHighPrice / targetLowPrice 与 analystRatings，须引用华尔街一致目标价区间与买入机构占比作为估值锚。注意：若 ebitda 为 null 但 evEbit 有值，说明数据源未披露 EBITDA，请用 EV/EBIT 替代，并注明"因数据源未披露 EBITDA，采用 EV/EBIT（该倍数因不含折旧摊销而天然偏高）"）
 ## 同业估值对比
-（若数据中包含 peers 数组，必须用表格对比本公司及同业的关键指标——市值、TTM PE、前瞻 PE、EV/EBITDA、分析师目标价——并点评相对估值高低与各自业务特征）
+（若数据中包含 peers 数组，必须用表格对比本公司及同业的关键指标——市值、TTM PE、PB、前瞻 PE、EV/EBITDA、分析师目标价——并点评相对估值高低与各自业务特征。A 股可比公司优先用 PB 与 TTM PE 比较，若某列缺失（如前瞻 PE / EV/EBITDA 为 null）则留空或填"—"，不要编造）
 ## 技术分析
 （基于提供的技术信号与技术面数据，给出趋势判断、关键支撑/阻力位、短期(1–3 月)与中期(3–6 月)方向）
 ## 风险评估
@@ -1064,6 +1085,7 @@ function buildReportPrompt(data: StockAnalysisData): {
         trailingPE: p.trailingPE,
         forwardPE: p.forwardPE,
         evEbitda: p.evEbitda,
+        pb: p.pb,
         targetMeanPrice: p.targetMeanPrice,
       })),
       news: (data.news || []).slice(0, 8).map((n) => ({

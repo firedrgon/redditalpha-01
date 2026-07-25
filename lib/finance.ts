@@ -38,6 +38,7 @@ export interface FinancialMetrics {
   forwardPE: number | null;
   pegRatio: number | null;
   industry?: string | null;
+  boardCode?: string | null; // 东方财富行业板块代码（A 股同业对比定位成分股用）
   industryPE?: number | null; // 行业 PE（近似值）
   sector?: string | null; // 所属 broad sector
   // 同行业对比（百分位，0-100，数值越大越好）

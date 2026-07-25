@@ -229,6 +229,7 @@ async function fetchEastmoneyMetrics(
   const secid = ex === "SH" ? `1.${code}` : `0.${code}`;
   const f10Code = `${ex}${code}`; // SH600276
   const emCode = `${code}.${ex}`; // 600276.SH
+  let boardCode: string | null = null; // 行业板块代码（用于同业对比定位成分股），下方 CPD 抓取时赋值
 
   // 并行请求 7 路数据
   const [
@@ -302,8 +303,7 @@ async function fetchEastmoneyMetrics(
     })(),
     // 5. 行业 PE（需要 CPD 的 BOARD_CODE，先取 CPD 再算行业 PE）
     (async (): Promise<number | null> => {
-      // 先取 CPD 获取行业板块代码
-      let boardCode: string | null = null;
+      // 先取 CPD 获取行业板块代码（boardCode 已在函数顶部声明）
       try {
         const res = await fetch(
           `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_LICO_FN_CPD&columns=BOARD_CODE&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=1&sortColumns=REPORTDATE&sortTypes=-1`,
@@ -675,6 +675,7 @@ async function fetchEastmoneyMetrics(
     forwardPE: null,
     pegRatio,
     industry,
+    boardCode,
     industryPE,
     sector: null,
     industryRank: null,
@@ -734,7 +735,8 @@ async function fetchEastmoneyMetrics(
  * 从东方财富研报接口获取分析师共识（目标价/评级/机构数）。
  */
 async function fetchEastmoneyAnalystConsensus(
-  ticker: string
+  ticker: string,
+  timeoutMs: number = 8000
 ): Promise<AnalystConsensus | null> {
   const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
   if (!m) return null;
@@ -752,7 +754,7 @@ async function fetchEastmoneyAnalystConsensus(
           "User-Agent": UA,
           Referer: "https://data.eastmoney.com/",
         },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(timeoutMs),
       }
     );
     if (!res.ok) return null;
@@ -822,6 +824,93 @@ async function fetchEastmoneyAnalystConsensus(
       recommendationMean,
       distribution,
     };
+  } catch {
+    return null;
+  }
+}
+
+export interface CNPeer {
+  ticker: string;
+  name: string | null;
+  price: number | null;
+  changePercent: number | null;
+  marketCap: number | null;
+  trailingPE: number | null;
+  forwardPE: number | null;
+  evEbitda: number | null;
+  pb: number | null;
+  targetMeanPrice: number | null;
+}
+
+/**
+ * 从东方财富 clist 接口获取同行业可比公司（A 股同业对比）。
+ * 通过行业板块代码列出成分股，对每只 peer 抓分析师目标价，组装成 CNPeer[]。
+ */
+export async function fetchCNPeers(
+  selfCode: string,
+  boardCode: string | null,
+  notes: string[]
+): Promise<CNPeer[] | null> {
+  if (!boardCode) return null;
+  const selfNum = selfCode.match(/^(\d{6})/)?.[1];
+  try {
+    const res = await fetch(
+      `https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fs=b:${boardCode}&fields=f12,f14,f9,f20,f23,f57`,
+      {
+        headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
+        signal: AbortSignal.timeout(6000),
+      }
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      data?: {
+        diff?: Array<{
+          f12?: string;
+          f14?: string;
+          f9?: number;
+          f20?: number;
+          f23?: number;
+          f57?: string;
+        }>;
+      };
+    };
+    const list = json.data?.diff ?? [];
+    const peers = list
+      .filter((x) => x.f57 && selfNum && !x.f57.toUpperCase().includes(selfNum))
+      .slice(0, 5);
+    if (peers.length === 0) return null;
+
+    const valid = (
+      await Promise.all(
+        peers.map(async (p) => {
+          const [mktNum, code] = (p.f57 as string).split(".");
+          const sym = mktNum === "1" ? "SH" : "SZ";
+          const peerCode = `${code}.${sym}`;
+          const consensus = await fetchEastmoneyAnalystConsensus(
+            peerCode,
+            5000
+          ).catch(() => null);
+          return {
+            ticker: peerCode,
+            name: p.f14 ?? null,
+            price: null,
+            changePercent: null,
+            marketCap: p.f20 ?? null,
+            trailingPE: p.f9 ?? null,
+            forwardPE: null,
+            evEbitda: null,
+            pb: p.f23 ?? null,
+            targetMeanPrice: consensus?.targetMeanPrice ?? null,
+          } as CNPeer;
+        })
+      )
+    ).filter((r) => r.marketCap != null || r.trailingPE != null);
+
+    if (valid.length === 0) {
+      notes.push("同业对标数据获取失败，已跳过同业对比。");
+      return null;
+    }
+    return valid;
   } catch {
     return null;
   }
@@ -957,6 +1046,7 @@ export async function fetchCNFinancialMetrics(
     forwardPE: null,
     pegRatio: null,
     industry: null,
+    boardCode: null,
     industryPE: null,
     sector: null,
     industryRank: null,
