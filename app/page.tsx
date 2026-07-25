@@ -271,6 +271,7 @@ interface ProviderInfo {
   name: string;
   description: string;
   model: string;
+  customModel: boolean;
   protocol: string;
   free: boolean;
   needsKey: boolean;
@@ -1830,6 +1831,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [llmLoading, setLlmLoading] = useState(true);
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState<string | null>(null);
   const [testingAll, setTestingAll] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
@@ -1934,6 +1936,29 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     await updateProvider(providerId, "setKey", { apiKey: key });
     setKeyInputs((prev) => ({ ...prev, [providerId]: "" }));
     showToast("API Key 已保存");
+  };
+
+  const handleSaveModel = async (providerId: string) => {
+    const model = (modelInputs[providerId] || "").trim();
+    if (!model) return;
+    try {
+      const res = await fetch("/api/llm-providers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setModel", providerId, model }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt);
+      }
+      await reloadLLM();
+      const p = providers.find((x) => x.id === providerId);
+      showToast(`模型已更新：${p?.name ?? providerId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLlmError(msg);
+      showToast(msg, "err");
+    }
   };
 
   const handleTestOne = async (providerId: string) => {
@@ -2207,6 +2232,36 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                     {" · "}
                     {p.freeQuota}
                   </div>
+                  {/* 自定义模型名编辑（豆包等需填 Endpoint ID 的 provider） */}
+                  {p.customModel && (
+                    <div className="mt-2">
+                      <label className="mb-1 block text-[11px] text-zinc-500">
+                        模型 / 接入点 ID（必填，如 <span className="font-mono">ep-xxxx</span>）
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={modelInputs[p.id] ?? p.model}
+                          onChange={(e) =>
+                            setModelInputs((prev) => ({
+                              ...prev,
+                              [p.id]: e.target.value,
+                            }))
+                          }
+                          placeholder={p.model}
+                          className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveModel(p.id)}
+                          disabled={!(modelInputs[p.id] && modelInputs[p.id].trim())}
+                          className="rounded border border-orange-500/40 bg-orange-500/20 px-3 py-1 text-xs text-orange-400 hover:bg-orange-500/30 disabled:opacity-30"
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {p.hasKey ? (
                     <div className="mt-1 text-[11px] text-zinc-600">
                       {p.keySource === "env" ? (

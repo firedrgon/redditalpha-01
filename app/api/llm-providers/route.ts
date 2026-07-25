@@ -4,6 +4,7 @@ import {
   setProviderKey,
   setProviderEnabled,
   setActiveProvider,
+  setProviderModel,
 } from "@/lib/llm-config";
 import { LLM_PROVIDERS } from "@/lib/llm-providers";
 import { refreshProviderStatuses, testProvider } from "@/lib/llm";
@@ -35,7 +36,9 @@ export async function GET() {
       id: p.id,
       name: p.name,
       description: p.description,
-      model: p.model,
+      // 用户自定义模型（如豆包 Endpoint ID）优先；否则用静态默认 model
+      model: status.model ?? p.model,
+      customModel: p.customModel ?? false,
       protocol: p.protocol,
       free: p.free,
       needsKey: p.needsKey,
@@ -73,10 +76,11 @@ export async function GET() {
 }
 
 interface PatchBody {
-  action: "setKey" | "setEnabled" | "setActive";
+  action: "setKey" | "setEnabled" | "setActive" | "setModel";
   providerId?: string;
   apiKey?: string;
   enabled?: boolean;
+  model?: string;
 }
 
 /** PATCH /api/llm-providers：更新单个 provider 的 Key/启用状态/活跃 */
@@ -91,7 +95,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "无效的 JSON 请求体" }, { status: 400 });
   }
 
-  const { action, providerId, apiKey, enabled } = body;
+  const { action, providerId, apiKey, enabled, model } = body;
   if (!providerId && action !== "setActive") {
     return NextResponse.json({ error: "缺少 providerId" }, { status: 400 });
   }
@@ -108,6 +112,10 @@ export async function PATCH(request: NextRequest) {
         if (typeof enabled !== "boolean")
           throw new Error("enabled 必须为 boolean");
         config = await setProviderEnabled(providerId, enabled);
+        break;
+      case "setModel":
+        if (!providerId) throw new Error("缺少 providerId");
+        config = await setProviderModel(providerId, model ?? "");
         break;
       case "setActive":
         config = await setActiveProvider(providerId ?? null);
