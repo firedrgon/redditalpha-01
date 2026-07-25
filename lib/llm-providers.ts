@@ -54,6 +54,12 @@ export const ZHIPU_PROVIDER_IDS = [
   "zhipu-2",
 ] as const;
 
+/** 通义千问系列 provider 共享同一 API Key（LLM_API_KEY_QWEN / DASHSCOPE_API_KEY） */
+export const QWEN_PROVIDER_IDS = [
+  "qwen-1",
+  "qwen-2",
+] as const;
+
 /**
  * 自动选择活跃 provider 时的优先级（配额 + 质量综合优先）。
  *
@@ -66,6 +72,8 @@ export const PREFERRED_ACTIVE_ORDER = [
   "gemini-2",
   "zhipu-1",
   "zhipu-2",
+  "qwen-1",
+  "qwen-2",
   "deepseek-1",
   "groq-1",
   "groq-2",
@@ -203,6 +211,39 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "智谱最新 GLM-4.7-Flash：免费、质量优于 GLM-4-Flash，128K 上下文，适合深度中文分析。与其他智谱配置共用 Key",
     protocol: "openai",
     freeQuota: "免费层：GLM-4.7-Flash 永久免费；注册送 2000 万 token（永久有效）",
+  },
+  {
+    id: "qwen-1",
+    contextWindow: 128_000,
+    name: "通义千问 Qwen-Turbo",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    model: "qwen-turbo",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "阿里云百炼 Qwen-Turbo：永久免费（每月 100 万 token）、128K 上下文、中文强、速度快，适合轻量中文分析。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota:
+      "永久免费：qwen-turbo 每月 100 万 token（需阿里云实名）；其他 Qwen 模型各有 90 天免费额度",
+  },
+  {
+    id: "qwen-2",
+    contextWindow: 128_000,
+    name: "通义千问 Qwen-Plus",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    model: "qwen-plus",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "阿里云百炼 Qwen-Plus：质量优于 Turbo、128K 上下文、有 90 天免费额度，适合深度中文分析。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota: "开通后 90 天免费额度：各 Qwen 模型独立 100 万 token（累计超 7000 万）",
   },
 ];
 

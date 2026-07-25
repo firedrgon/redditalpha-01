@@ -19,6 +19,7 @@ import {
   GEMINI_PROVIDER_IDS,
   GROQ_PROVIDER_IDS,
   ZHIPU_PROVIDER_IDS,
+  QWEN_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
   type LLMProvider,
 } from "./llm-providers";
@@ -90,6 +91,7 @@ function readEnvKeys(): Record<string, string> {
     ["GEMINI_API_KEY", "gemini-1"],
     ["GOOGLE_API_KEY", "gemini-1"],
     ["ZHIPU_API_KEY", "zhipu-1"],
+    ["DASHSCOPE_API_KEY", "qwen-1"],
   ];
   for (const [alias, providerId] of aliases) {
     const v = process.env[alias];
@@ -141,6 +143,16 @@ function readEnvKeys(): Record<string, string> {
   if (zhipuKey) {
     for (const id of ZHIPU_PROVIDER_IDS) {
       if (!out[id]) out[id] = zhipuKey;
+    }
+  }
+  // 通义千问系列共用同一 Key
+  // 统一环境变量 LLM_API_KEY_QWEN，兼容 DASHSCOPE_API_KEY
+  const qwenKey =
+    process.env.LLM_API_KEY_QWEN?.trim() ||
+    process.env.DASHSCOPE_API_KEY?.trim();
+  if (qwenKey) {
+    for (const id of QWEN_PROVIDER_IDS) {
+      if (!out[id]) out[id] = qwenKey;
     }
   }
   return out;
@@ -229,6 +241,29 @@ function applySharedZhipuKeys(config: LLMConfig): void {
   }
   if (!sharedKey) return;
   for (const id of ZHIPU_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s && !s.apiKey?.trim()) {
+      s.apiKey = sharedKey;
+      if (sharedSource === "env") s.keySource = "env";
+      else if (sharedSource === "local") s.keySource = "local";
+    }
+  }
+}
+
+/** 通义千问系列共用同一 Key（LLM_API_KEY_QWEN / DASHSCOPE_API_KEY，UI 保存到任一 provider 即可） */
+function applySharedQwenKeys(config: LLMConfig): void {
+  let sharedKey = "";
+  let sharedSource: ProviderStatus["keySource"] | null = null;
+  for (const id of QWEN_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      sharedKey = s.apiKey.trim();
+      sharedSource = s.keySource;
+      break;
+    }
+  }
+  if (!sharedKey) return;
+  for (const id of QWEN_PROVIDER_IDS) {
     const s = config.providers[id];
     if (s && !s.apiKey?.trim()) {
       s.apiKey = sharedKey;
@@ -426,6 +461,7 @@ export async function readConfig(): Promise<LLMConfig> {
   applySharedGeminiKeys(config);
   applySharedGroqKeys(config);
   applySharedZhipuKeys(config);
+  applySharedQwenKeys(config);
   applyEnvKeys(config, isFreshConfig);
 
   // 校正活跃模型：用户锁定的是"具体模型 slug"而非槽位。
