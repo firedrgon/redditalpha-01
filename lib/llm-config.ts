@@ -46,7 +46,6 @@ export interface LLMConfig {
   providers: Record<string, ProviderStatus>;
   activeProvider: string | null;
   updatedAt: number;
-  dynamicOpenRouterModels?: Array<{ id: string; name: string; slug: string }>;
   dynamicGeminiModels?: Array<{ id: string; name: string; slug: string }>;
   dynamicGroqModels?: Array<{ id: string; name: string; slug: string }>;
 }
@@ -236,6 +235,10 @@ function migrateOldProviderIds(providers: Record<string, ProviderStatus>): Recor
     "groq-qwen3-32b": "groq-2",
     "groq-gpt-oss-120b": "groq-3",
     "duckduckgo": "groq-1", // DuckDuckGo 已移除，映射到 groq-1 作为兜底
+    "openrouter-2": "openrouter-1",
+    "openrouter-3": "openrouter-1",
+    "openrouter-4": "openrouter-1",
+    "openrouter-5": "openrouter-1",
   };
   const result = { ...providers };
   for (const [oldId, newId] of Object.entries(migrations)) {
@@ -257,6 +260,10 @@ function migrateActiveProvider(activeProvider: string | null | undefined): strin
     "groq-qwen3-32b": "groq-2",
     "groq-gpt-oss-120b": "groq-3",
     "duckduckgo": null, // DuckDuckGo 已移除
+    "openrouter-2": "openrouter-1",
+    "openrouter-3": "openrouter-1",
+    "openrouter-4": "openrouter-1",
+    "openrouter-5": "openrouter-1",
   };
   if (activeProvider in migrations) return migrations[activeProvider];
   return activeProvider;
@@ -273,7 +280,6 @@ function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
     providers: { ...DEFAULT_CONFIG.providers, ...migratedProviders },
     activeProvider: validActive,
     updatedAt: parsed.updatedAt ?? 0,
-    dynamicOpenRouterModels: parsed.dynamicOpenRouterModels,
     dynamicGeminiModels: parsed.dynamicGeminiModels,
     dynamicGroqModels: parsed.dynamicGroqModels,
   };
@@ -294,17 +300,6 @@ async function applyPersistedModels(config: LLMConfig): Promise<void> {
 
   // 兼容旧配置：如果数据库没有缓存，尝试从 config JSON 中读取（迁移期过渡）
   if (cachedModels.length === 0) {
-    if (config.dynamicOpenRouterModels) {
-      for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
-        const providerId = OPENROUTER_PROVIDER_IDS[i];
-        const modelInfo = config.dynamicOpenRouterModels[i];
-        const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
-        if (provider && modelInfo) {
-          provider.model = `${modelInfo.slug}:free`;
-          provider.name = `OpenRouter · ${modelInfo.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
-        }
-      }
-    }
     if (config.dynamicGeminiModels) {
       for (let i = 0; i < GEMINI_PROVIDER_IDS.length; i++) {
         const providerId = GEMINI_PROVIDER_IDS[i];
@@ -346,6 +341,16 @@ async function applyPersistedModels(config: LLMConfig): Promise<void> {
       if (provider) {
         provider.model = status.model;
       }
+    }
+  }
+
+  // OpenRouter 固定使用官方 Free Models Router（openrouter/free），
+  // 强制覆盖任何旧配置里残留的具体免费模型 slug，确保始终走自动路由。
+  for (const id of OPENROUTER_PROVIDER_IDS) {
+    const provider = LLM_PROVIDERS.find((p) => p.id === id);
+    if (provider) {
+      provider.model = "openrouter/free";
+      provider.name = "OpenRouter · Free Models Router";
     }
   }
 }

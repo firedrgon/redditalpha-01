@@ -14,7 +14,6 @@ import { readConfig, updateConfigSafely } from "./llm-config";
 import {
   LLM_PROVIDERS,
   type LLMProvider,
-  OPENROUTER_PROVIDER_IDS,
   GROQ_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
 } from "./llm-providers";
@@ -210,22 +209,7 @@ export async function chatCompletion(
         } else if (isTransientError(msg)) {
           freshStatus.working = null;
           freshStatus.cooldownUntil = now + getCooldownMs(msg);
-          // OpenRouter / Groq 系列共享配额：联动冷却同系列模型
-          if (
-            /429|rate.?limit/i.test(msg) &&
-            OPENROUTER_PROVIDER_IDS.includes(
-              provider.id as (typeof OPENROUTER_PROVIDER_IDS)[number]
-            )
-          ) {
-            for (const id of OPENROUTER_PROVIDER_IDS) {
-              if (id === provider.id) continue;
-              const s = freshConfig.providers[id];
-              if (s && s.enabled && s.apiKey) {
-                s.cooldownUntil = now + getCooldownMs(msg);
-                s.working = null;
-              }
-            }
-          }
+          // Groq 系列共享配额：联动冷却同系列模型
           if (
             /429|rate.?limit/i.test(msg) &&
             GROQ_PROVIDER_IDS.includes(
@@ -461,10 +445,6 @@ export async function refreshProviderStatuses(): Promise<{
   results: Array<{ id: string; name: string; ok: boolean; error?: string }>;
 }> {
   try {
-    await refreshOpenRouterModels();
-  } catch {
-  }
-  try {
     await refreshGroqModels();
   } catch {
   }
@@ -499,95 +479,6 @@ export async function refreshProviderStatuses(): Promise<{
   }
 
   return { results };
-}
-
-interface OpenRouterModelInfo {
-  id: string;
-  name: string;
-  slug: string;
-  contextLength: number;
-  supportsTools: boolean;
-  supportsReasoning: boolean;
-  supportsStructuredOutputs: boolean;
-  createdAt: number;
-}
-
-/**
- * 从 OpenRouter API 获取最新免费模型列表，并按财务分析适配度评分排序。
- * 返回前5个最适合财务分析的免费模型。
- */
-export async function fetchOpenRouterFreeModels(): Promise<OpenRouterModelInfo[]> {
-  try {
-    const res = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { "User-Agent": "Reddit-Alpha/1.0" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const models = data?.data ?? [];
-
-    const free = models.filter((m: Record<string, unknown>) => {
-      const pricing = m.pricing as Record<string, unknown> | undefined;
-      return pricing?.prompt === "0" && pricing?.completion === "0";
-    });
-
-    const excludeKeywords = /content-safety|code|audio|whisper|tts|vision|vl$|clip|lyria|laguna|poolside|cohere\/north/i;
-
-    const scored = free
-      .filter((m: Record<string, unknown>) => {
-        const id = String(m.id ?? "");
-        if (excludeKeywords.test(id)) return false;
-        const modalities = (m.architecture as Record<string, unknown>)?.input_modalities as string[] | undefined;
-        return !modalities || modalities.length === 0 || modalities.every((mod) => mod === "text");
-      })
-      .map((m: Record<string, unknown>) => {
-        const id = String(m.id ?? "");
-        const supportedParams = (m.supported_parameters as string[]) ?? [];
-        const supportedFeatures = (m.supported_features as string[]) ?? [];
-        const allFeatures = [...supportedParams, ...supportedFeatures];
-        return {
-          id: id,
-          name: String(m.name ?? id),
-          slug: id,
-          contextLength: Number(m.context_length ?? 0),
-          supportsTools: allFeatures.includes("tools") || allFeatures.includes("function_calling"),
-          supportsReasoning: allFeatures.includes("reasoning"),
-          supportsStructuredOutputs: allFeatures.includes("structured_outputs") || allFeatures.includes("json_mode"),
-          createdAt: Number(m.created ?? 0),
-        };
-      });
-
-    const now = Date.now() / 1000;
-    return scored
-      .map((model: OpenRouterModelInfo) => {
-        const daysOld = Math.floor((now - model.createdAt) / (24 * 3600));
-        const recencyScore = Math.max(0, 365 - daysOld) * 10;
-        return {
-          ...model,
-          score:
-            model.contextLength * 0.5 +
-            (model.supportsTools ? 2000 : 0) +
-            (model.supportsReasoning ? 1500 : 0) +
-            (model.supportsStructuredOutputs ? 1000 : 0) +
-            recencyScore,
-        };
-      })
-      .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
-      .slice(0, 5)
-      .map((m: OpenRouterModelInfo & { score: number }) => ({
-        id: m.id,
-        name: m.name,
-        slug: m.slug,
-        contextLength: m.contextLength,
-        supportsTools: m.supportsTools,
-        supportsReasoning: m.supportsReasoning,
-        supportsStructuredOutputs: m.supportsStructuredOutputs,
-        createdAt: m.createdAt,
-      }));
-  } catch {
-    return [];
-  }
 }
 
 interface GroqModelInfo {
@@ -717,68 +608,6 @@ export async function fetchGeminiModels(apiKey: string): Promise<GeminiModelInfo
   } catch {
     return [];
   }
-}
-
-/**
- * 动态刷新 OpenRouter 免费模型：获取前5个评分最高的模型，直接替换所有 OpenRouter provider。
- * 同时测试每个 provider 的可用性。
- */
-export async function refreshOpenRouterModels(): Promise<{
-  updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
-  availableModels: string[];
-  testResults: Array<{ providerId: string; working: boolean; error?: string }>;
-}> {
-  const freeModels = await fetchOpenRouterFreeModels();
-  if (freeModels.length === 0) return { updated: [], availableModels: [], testResults: [] };
-
-  const availableSlugs = freeModels.map((m) => m.slug);
-  const updated: Array<{ providerId: string; oldModel: string; newModel: string }> = [];
-  const dbModels: Array<{ providerId: string; modelSlug: string; modelName: string }> = [];
-
-  for (let i = 0; i < OPENROUTER_PROVIDER_IDS.length; i++) {
-    const providerId = OPENROUTER_PROVIDER_IDS[i];
-    const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
-    const model = freeModels[i];
-    if (!provider || !model) continue;
-
-    const oldModel = provider.model;
-    const newModelSlug = `${model.slug}:free`;
-    const newModelName = `OpenRouter · ${model.name.replace(/\s*\(free\)\s*/i, "").trim()}`;
-    if (oldModel !== newModelSlug) {
-      provider.model = newModelSlug;
-      provider.name = newModelName;
-      updated.push({ providerId, oldModel, newModel: newModelSlug });
-    }
-    dbModels.push({ providerId, modelSlug: newModelSlug, modelName: newModelName });
-  }
-
-  await saveCachedModels("openrouter", dbModels);
-
-  const config = await readConfig();
-  const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
-  let openrouterKey = "";
-  for (const id of OPENROUTER_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s?.apiKey?.trim()) {
-      openrouterKey = s.apiKey.trim();
-      break;
-    }
-  }
-
-  if (openrouterKey) {
-    for (const providerId of OPENROUTER_PROVIDER_IDS) {
-      const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
-      if (!provider || !provider.model) continue;
-      try {
-        const result = await testProvider(providerId);
-        testResults.push({ providerId, working: result.ok, error: result.error });
-      } catch (err) {
-        testResults.push({ providerId, working: false, error: String(err) });
-      }
-    }
-  }
-
-  return { updated, availableModels: availableSlugs, testResults };
 }
 
 /**

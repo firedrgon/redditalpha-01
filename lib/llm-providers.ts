@@ -22,14 +22,12 @@ export interface LLMProvider {
   freeQuota: string;
 }
 
-/** OpenRouter 系列 provider 共享同一 API Key */
-export const OPENROUTER_PROVIDER_IDS = [
-  "openrouter-1",
-  "openrouter-2",
-  "openrouter-3",
-  "openrouter-4",
-  "openrouter-5",
-] as const;
+/**
+ * OpenRouter 系列 provider 共享同一 API Key。
+ * 仅保留 1 个：使用官方 Free Models Router（openrouter/free），
+ * 由 OpenRouter 自动从可用免费模型中挑选，无需自行筛选/打分。
+ */
+export const OPENROUTER_PROVIDER_IDS = ["openrouter-1"] as const;
 
 /** Gemini 系列 provider 共享同一 API Key */
 export const GEMINI_PROVIDER_IDS = [
@@ -58,10 +56,6 @@ export const PREFERRED_ACTIVE_ORDER = [
   "groq-2",
   "groq-3",
   "openrouter-1",
-  "openrouter-2",
-  "openrouter-3",
-  "openrouter-4",
-  "openrouter-5",
 ] as const;
 
 export const LLM_PROVIDERS: LLMProvider[] = [
@@ -93,68 +87,17 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "openrouter-1",
-    name: "OpenRouter · Nemotron 3 Ultra 550B",
+    name: "OpenRouter · Free Models Router",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+    model: "openrouter/free",
     free: true,
     needsKey: true,
     signupUrl: "https://openrouter.ai/keys",
-    docsUrl: "https://openrouter.ai/docs",
-    description: "550B 参数，1M 上下文，推理能力强，适合深度财务分析。与其他 OpenRouter 模型共用 Key",
+    docsUrl: "https://openrouter.ai/docs/cookbook/get-started/free-models-router-playground",
+    description:
+      "OpenRouter 官方 Free Models Router：自动从当前可用的免费模型中挑选最合适的（按是否支持工具调用/结构化输出等特性智能过滤），无需手动指定具体模型。与其他 OpenRouter 配置共用 Key",
     protocol: "openai",
-    freeQuota: "免费层：约 20 req/min，每天 50 req（充值 $10 可升至 1000/天）",
-  },
-  {
-    id: "openrouter-2",
-    name: "OpenRouter · Tencent Hy3",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "tencent/hy3:free",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://openrouter.ai/keys",
-    docsUrl: "https://openrouter.ai/docs",
-    description: "腾讯混元 Hy3，295B 参数 MoE，256K 上下文，支持推理模式。与其他 OpenRouter 模型共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：约 10 req/min，每天 50 req",
-  },
-  {
-    id: "openrouter-3",
-    name: "OpenRouter · Qwen3 Coder 480B",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "qwen/qwen3-coder:free",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://openrouter.ai/keys",
-    docsUrl: "https://openrouter.ai/docs",
-    description: "480B 参数，1M 上下文，中文表达自然，通用分析能力强。与其他 OpenRouter 模型共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：约 20 req/min，每天 50 req",
-  },
-  {
-    id: "openrouter-4",
-    name: "OpenRouter · GPT-OSS 120B",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "openai/gpt-oss-120b:free",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://openrouter.ai/keys",
-    docsUrl: "https://openrouter.ai/docs",
-    description: "OpenAI 开源 120B 模型，131K 上下文，分析能力均衡。与其他 OpenRouter 模型共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：约 20 req/min，每天 50 req",
-  },
-  {
-    id: "openrouter-5",
-    name: "OpenRouter · Llama 3.3 70B",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://openrouter.ai/keys",
-    docsUrl: "https://openrouter.ai/docs",
-    description: "Llama 3.3 70B，131K 上下文，速度稳定，适合兜底。与其他 OpenRouter 模型共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：约 20 req/min，每天 50 req",
+    freeQuota: "免费层：路由到多个免费模型，整体配额远高于单一免费模型（充值 $10 后每日上限提升）",
   },
   {
     id: "groq-1",
