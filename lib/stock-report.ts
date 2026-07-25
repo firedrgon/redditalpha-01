@@ -99,6 +99,8 @@ export interface StockAnalysisData {
   trailingEps?: number | null;
   forwardEps?: number | null;
   ytdPercent?: number | null;
+  /** 下次财报披露日期（来自 stockanalysis 概览页 "Earnings Date"，ISO 格式 YYYY-MM-DD） */
+  nextEarningsDate?: string | null;
   netIncomeHistory?: Array<{ year: number; value: number }>;
   freeCashFlowHistory?: Array<{ year: number; value: number }>;
   peers?: PeerComparison[] | null;
@@ -629,6 +631,17 @@ async function scrapeStockAnalysis(
       if (hi) out.week52High = parseFloat(hi[1]);
       if (lo) out.week52Low = parseFloat(lo[1]);
     }
+
+    // 下次财报日期：stockanalysis 概览页以 "Earnings Date" 标签展示，紧邻日期文本
+    const earningsDateMatch = overviewHtml.match(
+      /Earnings Date[\s\S]{0,140}?([A-Z][a-z]{2}\s+\d{1,2},?\s*\d{4})/
+    );
+    if (earningsDateMatch) {
+      const d = new Date(earningsDateMatch[1]);
+      if (!isNaN(d.getTime())) {
+        out.nextEarningsDate = d.toISOString().slice(0, 10); // YYYY-MM-DD
+      }
+    }
   }
 
   return out;
@@ -878,7 +891,7 @@ function buildReportPrompt(data: StockAnalysisData): {
   const system = `你是一名资深美股证券分析师。请基于提供的真实财务与技术数据，撰写一份结构化、详尽的综合分析报告。报告应尽量写满、覆盖所有章节，不要省略或一句话带过。
 
 要求：
-1. 必须严格基于提供的数据，不得编造精确财务数字；数据缺失的字段可基于你的公开领域知识合理补充定性事实（如行业地位、主要客户/长期购电协议、近期重大并购或事件、管理层动向），但须注明"（基于公开信息）"。
+1. 必须严格基于提供的数据，不得编造精确财务数字；数据缺失的字段可基于你的公开领域知识合理补充定性事实（如行业地位、主要客户/长期购电协议、近期重大并购或事件、管理层动向），但须注明"（基于公开信息）"。特别地，装机容量、产能、用户数等绝对规模数字，若数据未提供，禁止用"占比/市场份额"反推具体 GW 或数量，应标注"以公司官方披露为准（基于公开信息）"。
 2. 报告使用 Markdown 格式，必须包含以下章节（顺序固定，每节都要有实质内容，含表格或要点列表）：
 ## 执行摘要
 （含：公司一句话定位、核心投资逻辑、关键风险、评级与目标价预览）
@@ -887,7 +900,7 @@ function buildReportPrompt(data: StockAnalysisData): {
 ## 投资论点
 （### 看多理由 与 ### 看空理由 两个小节，各列 4–6 条，带具体事实与数据支撑）
 ## 基本面分析
-（先用"关键财务数据"表格列出：营业收入、净利润、EBITDA(或 EBIT)、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金、EPS；尽量用提供的绝对数字，缺失写"—"；再用文字解读收入与盈利趋势、利润率变化）
+（先用"关键财务数据"表格列出：营业收入、净利润、EBITDA(或 EBIT)、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金、EPS。重要：下方 JSON 中凡是已提供的字段（totalRevenue / netIncome / operatingIncome / ebitda / operatingCashFlow / freeCashFlow / grossMargin / profitMargin / roe / totalDebt / totalCash / trailingEps / forwardEps），必须填入对应数值，严禁填 "—" 或留空；仅当该字段在 JSON 中确实为 null 或不存在时才填 "—"。注意：若 ebitda 为 null 但 operatingIncome 有值，应将 operatingIncome 作为 EBIT 填入 "EBITDA(或 EBIT)" 列并注明"数据源未披露 EBITDA，此处为 EBIT"。再用文字解读收入与盈利趋势、利润率变化）
 ## 现金流与资产负债表分析
 （结合自由现金流历史趋势、资本开支、债务水平与偿债能力展开；若提供了 netIncomeHistory / freeCashFlowHistory，请用文字描述其趋势；评估杠杆率与流动性风险）
 ## 业务质量与护城河
@@ -901,9 +914,9 @@ function buildReportPrompt(data: StockAnalysisData): {
 ## 风险评估
 （按影响/概率优先级列出公司特有风险与宏观风险）
 ## 催化剂与时间线
-（用表格列出未来 6–12 个月的关键事件：财报日期、监管/政策节点、重大合同或产能里程碑，并标注方向）
+（用表格列出未来 6–12 个月的关键事件：财报日期、监管/政策节点、重大合同或产能里程碑，并标注方向。其中"财报日期"必须使用数据中的 nextEarningsDate 字段；若数据未提供 nextEarningsDate，则明确写"待公司披露"并在该格留空，严禁自行编造任何具体日期。）
 ## 投资建议
-（含评级、12 个月目标价区间——用"保守/基准/乐观"三档情景测算并以表格呈现、建仓/加仓/止损策略、仓位建议与监控清单；目标价需结合估值、同业水平与分析师共识给出依据）
+（含评级、12 个月目标价区间——用"保守/基准/乐观"三档情景测算并以表格呈现、建仓/加仓/止损策略、仓位建议与监控清单；目标价需结合估值、同业水平与分析师共识给出依据。其中"基准"档目标价必须以数据中的 targetMeanPrice（华尔街一致目标价均值）为准，不得另设一个与之不同的"基准"数值；若需给出独立测算的基准，必须明确标注为"本文独立测算"并与 targetMeanPrice 区分。）
 ## 结论
 （3–5 条要点总结，重申评级与目标价）
 3. 全文中文，专业、客观、可执行。所有结论须有数据或逻辑支撑，避免空话。报告末尾用 "> ⚠️" 引用块给出风险提示，声明非投资建议。`;
@@ -915,6 +928,7 @@ function buildReportPrompt(data: StockAnalysisData): {
       price: data.price,
       changePercent: data.changePercent,
       ytdPercent: data.ytdPercent,
+      nextEarningsDate: data.nextEarningsDate,
       currency: data.currency,
       marketCap: data.marketCap,
       week52High: data.week52High,
