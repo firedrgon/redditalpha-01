@@ -8,8 +8,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// 研报生成可能耗时较长（maxTokens 已上调至 7000，Gemini 单次生成接近 60s），
-// 显式放宽函数时长上限，避免被平台默认超时中断。
+// 研报生成可能耗时较长，但 Vercel Hobby 函数硬上限即 60s，且单 provider 子超时
+// 设为 50s（见 lib/llm.ts），故函数时长保持 60s 不再上调，避免部署超限。
+// 报告 maxTokens 控制在 4500 以内，确保免费/慢速模型也能在 50s 子超时内完成。
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {

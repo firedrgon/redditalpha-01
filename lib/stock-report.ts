@@ -1009,7 +1009,7 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 7000 }
+    { temperature: 0.3, maxTokens: 4500 }
   );
 
   // 落库（失败不应阻断返回，仅记录）

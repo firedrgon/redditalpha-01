@@ -66,16 +66,14 @@ function getCooldownMs(msg: string): number {
 /**
  * 单个 provider 调用的子超时（毫秒）。
  *
- * chatCompletion 外部总超时通常 45s，若某个 provider（尤其是 OpenRouter
- * 推理模型如 Nemotron 550B）单次生成就要 60s+，会吃掉全部预算导致后续
- * provider 没机会尝试。设置子超时后，单个 provider 超时即 fallback，
- * 总预算内可尝试 1-2 个 provider。
+ * ⚠️ 必须小于 Vercel 函数的 maxDuration（stock-report 路由设为 60s，
+ * 也是 Hobby 计划硬上限）。否则 Vercel 会先杀掉整个函数，我们的子超时
+ * 根本来不及触发，前端只会收到"连接被掐断"的网络错误而非正常 502。
  *
- * 注：美股研报需要较长的输出（maxTokens 已上调至 7000），对于 Gemini 等
- * 支持大输出的模型，单次生成可能接近 60s，故将子超时放宽到 75s，避免
- * 长报告在中途被 abort。
+ * 这里取 50s，给函数留出 ~10s 余量；某 provider 单次生成超过 50s 即 abort，
+ * 调用方 catch 后返回清晰的报错信息（而非静默超时）。
  */
-const PROVIDER_TIMEOUT_MS = 75_000;
+const PROVIDER_TIMEOUT_MS = 50_000;
 
 /**
  * 包装 callProvider，加上单 provider 子超时。
