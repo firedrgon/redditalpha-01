@@ -36,6 +36,17 @@ export interface StockReportNews {
   url?: string;
 }
 
+export interface PeerComparison {
+  ticker: string;
+  name?: string | null;
+  price?: number | null;
+  marketCap?: number | null;
+  trailingPE?: number | null;
+  forwardPE?: number | null;
+  evEbitda?: number | null;
+  targetMeanPrice?: number | null;
+}
+
 export interface StockAnalysisData {
   ticker: string;
   name?: string | null;
@@ -64,6 +75,22 @@ export interface StockAnalysisData {
   industry?: string | null;
   technical?: TechnicalSignals | null;
   news?: StockReportNews[];
+  // —— 由 Yahoo quoteSummary 补充的绝对财务与估值指标 ——
+  netIncome?: number | null;
+  ebitda?: number | null;
+  operatingCashFlow?: number | null;
+  totalCash?: number | null;
+  totalDebt?: number | null;
+  enterpriseValue?: number | null;
+  /** 优先 Yahoo enterpriseToEbitda，否则 (EV 或 市值+债-现金)/EBITDA */
+  evEbitda?: number | null;
+  dividendYield?: number | null;
+  trailingEps?: number | null;
+  forwardEps?: number | null;
+  ytdPercent?: number | null;
+  netIncomeHistory?: Array<{ year: number; value: number }>;
+  freeCashFlowHistory?: Array<{ year: number; value: number }>;
+  peers?: PeerComparison[] | null;
   notes?: string[];
 }
 
@@ -303,10 +330,10 @@ async function scrapeStockAnalysis(
  * 兜底数据源
  * ============================================================ */
 
-/** Yahoo v8 chart 取 52 周高低（stockanalysis 未给时的兜底） */
+/** Yahoo v8 chart 取 52 周高低 + 当年首个交易日收盘价（用于 YTD） */
 async function fetchYahoo52w(
   ticker: string
-): Promise<{ high: number; low: number } | null> {
+): Promise<{ high: number; low: number; ytdBase: number | null } | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
       ticker
@@ -318,13 +345,19 @@ async function fetchYahoo52w(
     });
     if (!res.ok) return null;
     const d = await res.json();
-    const closes: number[] =
-      d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-    const vals = closes.filter(
-      (x: number) => typeof x === "number" && !isNaN(x)
-    );
+    const result = d?.chart?.result?.[0];
+    const closes: number[] = result?.indicators?.quote?.[0]?.close || [];
+    const timestamps: number[] = result?.timestamp || [];
+    const vals = closes
+      .map((c, i) => ({ c, t: timestamps[i] }))
+      .filter((x) => typeof x.c === "number" && !isNaN(x.c));
     if (vals.length === 0) return null;
-    return { high: Math.max(...vals), low: Math.min(...vals) };
+    const high = Math.max(...vals.map((v) => v.c));
+    const low = Math.min(...vals.map((v) => v.c));
+    const yearStart =
+      new Date(new Date().getFullYear(), 0, 1).getTime() / 1000;
+    const ytdPoint = vals.find((v) => v.t >= yearStart);
+    return { high, low, ytdBase: ytdPoint ? ytdPoint.c : null };
   } catch {
     return null;
   }
@@ -372,6 +405,314 @@ async function fetchYahooNews(ticker: string): Promise<StockReportNews[]> {
 }
 
 /* ============================================================
+ * Yahoo quoteSummary 补充（绝对财务 / 估值 / 同业）
+ * 自包含实现，复用 lib/finance.ts 的 crumb 范式
+ * ============================================================ */
+
+let yfCrumb: { crumb: string; cookie: string; expires: number } | null = null;
+
+async function yfGetCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+  if (yfCrumb && yfCrumb.expires > Date.now()) {
+    return { crumb: yfCrumb.crumb, cookie: yfCrumb.cookie };
+  }
+  try {
+    const homeRes = await fetch("https://fc-api.yahoo.com/", {
+      headers: { "User-Agent": UA },
+      redirect: "manual",
+    });
+    const setCookie = homeRes.headers.get("set-cookie") || "";
+    const parts: string[] = [];
+    for (const c of setCookie.split(/,\s*(?=[A-Za-z])/)) {
+      const m = c.match(/^([^=]+=[^;]+)/);
+      if (m) parts.push(m[1]);
+    }
+    const cookie = parts.join("; ");
+    if (!cookie) return null;
+    const crumbRes = await fetch(
+      "https://query2.finance.yahoo.com/v1/test/getcrumb",
+      { headers: { "User-Agent": UA, Cookie: cookie } }
+    );
+    if (!crumbRes.ok) return null;
+    const crumb = (await crumbRes.text()).trim();
+    if (!crumb || crumb.length < 4) return null;
+    yfCrumb = { crumb, cookie, expires: Date.now() + 5 * 60 * 1000 };
+    return { crumb, cookie };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchYahooSummary(
+  ticker: string,
+  modules: string[]
+): Promise<Record<string, unknown> | null> {
+  const auth = await yfGetCrumb();
+  const base = auth
+    ? `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
+        ticker
+      )}?modules=${modules.join(",")}&crumb=${encodeURIComponent(auth.crumb)}`
+    : `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
+        ticker
+      )}?modules=${modules.join(",")}`;
+  try {
+    const res = await fetch(base, {
+      headers: {
+        "User-Agent": UA,
+        Accept: "application/json",
+        ...(auth ? { Cookie: auth.cookie } : {}),
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as {
+      quoteSummary?: { result?: Array<Record<string, unknown>> };
+    };
+    return d?.quoteSummary?.result?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 取 Yahoo 字段的 raw 值（Yahoo 字段形如 { raw, fmt }） */
+function yh(section: unknown, key: string): number | null {
+  const obj = section as Record<string, unknown> | undefined;
+  if (!obj) return null;
+  const raw = obj[key];
+  if (raw == null) return null;
+  if (typeof raw === "object" && raw !== null && "raw" in raw) {
+    const v = (raw as { raw: unknown }).raw;
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  }
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+/** 从 Yahoo 报表的 endDate 取财年 */
+function yhYear(stmt: Record<string, unknown>): number | null {
+  const raw = (stmt.endDate as { raw?: number } | undefined)?.raw;
+  if (typeof raw === "number" && raw > 0) {
+    const y = new Date(raw * 1000).getFullYear();
+    return Number.isNaN(y) ? null : y;
+  }
+  return null;
+}
+
+async function fetchYahooFundamentals(
+  ticker: string,
+  notes: string[]
+): Promise<Partial<StockAnalysisData>> {
+  const summary = await fetchYahooSummary(ticker, [
+    "incomeStatementHistory",
+    "balanceSheetHistory",
+    "cashflowStatementHistory",
+    "defaultKeyStatistics",
+    "summaryDetail",
+    "price",
+  ]);
+  if (!summary) {
+    notes.push("Yahoo 财务补充数据获取失败（quoteSummary 不可用），绝对财务数字可能缺失。");
+    return {};
+  }
+  const out: Partial<StockAnalysisData> = {};
+
+  // 利润表（年度）
+  const incomeStmts =
+    (
+      summary.incomeStatementHistory as
+        | { incomeStatementHistory?: Array<Record<string, unknown>> }
+        | undefined
+    )?.incomeStatementHistory || [];
+  if (incomeStmts.length > 0) {
+    const latest = incomeStmts[0];
+    out.netIncome = yh(latest, "netIncome");
+    out.ebitda = yh(latest, "ebitda");
+    const niHist = incomeStmts
+      .map((s) => ({ year: yhYear(s), value: yh(s, "netIncome") }))
+      .filter((x) => x.year != null && x.value != null)
+      .map((x) => ({ year: x.year as number, value: x.value as number }));
+    if (niHist.length) out.netIncomeHistory = niHist;
+  }
+
+  // 现金流（年度）
+  const cfStmts =
+    (
+      summary.cashflowStatementHistory as
+        | { cashflowStatements?: Array<Record<string, unknown>> }
+        | undefined
+    )?.cashflowStatements || [];
+  if (cfStmts.length > 0) {
+    const latest = cfStmts[0];
+    out.operatingCashFlow = yh(latest, "operatingCashFlow");
+    out.freeCashFlow = yh(latest, "freeCashFlow");
+    const fcfHist = cfStmts
+      .map((s) => ({ year: yhYear(s), value: yh(s, "freeCashFlow") }))
+      .filter((x) => x.year != null && x.value != null)
+      .map((x) => ({ year: x.year as number, value: x.value as number }));
+    if (fcfHist.length) out.freeCashFlowHistory = fcfHist;
+  }
+
+  // 资产负债表（年度）：现金 / 总债务
+  const bsStmts =
+    (
+      summary.balanceSheetHistory as
+        | { balanceSheetStatements?: Array<Record<string, unknown>> }
+        | undefined
+    )?.balanceSheetStatements || [];
+  if (bsStmts.length > 0) {
+    const latest = bsStmts[0];
+    const cash = yh(latest, "cash");
+    const sti = yh(latest, "shortTermInvestments");
+    out.totalCash =
+      cash != null && sti != null ? cash + sti : cash ?? sti;
+    const ltd = yh(latest, "longTermDebt");
+    const std = yh(latest, "shortTermDebt") ?? yh(latest, "currentDebt");
+    out.totalDebt = ltd != null && std != null ? ltd + std : ltd ?? std;
+  }
+
+  // defaultKeyStatistics
+  const dks = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
+  if (dks) {
+    out.enterpriseValue = yh(dks, "enterpriseValue");
+    out.dividendYield = yh(dks, "dividendYield");
+    out.trailingEps = yh(dks, "trailingEps");
+    out.forwardEps = yh(dks, "forwardEps");
+    if (out.ebitda == null) out.ebitda = yh(dks, "ebitda");
+    if (out.totalDebt == null) out.totalDebt = yh(dks, "totalDebt");
+    const ete = yh(dks, "enterpriseToEbitda");
+    if (ete != null) out.evEbitda = ete;
+  }
+
+  // summaryDetail 兜底
+  const sd = summary.summaryDetail as Record<string, unknown> | undefined;
+  if (sd) {
+    if (out.dividendYield == null) out.dividendYield = yh(sd, "dividendYield");
+    if (out.trailingPE == null) out.trailingPE = yh(sd, "trailingPE");
+    if (out.forwardPE == null) out.forwardPE = yh(sd, "forwardPE");
+    if (out.marketCap == null) out.marketCap = yh(sd, "marketCap");
+    if (out.week52High == null) out.week52High = yh(sd, "fiftyTwoWeekHigh");
+    if (out.week52Low == null) out.week52Low = yh(sd, "fiftyTwoWeekLow");
+    if (out.targetMeanPrice == null) out.targetMeanPrice = yh(sd, "targetMeanPrice");
+  }
+
+  // price 模块：52 周、名称
+  const priceMod = summary.price as Record<string, unknown> | undefined;
+  if (priceMod) {
+    if (out.week52High == null) out.week52High = yh(priceMod, "fiftyTwoWeekHigh");
+    if (out.week52Low == null) out.week52Low = yh(priceMod, "fiftyTwoWeekLow");
+    if (!out.name) {
+      const nm = priceMod.shortName ?? priceMod.longName;
+      if (typeof nm === "string") out.name = nm;
+    }
+  }
+
+  // 计算 EV/EBITDA（若 Yahoo 未直接给）
+  if (out.evEbitda == null && out.ebitda != null && out.ebitda > 0) {
+    const ev =
+      out.enterpriseValue ??
+      (out.marketCap != null
+        ? out.marketCap + (out.totalDebt ?? 0) - (out.totalCash ?? 0)
+        : null);
+    if (ev != null) out.evEbitda = ev / out.ebitda;
+  }
+
+  return out;
+}
+
+/* —— 同业对比（按行业分组抓取关键估值指标） —— */
+
+const PEER_GROUPS: Record<string, string[]> = {
+  utilities: ["VST", "NRG", "TLN", "AEP", "DUK", "NEE"],
+  renewable: ["VST", "NRG", "TLN", "NEE", "ENPH", "FSLR"],
+  semiconductor: ["NVDA", "AMD", "AVGO", "TSM", "QCOM", "INTC", "MU"],
+  software: ["MSFT", "ORCL", "CRM", "NOW", "ADBE", "INTU"],
+  internet: ["GOOGL", "META", "SNAP", "BIDU", "TWLO"],
+  auto: ["TSLA", "F", "GM", "RIVN", "LCID"],
+  bank: ["JPM", "BAC", "WFC", "C", "GS"],
+  retail: ["AMZN", "WMT", "COST", "TGT", "HD"],
+  biotech: ["AMGN", "GILD", "VRTX", "REGN", "MRNA"],
+  pharmaceutical: ["PFE", "MRK", "ABBV", "LLY", "BMY"],
+  energy: ["XOM", "CVX", "COP", "SLB", "EOG"],
+  payments: ["V", "MA", "PYPL", "AXP", "SQ"],
+  telecom: ["T", "VZ", "TMUS", "CHTR"],
+  airline: ["DAL", "AAL", "UAL", "LUV"],
+  reit: ["AMT", "PLD", "O", "SPG", "EQIX"],
+  cloud: ["AMZN", "MSFT", "GOOGL", "CRM", "NET"],
+};
+
+function pickPeerGroup(industry: string | null | undefined): string[] | null {
+  if (!industry) return null;
+  const s = industry.toLowerCase();
+  let best: string | null = null;
+  let bestLen = 0;
+  for (const key of Object.keys(PEER_GROUPS)) {
+    if (s.includes(key) && key.length > bestLen) {
+      best = key;
+      bestLen = key.length;
+    }
+  }
+  return best ? PEER_GROUPS[best] : null;
+}
+
+async function scrapePeer(ticker: string): Promise<PeerComparison | null> {
+  const summary = await fetchYahooSummary(ticker, [
+    "price",
+    "summaryDetail",
+    "defaultKeyStatistics",
+  ]);
+  if (!summary) return null;
+  const priceMod = summary.price as Record<string, unknown> | undefined;
+  const sd = summary.summaryDetail as Record<string, unknown> | undefined;
+  const dks = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
+  const name =
+    (typeof priceMod?.shortName === "string" ? priceMod.shortName : null) ??
+    (typeof priceMod?.longName === "string" ? priceMod.longName : null);
+  const pe = yh(sd, "trailingPE") ?? yh(dks, "trailingPE");
+  const fpe = yh(sd, "forwardPE") ?? yh(dks, "forwardPE");
+  const mc = yh(sd, "marketCap") ?? yh(dks, "marketCap");
+  const ev = yh(dks, "enterpriseValue");
+  const td = yh(dks, "totalDebt");
+  const ebitda = yh(dks, "ebitda");
+  const target = yh(sd, "targetMeanPrice") ?? yh(dks, "targetMeanPrice");
+  let evEbitda = yh(dks, "enterpriseToEbitda");
+  if (evEbitda == null && ebitda != null && ebitda > 0) {
+    const evCalc = ev ?? (mc != null ? mc + (td ?? 0) : null);
+    if (evCalc != null) evEbitda = evCalc / ebitda;
+  }
+  return {
+    ticker,
+    name,
+    price: yh(priceMod, "regularMarketPrice"),
+    marketCap: mc,
+    trailingPE: pe,
+    forwardPE: fpe,
+    evEbitda,
+    targetMeanPrice: target,
+  };
+}
+
+async function scrapePeers(
+  ticker: string,
+  industry: string | null | undefined,
+  notes: string[]
+): Promise<PeerComparison[] | null> {
+  const group = pickPeerGroup(industry);
+  if (!group) return null;
+  const peers = group
+    .filter((t) => t.toUpperCase() !== ticker.toUpperCase())
+    .slice(0, 5);
+  if (peers.length === 0) return null;
+  const results = await Promise.all(
+    peers.map((t) => scrapePeer(t).catch(() => null))
+  );
+  const valid = results.filter((r): r is PeerComparison => r != null);
+  if (valid.length === 0) {
+    notes.push("同业对标数据获取失败，已跳过同业对比。");
+    return null;
+  }
+  return valid;
+}
+
+/* ============================================================
  * 聚合数据
  * ============================================================ */
 
@@ -403,14 +744,47 @@ export async function getStockAnalysisData(
     if (!data.name && quote.name) data.name = quote.name;
   }
 
-  // 52 周兜底
-  if (data.week52High == null || data.week52Low == null) {
+  // 52 周兜底 + YTD 基准
+  let ytdBase: number | null = null;
+  if (
+    data.week52High == null ||
+    data.week52Low == null ||
+    data.ytdPercent == null
+  ) {
     const w52 = await fetchYahoo52w(upper);
     if (w52) {
       if (data.week52High == null) data.week52High = w52.high;
       if (data.week52Low == null) data.week52Low = w52.low;
+      ytdBase = w52.ytdBase;
     }
   }
+  if (data.price != null && ytdBase != null) {
+    data.ytdPercent = (data.price / ytdBase - 1) * 100;
+  }
+
+  // Yahoo 财务补充（绝对数字 / EV-EBITDA / 股息 / EPS）——优先覆盖 stockanalysis 的稀疏字段
+  const yf = await fetchYahooFundamentals(upper, notes).catch(
+    () => ({}) as Partial<StockAnalysisData>
+  );
+  if (yf.netIncome != null) data.netIncome = yf.netIncome;
+  if (yf.ebitda != null) data.ebitda = yf.ebitda;
+  if (yf.operatingCashFlow != null) data.operatingCashFlow = yf.operatingCashFlow;
+  if (yf.freeCashFlow != null) data.freeCashFlow = yf.freeCashFlow;
+  if (yf.totalCash != null) data.totalCash = yf.totalCash;
+  if (yf.totalDebt != null) data.totalDebt = yf.totalDebt;
+  if (yf.enterpriseValue != null) data.enterpriseValue = yf.enterpriseValue;
+  if (yf.evEbitda != null) data.evEbitda = yf.evEbitda;
+  if (yf.dividendYield != null) data.dividendYield = yf.dividendYield;
+  if (yf.trailingEps != null) data.trailingEps = yf.trailingEps;
+  if (yf.forwardEps != null) data.forwardEps = yf.forwardEps;
+  if (yf.netIncomeHistory) data.netIncomeHistory = yf.netIncomeHistory;
+  if (yf.freeCashFlowHistory) data.freeCashFlowHistory = yf.freeCashFlowHistory;
+
+  // 同业对比
+  const peers = await scrapePeers(upper, data.industry, notes).catch(
+    () => null as PeerComparison[] | null
+  );
+  if (peers) data.peers = peers;
 
   return data;
 }
@@ -432,14 +806,22 @@ function buildReportPrompt(data: StockAnalysisData): {
 ## 投资论点
 （使用 ### 看多理由 与 ### 看空理由 两个小节）
 ## 基本面分析
+（必须先用一张"关键财务数据"表格列出：营业收入、净利润、EBITDA、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金；尽量使用提供的绝对数字，缺失则写"—"）
+## 现金流与资产负债表分析
+（结合自由现金流历史趋势、资本开支、债务水平与偿债能力展开；若提供了 netIncomeHistory / freeCashFlowHistory，请用文字描述其趋势）
+## 业务质量与护城河
+（基于提供的新闻标题与公开信息，分析商业模式、竞争壁垒、长期合约/客户结构；信息缺失处标注"（基于公开信息推断）"）
 ## 估值分析
+（必须使用 PE、前瞻 PE、EV/EBITDA、PEG 等指标；结合 52 周区间与 YTD 涨跌幅给出相对行业/历史估值的溢价或折价判断；若有 forwardEps / 管理层指引相关新闻，可推导 EPS 增速与 PEG）
+## 同业估值对比
+（若数据中包含 peers 数组，必须用表格对比本公司及同业的关键指标——市值、TTM PE、前瞻 PE、EV/EBITDA、分析师目标价——并点评相对估值高低）
 ## 技术分析
 ## 风险评估
 ## 催化剂与时间线
 ## 投资建议
-（含评级、12 个月目标价区间、建仓/加仓/止损策略）
+（含评级、12 个月目标价区间、建仓/加仓/止损策略；目标价需结合估值与同业水平给出依据）
 ## 结论
-3. 全文中文，专业、客观、可执行。报告末尾用 "> ⚠️" 引用块给出风险提示，声明非投资建议。`;
+3. 全文中文，专业、客观、可执行。所有结论须有数据或逻辑支撑，避免空话。报告末尾用 "> ⚠️" 引用块给出风险提示，声明非投资建议。`;
 
   const dataJson = JSON.stringify(
     {
@@ -447,27 +829,40 @@ function buildReportPrompt(data: StockAnalysisData): {
       name: data.name,
       price: data.price,
       changePercent: data.changePercent,
+      ytdPercent: data.ytdPercent,
       currency: data.currency,
       marketCap: data.marketCap,
       week52High: data.week52High,
       week52Low: data.week52Low,
+      industry: data.industry,
       trailingPE: data.trailingPE,
       forwardPE: data.forwardPE,
+      evEbitda: data.evEbitda,
       pegRatio: data.pegRatio,
+      enterpriseValue: data.enterpriseValue,
+      dividendYield: data.dividendYield,
+      trailingEps: data.trailingEps,
+      forwardEps: data.forwardEps,
       roe: data.roe,
       grossMargin: data.grossMargin,
       profitMargin: data.profitMargin,
       revenueGrowthYoY: data.revenueGrowthYoY,
       totalRevenue: data.totalRevenue,
       revenueHistory: data.revenueHistory,
-      debtToEquity: data.debtToEquity,
+      netIncome: data.netIncome,
+      ebitda: data.ebitda,
+      operatingCashFlow: data.operatingCashFlow,
       freeCashFlow: data.freeCashFlow,
+      netIncomeHistory: data.netIncomeHistory,
+      freeCashFlowHistory: data.freeCashFlowHistory,
+      totalCash: data.totalCash,
+      totalDebt: data.totalDebt,
+      debtToEquity: data.debtToEquity,
       targetMeanPrice: data.targetMeanPrice,
       targetHighPrice: data.targetHighPrice,
       targetLowPrice: data.targetLowPrice,
       recommendationMean: data.recommendationMean,
       numberOfAnalysts: data.numberOfAnalysts,
-      industry: data.industry,
       technicalSignals: data.technical
         ? {
             overall: SIGNAL_LABELS[data.technical.overall],
@@ -475,6 +870,16 @@ function buildReportPrompt(data: StockAnalysisData): {
             movingAverages: SIGNAL_LABELS[data.technical.movingAverages],
           }
         : null,
+      peers: (data.peers || []).map((p) => ({
+        ticker: p.ticker,
+        name: p.name,
+        price: p.price,
+        marketCap: p.marketCap,
+        trailingPE: p.trailingPE,
+        forwardPE: p.forwardPE,
+        evEbitda: p.evEbitda,
+        targetMeanPrice: p.targetMeanPrice,
+      })),
       news: (data.news || []).slice(0, 8).map((n) => ({
         title: n.title,
         date: n.date,
