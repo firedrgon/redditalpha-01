@@ -209,9 +209,9 @@ export default function StockReportPage() {
       <SiteHeader />
       <main className="page-gutter py-8">
         <div className="mx-auto max-w-3xl">
-          <h1 className="text-2xl font-bold text-zinc-100">美股研报</h1>
+          <h1 className="text-2xl font-bold text-zinc-100">股票研报</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            基于 stockanalysis.com 实时数据 + TradingView 技术信号，由 AI 生成综合分析报告（仅美股）。
+            基于实时行情 + 技术信号 + AI 合成的综合分析报告，支持美股（如 AAPL）与 A 股（如 600519.SH）。
           </p>
 
           {/* 输入区 */}
@@ -222,7 +222,7 @@ export default function StockReportPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") generate();
               }}
-              placeholder="输入美股代码，如 AAPL / NVDA / CEG"
+              placeholder="输入代码，如 AAPL / CEG / 600519.SH"
               className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-orange-500/50"
             />
             <button

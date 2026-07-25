@@ -75,6 +75,34 @@ export interface FinancialMetrics {
   revenueHistory: Array<{ year: number; revenue: number | null }>;
   marketCap?: number | null;
   currency?: string | null;
+  // —— 研报专用扩展字段（美股/ A 股共用，均为可选，缺失由模型跳过）——
+  changePercent?: number | null; // 当日涨跌幅（小数，-0.02 = -2%）
+  netIncome?: number | null; // 净利润（归母净利润）
+  operatingIncome?: number | null; // 营业利润（≈ EBIT）
+  trailingEps?: number | null; // 静态 EPS
+  forwardEps?: number | null; // 预期 EPS
+  dividendYield?: number | null; // 股息率（小数，0.0062 = 0.62%）
+  ebitda?: number | null;
+  evEbit?: number | null; // EV / EBIT（数据源未披露 EBITDA 时替代 EV/EBITDA）
+  evEbitda?: number | null; // EV / EBITDA
+  enterpriseValue?: number | null; // 企业价值 = 市值 + 总债务 - 现金
+  operatingCashFlow?: number | null; // 经营活动现金流
+  freeCashFlow?: number | null; // 自由现金流
+  totalCash?: number | null; // 货币资金
+  totalDebt?: number | null; // 负债合计
+  debtToEquity?: number | null; // 资产负债率衍生（债务 / 权益）
+  week52High?: number | null; // 52 周最高
+  week52Low?: number | null; // 52 周最低
+  ytdPercent?: number | null; // 年初至今涨跌幅（%）
+  nextEarningsDate?: string | null; // 下次财报披露日期（ISO YYYY-MM-DD）
+  /** 分析师评级分布（强买/买/持/卖/强卖家数），用于"买入占比"共识判断 */
+  analystRatings?: {
+    strongBuy: number;
+    buy: number;
+    hold: number;
+    sell: number;
+    strongSell: number;
+  } | null;
   // 新闻
   news?: Array<{
     title: string;

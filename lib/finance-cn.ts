@@ -46,6 +46,7 @@ interface EMMarketData {
   f187?: number; // 涨停价
   f188?: number; // 跌停价
   f189?: number; // 振幅
+  f171?: number; // 股息率（百分比，如 1.23 表示 1.23%）
 }
 
 interface EMMarketResp {
@@ -94,6 +95,43 @@ interface EMZyzbResp {
   data?: EMZyzbRow[];
 }
 
+/** 利润表行（RPT_DMSK_FN_INCOME） */
+interface EMIncomeRow {
+  REPORT_DATE?: string;
+  OPERATE_PROFIT?: number; // 营业利润（≈ EBIT）
+  PARENT_NETPROFIT?: number; // 归母净利润
+  BASIC_EPS?: number; // 基本每股收益
+}
+
+/** 资产负债表行（RPT_DMSK_FN_BALANCE） */
+interface EMBalanceRow {
+  REPORT_DATE?: string;
+  TOTAL_LIABILITIES?: number; // 负债合计
+  TOTAL_EQUITY?: number; // 所有者权益合计
+  MONETARYFUNDS?: number; // 货币资金
+}
+
+/** 现金流表行（RPT_DMSK_FN_CASHFLOW） */
+interface EMCashFlowRow {
+  REPORT_DATE?: string;
+  NETCASH_OPERATE?: number; // 经营活动现金流净额
+  FREE_CASH_FLOW?: number; // 自由现金流
+}
+
+/** K 线响应（push2his，用于 52 周高低） */
+interface EMKlineResp {
+  data?: {
+    klines?: string[]; // 每个元素 "日期,开,收,高,低,量,..."
+  };
+}
+
+/** 预约披露响应 */
+interface EMPredictDateResp {
+  result?: {
+    data?: Array<Record<string, unknown>>;
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* 分析师共识类型                                                       */
 /* ------------------------------------------------------------------ */
@@ -116,6 +154,14 @@ interface AnalystConsensus {
   targetLowPrice: number | null;
   numberOfAnalysts: number | null;
   recommendationMean: number | null;
+  /** 评级分布（强买/买/持/卖/强卖 家数） */
+  distribution?: {
+    strongBuy: number;
+    buy: number;
+    hold: number;
+    sell: number;
+    strongSell: number;
+  } | null;
 }
 
 // 评级文字 → 数值（与 Yahoo 约定一致：1=强力买入, 2=买入, 3=持有, 4=卖出, 5=强力卖出）
@@ -197,7 +243,7 @@ async function fetchEastmoneyMetrics(
     // 1. push2 行情
     (async () => {
       const fields =
-        "f43,f44,f45,f46,f57,f58,f60,f116,f117,f162,f167,f168,f170,f184,f185,f186,f187,f188,f189";
+        "f43,f44,f45,f46,f57,f58,f60,f116,f117,f162,f167,f168,f170,f171,f184,f185,f186,f187,f188,f189";
       const res = await fetch(
         `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=${fields}`,
         {
@@ -326,6 +372,134 @@ async function fetchEastmoneyMetrics(
   const cnNews =
     newsResult.status === "fulfilled" ? newsResult.value : [];
 
+  // —— A 股研报增强抓取（利润表 / 资产负债表 / 现金流 / 52 周 / 预约披露，并行）——
+  const [
+    incomeResult,
+    balanceResult,
+    cashFlowResult,
+    klineResult,
+    predictResult,
+  ] = await Promise.allSettled([
+    // 8. 利润表（营业利润 / 净利润 / EPS）
+    (async (): Promise<EMIncomeRow | null> => {
+      try {
+        const res = await fetch(
+          `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_FN_INCOME&columns=ALL&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1`,
+          {
+            headers: { "User-Agent": UA, Referer: "https://data.eastmoney.com/" },
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!res.ok) return null;
+        const json = (await res.json()) as { result?: { data?: EMIncomeRow[] } };
+        return json.result?.data?.[0] ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+    // 9. 资产负债表（负债 / 权益 / 货币资金）
+    (async (): Promise<EMBalanceRow | null> => {
+      try {
+        const res = await fetch(
+          `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_FN_BALANCE&columns=ALL&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1`,
+          {
+            headers: { "User-Agent": UA, Referer: "https://data.eastmoney.com/" },
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!res.ok) return null;
+        const json = (await res.json()) as { result?: { data?: EMBalanceRow[] } };
+        return json.result?.data?.[0] ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+    // 10. 现金流表（经营现金流 / 自由现金流）
+    (async (): Promise<EMCashFlowRow | null> => {
+      try {
+        const res = await fetch(
+          `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_DMSK_FN_CASHFLOW&columns=ALL&filter=(SECUCODE="${emCode}")&pageNumber=1&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1`,
+          {
+            headers: { "User-Agent": UA, Referer: "https://data.eastmoney.com/" },
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!res.ok) return null;
+        const json = (await res.json()) as { result?: { data?: EMCashFlowRow[] } };
+        return json.result?.data?.[0] ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+    // 11. 52 周高低（push2his 日 K 近 252 根）
+    (async (): Promise<{ high: number; low: number } | null> => {
+      try {
+        const res = await fetch(
+          `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&klt=101&fqt=1&lmt=252&end=20500101&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55`,
+          {
+            headers: { "User-Agent": UA, Referer: "https://quote.eastmoney.com/" },
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!res.ok) return null;
+        const json = (await res.json()) as EMKlineResp;
+        const klines = json.data?.klines ?? [];
+        if (klines.length === 0) return null;
+        let high = -Infinity;
+        let low = Infinity;
+        for (const k of klines) {
+          const parts = k.split(",");
+          const h = parseFloat(parts[3]); // 高 (f54)
+          const l = parseFloat(parts[4]); // 低 (f55)
+          if (!isNaN(h) && h > 0) high = Math.max(high, h);
+          if (!isNaN(l) && l > 0) low = Math.min(low, l);
+        }
+        if (high === -Infinity || low === Infinity) return null;
+        return { high, low };
+      } catch {
+        return null;
+      }
+    })(),
+    // 12. 财报预约披露日
+    (async (): Promise<string | null> => {
+      try {
+        const res = await fetch(
+          `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_PUBLIC_BASICINFO&columns=ALL&filter=(SECURITY_CODE="${code}")&pageSize=1`,
+          {
+            headers: { "User-Agent": UA, Referer: "https://data.eastmoney.com/" },
+            signal: AbortSignal.timeout(6000),
+          }
+        );
+        if (!res.ok) return null;
+        const json = (await res.json()) as EMPredictDateResp;
+        const row = json.result?.data?.[0];
+        if (!row) return null;
+        for (const key of Object.keys(row)) {
+          if (/PREDICT|预约|PERFORM_DATE|FINANCE_DATE/i.test(key)) {
+            const v = row[key];
+            if (typeof v === "string" && /\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(v)) {
+              return v.slice(0, 10);
+            }
+          }
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
+
+  const incomeRow =
+    incomeResult.status === "fulfilled" ? incomeResult.value : null;
+  const balanceRow =
+    balanceResult.status === "fulfilled" ? balanceResult.value : null;
+  const cashFlowRow =
+    cashFlowResult.status === "fulfilled" ? cashFlowResult.value : null;
+  const kline52 =
+    klineResult.status === "fulfilled" ? klineResult.value : null;
+  const predictDate =
+    predictResult.status === "fulfilled" ? predictResult.value : null;
+
   // 行情基础
   if (!quote || !quote.f58) return null;
 
@@ -448,6 +622,50 @@ async function fetchEastmoneyMetrics(
     targetUpside = (targetMeanPrice - currentPrice) / currentPrice;
   }
 
+  // —— A 股研报增强字段映射 ——
+  const netIncome =
+    zyzbLatest?.PARENTNETPROFIT ??
+    finance?.PARENT_NETPROFIT ??
+    incomeRow?.PARENT_NETPROFIT ??
+    null;
+  const trailingEps = finance?.BASIC_EPS ?? incomeRow?.BASIC_EPS ?? null;
+  const operatingIncome = incomeRow?.OPERATE_PROFIT ?? null;
+  const totalDebt = balanceRow?.TOTAL_LIABILITIES ?? null;
+  const totalEquity = balanceRow?.TOTAL_EQUITY ?? null;
+  const totalCash = balanceRow?.MONETARYFUNDS ?? null;
+  const operatingCashFlow = cashFlowRow?.NETCASH_OPERATE ?? null;
+  const freeCashFlow = cashFlowRow?.FREE_CASH_FLOW ?? null;
+  const dividendYield = quote.f171 != null ? quote.f171 / 100 : null;
+  const week52High = kline52?.high ?? null;
+  const week52Low = kline52?.low ?? null;
+  const nextEarningsDate = predictDate ?? null;
+  const analystRatings = analyst?.distribution ?? null;
+
+  // 企业价值与估值倍数
+  let enterpriseValue: number | null = null;
+  if (
+    marketCap != null &&
+    totalDebt != null &&
+    totalCash != null
+  ) {
+    enterpriseValue = marketCap + totalDebt - totalCash;
+  }
+  const evEbit =
+    enterpriseValue != null && operatingIncome && operatingIncome > 0
+      ? enterpriseValue / operatingIncome
+      : null;
+  const evEbitda =
+    enterpriseValue != null &&
+    incomeRow &&
+    (incomeRow as { EBITDA?: number }).EBITDA != null &&
+    (incomeRow as { EBITDA?: number }).EBITDA! > 0
+      ? enterpriseValue / (incomeRow as { EBITDA?: number }).EBITDA!
+      : null;
+  const debtToEquity =
+    totalDebt != null && totalEquity != null && totalEquity > 0
+      ? totalDebt / totalEquity
+      : null;
+
   const warnings: string[] = [];
 
   return {
@@ -481,6 +699,26 @@ async function fetchEastmoneyMetrics(
     revenueHistory,
     marketCap,
     currency: "CNY",
+    changePercent: quote.f170 != null ? quote.f170 / 100 : null,
+    netIncome,
+    operatingIncome,
+    trailingEps,
+    forwardEps: null,
+    dividendYield,
+    ebitda: incomeRow ? (incomeRow as { EBITDA?: number }).EBITDA ?? null : null,
+    evEbit,
+    evEbitda,
+    enterpriseValue,
+    operatingCashFlow,
+    freeCashFlow,
+    totalCash,
+    totalDebt,
+    debtToEquity,
+    week52High,
+    week52Low,
+    ytdPercent: null,
+    nextEarningsDate,
+    analystRatings,
     news: cnNews,
     fetchedAt: new Date().toISOString(),
     dataSource: "eastmoney",
@@ -539,7 +777,7 @@ async function fetchEastmoneyAnalystConsensus(
     const targetLowPrice =
       targets.length > 0 ? Math.min(...targets) : null;
 
-    // 评级聚合：取最近 10 条
+    // 评级聚合：取最近 10 条算均值
     const ratingValues: number[] = [];
     for (const r of reports.slice(0, 10)) {
       const name = r.emRatingName ?? r.sRatingName;
@@ -550,6 +788,23 @@ async function fetchEastmoneyAnalystConsensus(
     const recommendationMean =
       ratingValues.length > 0
         ? ratingValues.reduce((s, v) => s + v, 0) / ratingValues.length
+        : null;
+
+    // 评级分布（全量报告统计家数）
+    const dist = { strongBuy: 0, buy: 0, hold: 0, sell: 0, strongSell: 0 };
+    for (const r of reports) {
+      const name = r.emRatingName ?? r.sRatingName;
+      if (!name) continue;
+      const v = RATING_VALUE_MAP[name];
+      if (v === 1) dist.strongBuy++;
+      else if (v === 2) dist.buy++;
+      else if (v === 3) dist.hold++;
+      else if (v === 4) dist.sell++;
+      else if (v === 5) dist.strongSell++;
+    }
+    const distribution =
+      dist.strongBuy + dist.buy + dist.hold + dist.sell + dist.strongSell > 0
+        ? dist
         : null;
 
     // 分析师数：按机构去重
@@ -565,6 +820,7 @@ async function fetchEastmoneyAnalystConsensus(
       targetLowPrice,
       numberOfAnalysts,
       recommendationMean,
+      distribution,
     };
   } catch {
     return null;
@@ -725,6 +981,26 @@ export async function fetchCNFinancialMetrics(
     revenueHistory: [],
     marketCap: null,
     currency: "CNY",
+    changePercent: null,
+    netIncome: null,
+    operatingIncome: null,
+    trailingEps: null,
+    forwardEps: null,
+    dividendYield: null,
+    ebitda: null,
+    evEbit: null,
+    evEbitda: null,
+    enterpriseValue: null,
+    operatingCashFlow: null,
+    freeCashFlow: null,
+    totalCash: null,
+    totalDebt: null,
+    debtToEquity: null,
+    week52High: null,
+    week52Low: null,
+    ytdPercent: null,
+    nextEarningsDate: null,
+    analystRatings: null,
     news: [],
     fetchedAt: new Date().toISOString(),
     dataSource: "fallback",

@@ -19,12 +19,16 @@
 
 import {
   fetchTradingViewTechnicals,
+  fetchCNTradingViewTechnicals,
+  fetchChipSituation,
   SIGNAL_LABELS,
   type TechnicalSignals,
 } from "./technical";
 import { fetchQuote } from "./quote";
 import { chatCompletion } from "./llm";
 import { getPrisma } from "@/lib/db/prisma";
+import { fetchCNFinancialMetrics } from "./finance-cn";
+import { detectMarket } from "./market";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -881,6 +885,87 @@ export async function getStockAnalysisData(
 }
 
 /* ============================================================
+ * A 股数据聚合（东方财富 + TradingView 中国区 + 同花顺筹码）
+ * 与 getStockAnalysisData 同构，仅数据源不同；产出同一
+ * StockAnalysisData 结构，使报告章节完全一致。
+ * ============================================================ */
+
+export async function getCNAnalysisData(
+  ticker: string
+): Promise<StockAnalysisData> {
+  const notes: string[] = [];
+  const upper = ticker.trim().toUpperCase();
+
+  const [metrics, technical, chip] = await Promise.all([
+    fetchCNFinancialMetrics(upper).catch(() => null),
+    fetchCNTradingViewTechnicals(upper).catch(() => null),
+    fetchChipSituation(upper).catch(() => null),
+  ]);
+
+  if (!metrics) {
+    notes.push("东方财富 A 股数据获取失败，无法生成报告。");
+    return { ticker: upper, name: null, currency: "CNY", notes };
+  }
+
+  const data: StockAnalysisData = {
+    ticker: upper,
+    name: metrics.name,
+    price: metrics.currentPrice,
+    changePercent: metrics.changePercent,
+    currency: "CNY",
+    marketCap: metrics.marketCap,
+    week52High: metrics.week52High,
+    week52Low: metrics.week52Low,
+    trailingPE: metrics.trailingPE,
+    forwardPE: metrics.forwardPE,
+    pegRatio: metrics.pegRatio,
+    roe: metrics.roe,
+    grossMargin: metrics.grossMargin,
+    profitMargin: metrics.profitMargin,
+    revenueGrowthYoY: metrics.revenueGrowthYoY,
+    totalRevenue: metrics.totalRevenue,
+    revenueHistory: (metrics.revenueHistory || []).filter(
+      (r): r is { year: number; revenue: number } => r.revenue != null
+    ),
+    debtToEquity: metrics.debtToEquity,
+    currentRatio: metrics.currentRatio,
+    freeCashFlow: metrics.freeCashFlow,
+    netIncome: metrics.netIncome,
+    operatingIncome: metrics.operatingIncome,
+    ebitda: metrics.ebitda,
+    evEbit: metrics.evEbit,
+    operatingCashFlow: metrics.operatingCashFlow,
+    totalCash: metrics.totalCash,
+    totalDebt: metrics.totalDebt,
+    enterpriseValue: metrics.enterpriseValue,
+    evEbitda: metrics.evEbitda,
+    dividendYield: metrics.dividendYield,
+    trailingEps: metrics.trailingEps,
+    forwardEps: metrics.forwardEps,
+    ytdPercent: metrics.ytdPercent,
+    nextEarningsDate: metrics.nextEarningsDate,
+    industry: metrics.industry,
+    targetMeanPrice: metrics.targetMeanPrice,
+    targetHighPrice: metrics.targetHighPrice,
+    targetLowPrice: metrics.targetLowPrice,
+    recommendationMean: metrics.recommendationMean,
+    numberOfAnalysts: metrics.numberOfAnalysts,
+    analystRatings: metrics.analystRatings,
+    news: metrics.news,
+    notes,
+    technical: technical ?? null,
+  };
+
+  // 同花顺筹码状态作为辅助技术信号注入 notes（会随 dataJson 传入 prompt）
+  if (chip) {
+    data.notes = data.notes ?? [];
+    data.notes.push(`同花顺筹码状态：${chip}`);
+  }
+
+  return data;
+}
+
+/* ============================================================
  * 报告生成（us-stock-analysis 框架）
  * ============================================================ */
 
@@ -888,7 +973,11 @@ function buildReportPrompt(data: StockAnalysisData): {
   system: string;
   user: string;
 } {
-  const system = `你是一名资深美股证券分析师。请基于提供的真实财务与技术数据，撰写一份结构化、完整的综合分析报告。报告须覆盖以下所有章节，每节精炼要点、避免冗长与重复，确保在 token 预算内完整输出至结尾（不得中途截断）。
+  const system = `你是一名资深证券分析师，覆盖美股与 A 股。请基于提供的真实财务与技术数据，撰写一份结构化、完整的综合分析报告。报告须覆盖以下所有章节，每节精炼要点、避免冗长与重复，确保在 token 预算内完整输出至结尾（不得中途截断）。
+
+市场与货币约定（依据数据中的 currency 字段）：
+- 若 currency 为 "CNY"（A 股）：所有金额单位使用人民币 ¥，不使用 $；分析师目标价相关表述统一用"A股机构一致预期"（不要写"华尔街"）；涨跌幅按 A 股惯例——红涨绿跌（上涨用红色表述、下跌用绿色表述）；52 周区间与财报预约披露日若数据未提供，则注明"以交易所/公司披露为准"，禁止编造具体数值。
+- 若 currency 为 "$"（美股）：金额用美元 $，分析师目标价称"华尔街一致预期"。
 
 要求：
 1. 必须严格基于提供的数据，不得编造精确财务数字；数据缺失的字段可基于你的公开领域知识合理补充定性事实（如行业地位、主要客户/长期购电协议、近期重大并购或事件、管理层动向），但须注明"（基于公开信息）"。特别地，装机容量、产能、用户数等绝对规模数字，若数据未提供，禁止用"占比/市场份额"反推具体 GW 或数量，应标注"以公司官方披露为准（基于公开信息）"。
@@ -981,6 +1070,7 @@ function buildReportPrompt(data: StockAnalysisData): {
         title: n.title,
         date: n.date,
       })),
+      notes: data.notes || [],
     },
     null,
     2
@@ -1005,11 +1095,21 @@ export function isValidUSTicker(ticker: string): boolean {
 
 export async function generateStockReport(ticker: string): Promise<StockReport> {
   const clean = ticker.trim().toUpperCase();
-  if (!isValidUSTicker(clean)) {
-    throw new Error("无效的股票代码（美股应为字母代码，如 AAPL）");
-  }
+  const market = detectMarket(clean);
 
-  const data = await getStockAnalysisData(clean);
+  let data: StockAnalysisData;
+  if (market === "CN") {
+    data = await getCNAnalysisData(clean);
+  } else if (market === "US") {
+    if (!isValidUSTicker(clean)) {
+      throw new Error("无效的股票代码（美股应为字母代码，如 AAPL）");
+    }
+    data = await getStockAnalysisData(clean);
+  } else {
+    throw new Error(
+      "不支持的标的（仅支持美股字母代码或 A 股 6 位代码，如 AAPL / 600519.SH）"
+    );
+  }
   const { system, user } = buildReportPrompt(data);
 
   // 研报使用用户在 ⚙ 设置中选择的活跃模型（不再强制 Gemini：Gemini 免费额度
