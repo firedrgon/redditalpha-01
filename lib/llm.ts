@@ -75,6 +75,17 @@ function getCooldownMs(msg: string): number {
  */
 const PROVIDER_TIMEOUT_MS = 50_000;
 
+/** 中国大陆 API 的 provider（部署在海外节点如 Vercel 默认区域时可能网络不可达/超时） */
+const CN_PROVIDER_IDS = [
+  "zhipu-1",
+  "zhipu-2",
+  "qwen-1",
+  "qwen-2",
+  "kimi-1",
+  "doubao-1",
+];
+
+
 /**
  * 按字符估算 token 数（偏保守，用于防止 413 低估）。
  * CJK 字符按 ~2 token/字高估（中文 tokenizer 通常 1.3–2 token/字），
@@ -171,6 +182,13 @@ async function callProviderWithTimeout(
   } catch (err) {
     // 区分：子超时 vs 外部 signal 触发 vs 其他错误
     if (controller.signal.aborted && !options.signal?.aborted) {
+      if (CN_PROVIDER_IDS.includes(provider.id)) {
+        throw new Error(
+          `${provider.name} 单次调用超时 (${PROVIDER_TIMEOUT_MS}ms)：该模型 API 位于中国大陆，` +
+            `当前部署节点（如 Vercel 海外区域）可能网络受限无法访问。建议改用 Gemini / OpenRouter / Groq，` +
+            `或将应用部署到中国大陆/香港节点后重试。`
+        );
+      }
       throw new Error(`${provider.name} 单次调用超时 (${PROVIDER_TIMEOUT_MS}ms)`);
     }
     throw err;
