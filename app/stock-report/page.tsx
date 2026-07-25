@@ -30,6 +30,7 @@ interface ReportData {
   trailingPE?: number | null;
   forwardPE?: number | null;
   evEbitda?: number | null;
+  evEbit?: number | null;
   roe?: number | null;
   dividendYield?: number | null;
   trailingEps?: number | null;
@@ -308,10 +309,13 @@ export default function StockReportPage() {
                     label="前瞻 PE"
                     value={d.forwardPE != null ? fmt(d.forwardPE) : "—"}
                   />
-                  <Stat
-                    label="EV/EBITDA"
-                    value={d.evEbitda != null ? fmt(d.evEbitda) : "—"}
-                  />
+                  {d.evEbitda != null ? (
+                    <Stat label="EV/EBITDA" value={fmt(d.evEbitda)} />
+                  ) : d.evEbit != null ? (
+                    <Stat label="EV/EBIT" value={fmt(d.evEbit)} />
+                  ) : (
+                    <Stat label="EV/EBITDA" value="—" />
+                  )}
                   <Stat
                     label="ROE"
                     value={d.roe != null ? fmt(d.roe) + "%" : "—"}

@@ -75,16 +75,18 @@ export interface StockAnalysisData {
   industry?: string | null;
   technical?: TechnicalSignals | null;
   news?: StockReportNews[];
-  // —— 由 Yahoo quoteSummary 补充的绝对财务与估值指标 ——
+  // —— 绝对财务与估值指标（由 stockanalysis 财务表解析为主，Yahoo 仅兜底）——
   netIncome?: number | null;
+  operatingIncome?: number | null;
   ebitda?: number | null;
+  evEbit?: number | null; // EV/EBIT（stockanalysis 未披露 EBITDA 时的替代估值倍数）
   operatingCashFlow?: number | null;
   totalCash?: number | null;
   totalDebt?: number | null;
   enterpriseValue?: number | null;
   /** 优先 Yahoo enterpriseToEbitda，否则 (EV 或 市值+债-现金)/EBITDA */
   evEbitda?: number | null;
-  dividendYield?: number | null;
+  dividendYield?: number | null; // 小数形式（0.0062 = 0.62%）
   trailingEps?: number | null;
   forwardEps?: number | null;
   ytdPercent?: number | null;
@@ -147,6 +149,156 @@ function extractFinancialData(html: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 解析 stockanalysis.com 财务报表 HTML 表格，提取绝对财务数字。
+ * 数值单位统一为美元绝对值（表格内为百万美元，×1e6），与 marketCap 口径一致；
+ * dividendYield 为小数形式（表格百分比 ÷100），与 Yahoo 口径一致。
+ * 注意：stockanalysis 财务表不含 EBITDA / 折旧摊销行，故不在此提取 EBITDA。
+ */
+function parseFinancialTables(html: string): {
+  netIncome?: number | null;
+  operatingIncome?: number | null;
+  operatingCashFlow?: number | null;
+  freeCashFlow?: number | null;
+  totalDebt?: number | null;
+  totalCash?: number | null;
+  dividendYield?: number | null;
+  netIncomeHistory?: Array<{ year: number; value: number }>;
+  freeCashFlowHistory?: Array<{ year: number; value: number }>;
+} {
+  const rowsMatch = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
+  if (rowsMatch.length === 0) return {};
+  const rows = rowsMatch.map((m) =>
+    [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((c) =>
+      c[1]
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+  );
+
+  // 表头行：含 FY 年份或 TTM
+  let header: string[] = [];
+  for (const r of rows) {
+    if (
+      r.some(
+        (c) => /^FY\s*\d{4}$/i.test(c.trim()) || c.trim().toUpperCase() === "TTM"
+      )
+    ) {
+      header = r;
+      break;
+    }
+  }
+  const colYear: Array<number | "TTM" | null> = header.map((c) => {
+    const t = c.trim();
+    if (t.toUpperCase() === "TTM") return "TTM";
+    const m = t.match(/(\d{4})/);
+    return m ? parseInt(m[1], 10) : null;
+  });
+
+  const toNum = (s: string): number | null => {
+    const t = s.trim();
+    if (!t || t === "—" || t === "-") return null;
+    const neg = t.startsWith("(") && t.endsWith(")");
+    const cleaned = t.replace(/[(),$\s%]/g, "");
+    const n = Number(cleaned);
+    if (!Number.isFinite(n)) return null;
+    return neg ? -n : n;
+  };
+  const findRow = (re: RegExp): string[] | null => {
+    for (const r of rows) if (r[0] && re.test(r[0])) return r;
+    return null;
+  };
+  const MILLION = 1e6;
+  // 取最新完整财年（非 TTM）的数值；退回 TTM
+  const pickLatestFY = (row: string[] | null): number | null => {
+    if (!row) return null;
+    let best: number | null = null;
+    let bestYear = -1;
+    for (let i = 1; i < row.length && i < colYear.length; i++) {
+      const y = colYear[i];
+      if (typeof y === "number" && y > bestYear) {
+        const v = toNum(row[i]);
+        if (v != null) {
+          bestYear = y;
+          best = v;
+        }
+      }
+    }
+    if (best != null) return best;
+    const ti = colYear.indexOf("TTM");
+    return ti > 0 ? toNum(row[ti]) : null;
+  };
+  const historyOf = (
+    row: string[] | null
+  ): Array<{ year: number; value: number }> => {
+    const out: Array<{ year: number; value: number }> = [];
+    if (!row) return out;
+    for (let i = 1; i < row.length && i < colYear.length; i++) {
+      const y = colYear[i];
+      if (typeof y === "number") {
+        const v = toNum(row[i]);
+        if (v != null) out.push({ year: y, value: v * MILLION });
+      }
+    }
+    return out.sort((a, b) => a.year - b.year);
+  };
+
+  const result: {
+    netIncome?: number | null;
+    operatingIncome?: number | null;
+    operatingCashFlow?: number | null;
+    freeCashFlow?: number | null;
+    totalDebt?: number | null;
+    totalCash?: number | null;
+    dividendYield?: number | null;
+    netIncomeHistory?: Array<{ year: number; value: number }>;
+    freeCashFlowHistory?: Array<{ year: number; value: number }>;
+  } = {};
+
+  const ni = findRow(/net income/i);
+  if (ni) {
+    const v = pickLatestFY(ni);
+    if (v != null) result.netIncome = v * MILLION;
+    result.netIncomeHistory = historyOf(ni);
+  }
+  const oi = findRow(/operating income/i);
+  if (oi) {
+    const v = pickLatestFY(oi);
+    if (v != null) result.operatingIncome = v * MILLION;
+  }
+  const ocf = findRow(/operating cash flow/i);
+  if (ocf) {
+    const v = pickLatestFY(ocf);
+    if (v != null) result.operatingCashFlow = v * MILLION;
+  }
+  const fcf = findRow(/free cash flow/i);
+  if (fcf) {
+    const v = pickLatestFY(fcf);
+    if (v != null) result.freeCashFlow = v * MILLION;
+    result.freeCashFlowHistory = historyOf(fcf);
+  }
+  const td = findRow(/total debt/i);
+  if (td) {
+    const v = pickLatestFY(td);
+    if (v != null) result.totalDebt = v * MILLION;
+  }
+  const cash =
+    findRow(/cash & (short-term investments|equivalents|investments)/i) ||
+    findRow(/^cash\b/i);
+  if (cash) {
+    const v = pickLatestFY(cash);
+    if (v != null) result.totalCash = v * MILLION;
+  }
+  const dy = findRow(/dividend yield/i);
+  if (dy) {
+    const v = pickLatestFY(dy);
+    if (v != null) result.dividendYield = v / 100; // 百分比→小数
+  }
+  return result;
 }
 
 function arrNum(arr: unknown, idx: number): number | null {
@@ -225,6 +377,34 @@ async function scrapeStockAnalysis(
 
       out.freeCashFlow = arrNum(data.freeCashFlow, 1) ?? arrNum(data.freeCashFlow, 0);
       out.debtToEquity = arrNum(data.debtToEquity, 0) ?? arrNum(data.debtToEquity, 1);
+
+      // 补充：HTML 表格解析绝对财务数字（净利/现金流/债务/现金/股息率）
+      const finTbl = parseFinancialTables(incomeHtml);
+      if (finTbl.netIncome != null) out.netIncome = finTbl.netIncome;
+      if (finTbl.operatingIncome != null) out.operatingIncome = finTbl.operatingIncome;
+      if (finTbl.operatingCashFlow != null) out.operatingCashFlow = finTbl.operatingCashFlow;
+      if (finTbl.freeCashFlow != null) out.freeCashFlow = finTbl.freeCashFlow;
+      if (finTbl.totalDebt != null) out.totalDebt = finTbl.totalDebt;
+      if (finTbl.totalCash != null) out.totalCash = finTbl.totalCash;
+      if (finTbl.dividendYield != null) out.dividendYield = finTbl.dividendYield;
+      if (finTbl.netIncomeHistory?.length) out.netIncomeHistory = finTbl.netIncomeHistory;
+      if (finTbl.freeCashFlowHistory?.length)
+        out.freeCashFlowHistory = finTbl.freeCashFlowHistory;
+      // EV 与 EV/EBIT（stockanalysis 未披露 EBITDA，用 EBIT 替代估值）
+      if (
+        out.marketCap != null &&
+        out.totalDebt != null &&
+        out.totalCash != null
+      ) {
+        out.enterpriseValue = out.marketCap + out.totalDebt - out.totalCash;
+      }
+      if (
+        out.enterpriseValue != null &&
+        out.operatingIncome != null &&
+        out.operatingIncome > 0
+      ) {
+        out.evEbit = out.enterpriseValue / out.operatingIncome;
+      }
     } else {
       notes.push("stockanalysis.com 利润表数据解析失败。");
     }
@@ -762,23 +942,34 @@ export async function getStockAnalysisData(
     data.ytdPercent = (data.price / ytdBase - 1) * 100;
   }
 
-  // Yahoo 财务补充（绝对数字 / EV-EBITDA / 股息 / EPS）——优先覆盖 stockanalysis 的稀疏字段
+  // Yahoo 财务补充：仅作 stockanalysis 的兜底（当前环境 Yahoo crumb 常被封，多数取不到）。
+  // stockanalysis 为主源，仅当对应字段缺失时才用 Yahoo 值覆盖。
   const yf = await fetchYahooFundamentals(upper, notes).catch(
     () => ({}) as Partial<StockAnalysisData>
   );
-  if (yf.netIncome != null) data.netIncome = yf.netIncome;
-  if (yf.ebitda != null) data.ebitda = yf.ebitda;
-  if (yf.operatingCashFlow != null) data.operatingCashFlow = yf.operatingCashFlow;
-  if (yf.freeCashFlow != null) data.freeCashFlow = yf.freeCashFlow;
-  if (yf.totalCash != null) data.totalCash = yf.totalCash;
-  if (yf.totalDebt != null) data.totalDebt = yf.totalDebt;
-  if (yf.enterpriseValue != null) data.enterpriseValue = yf.enterpriseValue;
-  if (yf.evEbitda != null) data.evEbitda = yf.evEbitda;
-  if (yf.dividendYield != null) data.dividendYield = yf.dividendYield;
-  if (yf.trailingEps != null) data.trailingEps = yf.trailingEps;
-  if (yf.forwardEps != null) data.forwardEps = yf.forwardEps;
-  if (yf.netIncomeHistory) data.netIncomeHistory = yf.netIncomeHistory;
-  if (yf.freeCashFlowHistory) data.freeCashFlowHistory = yf.freeCashFlowHistory;
+  const yfKeys: (keyof StockAnalysisData)[] = [
+    "netIncome",
+    "operatingIncome",
+    "ebitda",
+    "operatingCashFlow",
+    "freeCashFlow",
+    "totalCash",
+    "totalDebt",
+    "enterpriseValue",
+    "evEbitda",
+    "dividendYield",
+    "trailingEps",
+    "forwardEps",
+    "netIncomeHistory",
+    "freeCashFlowHistory",
+  ];
+  for (const k of yfKeys) {
+    const v = (yf as unknown as Record<string, unknown>)[k];
+    const dataRec = data as unknown as Record<string, unknown>;
+    if (v != null && dataRec[k] == null) {
+      dataRec[k] = v;
+    }
+  }
 
   // 同业对比
   const peers = await scrapePeers(upper, data.industry, notes).catch(
@@ -806,13 +997,13 @@ function buildReportPrompt(data: StockAnalysisData): {
 ## 投资论点
 （使用 ### 看多理由 与 ### 看空理由 两个小节）
 ## 基本面分析
-（必须先用一张"关键财务数据"表格列出：营业收入、净利润、EBITDA、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金；尽量使用提供的绝对数字，缺失则写"—"）
+（必须先用一张"关键财务数据"表格列出：营业收入、净利润、EBITDA(或 EBIT)、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金；尽量使用提供的绝对数字，缺失则写"—"）
 ## 现金流与资产负债表分析
 （结合自由现金流历史趋势、资本开支、债务水平与偿债能力展开；若提供了 netIncomeHistory / freeCashFlowHistory，请用文字描述其趋势）
 ## 业务质量与护城河
 （基于提供的新闻标题与公开信息，分析商业模式、竞争壁垒、长期合约/客户结构；信息缺失处标注"（基于公开信息推断）"）
 ## 估值分析
-（必须使用 PE、前瞻 PE、EV/EBITDA、PEG 等指标；结合 52 周区间与 YTD 涨跌幅给出相对行业/历史估值的溢价或折价判断；若有 forwardEps / 管理层指引相关新闻，可推导 EPS 增速与 PEG）
+（必须使用 PE、前瞻 PE、EV/EBITDA 或 EV/EBIT、PEG 等指标；结合 52 周区间与 YTD 涨跌幅给出相对行业/历史估值的溢价或折价判断；若有 forwardEps / 管理层指引相关新闻，可推导 EPS 增速与 PEG。注意：若数据中 ebitda 为 null 但 evEbit 有值，说明数据源未披露 EBITDA，请用 EV/EBIT 替代，并在文中注明"因数据源未披露 EBITDA，采用 EV/EBIT（该倍数因不含折旧摊销而天然偏高）"）
 ## 同业估值对比
 （若数据中包含 peers 数组，必须用表格对比本公司及同业的关键指标——市值、TTM PE、前瞻 PE、EV/EBITDA、分析师目标价——并点评相对估值高低）
 ## 技术分析
@@ -850,7 +1041,9 @@ function buildReportPrompt(data: StockAnalysisData): {
       totalRevenue: data.totalRevenue,
       revenueHistory: data.revenueHistory,
       netIncome: data.netIncome,
+      operatingIncome: data.operatingIncome,
       ebitda: data.ebitda,
+      evEbit: data.evEbit,
       operatingCashFlow: data.operatingCashFlow,
       freeCashFlow: data.freeCashFlow,
       netIncomeHistory: data.netIncomeHistory,
