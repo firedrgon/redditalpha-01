@@ -24,7 +24,6 @@ import {
 } from "./technical";
 import { fetchQuote } from "./quote";
 import { chatCompletion } from "./llm";
-import { GEMINI_PROVIDER_IDS } from "./llm-providers";
 import { getPrisma } from "@/lib/db/prisma";
 
 const UA =
@@ -1005,16 +1004,15 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
   const data = await getStockAnalysisData(clean);
   const { system, user } = buildReportPrompt(data);
 
-  // 研报是长输出任务：Hobby 计划函数上限仅 60s，openrouter/free 随机挑选的免费模型
-  // 常常跑不完。强制走 Gemini（速度快、支持大输出），确保 60s 内稳定出报告；
-  // 若 Gemini 未配置则回退到用户设置的活跃模型。
-  const reportProviderId = GEMINI_PROVIDER_IDS[0];
+  // 研报使用用户在 ⚙ 设置中选择的活跃模型（不再强制 Gemini：Gemini 免费额度
+  // 容易被 429 打满导致研报直接失败）。长输出 + 60s 函数上限的超时风险由
+  // PROVIDER_TIMEOUT_MS(50s) 与 maxTokens(4500) 控制，超时返回清晰报错而非静默网络错误。
   const res = await chatCompletion(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 4500, providerId: reportProviderId }
+    { temperature: 0.3, maxTokens: 4500 }
   );
 
   // 落库（失败不应阻断返回，仅记录）

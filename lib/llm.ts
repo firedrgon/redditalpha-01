@@ -122,37 +122,17 @@ export async function chatCompletion(
     temperature?: number;
     maxTokens?: number;
     signal?: AbortSignal;
-    providerId?: string;
   } = {}
 ): Promise<LLMResponse> {
   const config = await readConfig();
 
-  // provider 选择：优先 options.providerId（研报强制走快速模型如 Gemini），
-  // 否则用设置的活跃模型。被强制指定的模型若不可用（禁用/无 key），回退到活跃模型。
-  const forcedId = options.providerId;
-  let provider = forcedId ? LLM_PROVIDERS.find((p) => p.id === forcedId) : null;
-  if (!provider && config.activeProvider) {
-    provider = LLM_PROVIDERS.find((p) => p.id === config.activeProvider) ?? null;
-  }
+  // 只使用活跃模型，失败直接报错，不遍历其他模型
+  const provider = config.activeProvider
+    ? LLM_PROVIDERS.find((p) => p.id === config.activeProvider)
+    : null;
+
   if (!provider) {
     throw new Error("未设置活跃 LLM 模型，请在 ⚙ 设置中选择一个模型。");
-  }
-
-  // 被强制指定的 provider 若未配置/禁用，则回退到活跃模型
-  const forcedStatus = forcedId ? config.providers[provider.id] : undefined;
-  const forcedUnavailable =
-    forcedId != null &&
-    (!forcedStatus ||
-      !forcedStatus.enabled ||
-      (provider.needsKey && !forcedStatus.apiKey) ||
-      !provider.model);
-  if (
-    forcedUnavailable &&
-    config.activeProvider &&
-    config.activeProvider !== provider.id
-  ) {
-    const active = LLM_PROVIDERS.find((p) => p.id === config.activeProvider);
-    if (active) provider = active;
   }
 
   const status = config.providers[provider.id];
