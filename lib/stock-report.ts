@@ -73,6 +73,14 @@ export interface StockAnalysisData {
   targetLowPrice?: number | null;
   recommendationMean?: number | null; // 1=强烈买入 ... 5=强烈卖出
   numberOfAnalysts?: number | null;
+  /** 分析师评级分布（强买/买/持/卖/强卖家数），用于给出"买入占比"等共识判断 */
+  analystRatings?: {
+    strongBuy: number;
+    buy: number;
+    hold: number;
+    sell: number;
+    strongSell: number;
+  } | null;
   industry?: string | null;
   technical?: TechnicalSignals | null;
   news?: StockReportNews[];
@@ -559,13 +567,16 @@ async function scrapeStockAnalysis(
     const analystChartMatch = overviewHtml.match(/analystChart:\{([^}]+)\}/);
     if (analystChartMatch) {
       const m = analystChartMatch[1];
-      const total =
-        parseInt(m.match(/strongBuy:(\d+)/)?.[1] || "0", 10) +
-        parseInt(m.match(/buy:(\d+)/)?.[1] || "0", 10) +
-        parseInt(m.match(/hold:(\d+)/)?.[1] || "0", 10) +
-        parseInt(m.match(/sell:(\d+)/)?.[1] || "0", 10) +
-        parseInt(m.match(/strongSell:(\d+)/)?.[1] || "0", 10);
-      if (total > 0) out.numberOfAnalysts = total;
+      const strongBuy = parseInt(m.match(/strongBuy:(\d+)/)?.[1] || "0", 10);
+      const buy = parseInt(m.match(/buy:(\d+)/)?.[1] || "0", 10);
+      const hold = parseInt(m.match(/hold:(\d+)/)?.[1] || "0", 10);
+      const sell = parseInt(m.match(/sell:(\d+)/)?.[1] || "0", 10);
+      const strongSell = parseInt(m.match(/strongSell:(\d+)/)?.[1] || "0", 10);
+      const total = strongBuy + buy + hold + sell + strongSell;
+      if (total > 0) {
+        out.numberOfAnalysts = total;
+        out.analystRatings = { strongBuy, buy, hold, sell, strongSell };
+      }
     }
 
     const analystsMatch = overviewHtml.match(/analysts:"([^"]+)"/);
@@ -864,30 +875,37 @@ function buildReportPrompt(data: StockAnalysisData): {
   system: string;
   user: string;
 } {
-  const system = `你是一名资深美股证券分析师。请基于提供的真实财务与技术数据，撰写一份结构化综合分析报告。
+  const system = `你是一名资深美股证券分析师。请基于提供的真实财务与技术数据，撰写一份结构化、详尽的综合分析报告。报告应尽量写满、覆盖所有章节，不要省略或一句话带过。
+
 要求：
-1. 必须严格基于提供的数据，不得编造数字；数据缺失的字段可基于公开常识合理推断，但须注明"（基于公开信息推断）"。
-2. 报告使用 Markdown 格式，必须包含以下章节（顺序固定）：
+1. 必须严格基于提供的数据，不得编造精确财务数字；数据缺失的字段可基于你的公开领域知识合理补充定性事实（如行业地位、主要客户/长期购电协议、近期重大并购或事件、管理层动向），但须注明"（基于公开信息）"。
+2. 报告使用 Markdown 格式，必须包含以下章节（顺序固定，每节都要有实质内容，含表格或要点列表）：
 ## 执行摘要
+（含：公司一句话定位、核心投资逻辑、关键风险、评级与目标价预览）
 ## 公司概览
+（用表格列出：交易所/代码、行业、现价、市值、52 周区间、YTD、Beta、股息与回购政策、业务/资产组合要点）
 ## 投资论点
-（使用 ### 看多理由 与 ### 看空理由 两个小节）
+（### 看多理由 与 ### 看空理由 两个小节，各列 4–6 条，带具体事实与数据支撑）
 ## 基本面分析
-（必须先用一张"关键财务数据"表格列出：营业收入、净利润、EBITDA(或 EBIT)、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金；尽量使用提供的绝对数字，缺失则写"—"）
+（先用"关键财务数据"表格列出：营业收入、净利润、EBITDA(或 EBIT)、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金、EPS；尽量用提供的绝对数字，缺失写"—"；再用文字解读收入与盈利趋势、利润率变化）
 ## 现金流与资产负债表分析
-（结合自由现金流历史趋势、资本开支、债务水平与偿债能力展开；若提供了 netIncomeHistory / freeCashFlowHistory，请用文字描述其趋势）
+（结合自由现金流历史趋势、资本开支、债务水平与偿债能力展开；若提供了 netIncomeHistory / freeCashFlowHistory，请用文字描述其趋势；评估杠杆率与流动性风险）
 ## 业务质量与护城河
-（基于提供的新闻标题与公开信息，分析商业模式、竞争壁垒、长期合约/客户结构；信息缺失处标注"（基于公开信息推断）"）
+（基于提供的新闻标题与公开信息，分析：①护城河类型与强度 ②管理层资本配置与执行力 ③商业模式可持续性；信息缺失处标注"（基于公开信息）"）
 ## 估值分析
-（必须使用 PE、前瞻 PE、EV/EBITDA 或 EV/EBIT、PEG 等指标；结合 52 周区间与 YTD 涨跌幅给出相对行业/历史估值的溢价或折价判断；若有 forwardEps / 管理层指引相关新闻，可推导 EPS 增速与 PEG。注意：若数据中 ebitda 为 null 但 evEbit 有值，说明数据源未披露 EBITDA，请用 EV/EBIT 替代，并在文中注明"因数据源未披露 EBITDA，采用 EV/EBIT（该倍数因不含折旧摊销而天然偏高）"）
+（必须使用 PE、前瞻 PE、EV/EBITDA 或 EV/EBIT、PEG、P/B、P/S 等指标；结合 52 周区间与 YTD 涨跌幅给出相对行业/历史的溢价或折价判断；若提供 forwardEps / 管理层指引相关新闻，可推导 EPS 增速与 PEG；若数据含 targetMeanPrice / targetHighPrice / targetLowPrice 与 analystRatings，须引用华尔街一致目标价区间与买入机构占比作为估值锚。注意：若 ebitda 为 null 但 evEbit 有值，说明数据源未披露 EBITDA，请用 EV/EBIT 替代，并注明"因数据源未披露 EBITDA，采用 EV/EBIT（该倍数因不含折旧摊销而天然偏高）"）
 ## 同业估值对比
-（若数据中包含 peers 数组，必须用表格对比本公司及同业的关键指标——市值、TTM PE、前瞻 PE、EV/EBITDA、分析师目标价——并点评相对估值高低）
+（若数据中包含 peers 数组，必须用表格对比本公司及同业的关键指标——市值、TTM PE、前瞻 PE、EV/EBITDA、分析师目标价——并点评相对估值高低与各自业务特征）
 ## 技术分析
+（基于提供的技术信号与技术面数据，给出趋势判断、关键支撑/阻力位、短期(1–3 月)与中期(3–6 月)方向）
 ## 风险评估
+（按影响/概率优先级列出公司特有风险与宏观风险）
 ## 催化剂与时间线
+（用表格列出未来 6–12 个月的关键事件：财报日期、监管/政策节点、重大合同或产能里程碑，并标注方向）
 ## 投资建议
-（含评级、12 个月目标价区间、建仓/加仓/止损策略；目标价需结合估值与同业水平给出依据）
+（含评级、12 个月目标价区间——用"保守/基准/乐观"三档情景测算并以表格呈现、建仓/加仓/止损策略、仓位建议与监控清单；目标价需结合估值、同业水平与分析师共识给出依据）
 ## 结论
+（3–5 条要点总结，重申评级与目标价）
 3. 全文中文，专业、客观、可执行。所有结论须有数据或逻辑支撑，避免空话。报告末尾用 "> ⚠️" 引用块给出风险提示，声明非投资建议。`;
 
   const dataJson = JSON.stringify(
@@ -933,6 +951,7 @@ function buildReportPrompt(data: StockAnalysisData): {
       targetLowPrice: data.targetLowPrice,
       recommendationMean: data.recommendationMean,
       numberOfAnalysts: data.numberOfAnalysts,
+      analystRatings: data.analystRatings,
       technicalSignals: data.technical
         ? {
             overall: SIGNAL_LABELS[data.technical.overall],
@@ -990,7 +1009,7 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 4000 }
+    { temperature: 0.3, maxTokens: 7000 }
   );
 
   // 落库（失败不应阻断返回，仅记录）

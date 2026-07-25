@@ -8,6 +8,9 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// 研报生成可能耗时较长（maxTokens 已上调至 7000，Gemini 单次生成接近 60s），
+// 显式放宽函数时长上限，避免被平台默认超时中断。
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;

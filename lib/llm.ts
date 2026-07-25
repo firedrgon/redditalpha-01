@@ -71,8 +71,12 @@ function getCooldownMs(msg: string): number {
  * 推理模型如 Nemotron 550B）单次生成就要 60s+，会吃掉全部预算导致后续
  * provider 没机会尝试。设置子超时后，单个 provider 超时即 fallback，
  * 总预算内可尝试 1-2 个 provider。
+ *
+ * 注：美股研报需要较长的输出（maxTokens 已上调至 7000），对于 Gemini 等
+ * 支持大输出的模型，单次生成可能接近 60s，故将子超时放宽到 75s，避免
+ * 长报告在中途被 abort。
  */
-const PROVIDER_TIMEOUT_MS = 30_000;
+const PROVIDER_TIMEOUT_MS = 75_000;
 
 /**
  * 包装 callProvider，加上单 provider 子超时。
