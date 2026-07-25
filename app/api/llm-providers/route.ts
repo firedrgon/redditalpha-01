@@ -22,7 +22,8 @@ export async function GET() {
   if (response) return response;
 
   const config = await readConfig();
-  const list = LLM_PROVIDERS.map((p) => {
+  // 过滤掉标记为 hidden 的 provider（如海外部署下不可用的国产模型），不在 UI 列表展示
+  const list = LLM_PROVIDERS.filter((p) => !p.hidden).map((p) => {
     const status = config.providers[p.id] ?? {
       id: p.id,
       apiKey: "",

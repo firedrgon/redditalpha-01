@@ -32,6 +32,12 @@ export interface LLMProvider {
    * 缺省时由 resolveMaxTokens 用保守默认值兜底。
    */
   contextWindow?: number;
+  /**
+   * 是否在设置页的模型列表中隐藏。
+   * 用于收起在海外部署下不可用/不稳定的国产模型（智谱、通义、Kimi、豆包）。
+   * 隐藏后仍保留配置与调用能力，仅不展示在 UI 列表；置 false 即可恢复显示。
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -82,16 +88,10 @@ export const DOUBAO_PROVIDER_IDS = ["doubao-1"] as const;
 export const PREFERRED_ACTIVE_ORDER = [
   "gemini-1",
   "gemini-2",
-  "zhipu-1",
-  "zhipu-2",
-  "qwen-1",
-  "qwen-2",
-  "kimi-1",
   "deepseek-1",
   "groq-1",
   "groq-2",
   "groq-3",
-  "doubao-1",
   "openrouter-1",
 ] as const;
 
@@ -210,6 +210,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "国产智谱 GLM-4-Flash：永久免费、中文强、128K 上下文，适合中文股票分析主力替补。与其他智谱配置共用 Key",
     protocol: "openai",
     freeQuota: "免费层：Flash 系列永久免费；注册送 2000 万 token（永久有效），QPS≈2",
+    hidden: true,
   },
   {
     id: "zhipu-2",
@@ -225,6 +226,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "智谱最新 GLM-4.7-Flash：免费、质量优于 GLM-4-Flash，128K 上下文，适合深度中文分析。与其他智谱配置共用 Key",
     protocol: "openai",
     freeQuota: "免费层：GLM-4.7-Flash 永久免费；注册送 2000 万 token（永久有效）",
+    hidden: true,
   },
   {
     id: "qwen-1",
@@ -242,6 +244,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     protocol: "openai",
     freeQuota:
       "永久免费：qwen-turbo 每月 100 万 token（需阿里云实名）；其他 Qwen 模型各有 90 天免费额度",
+    hidden: true,
   },
   {
     id: "qwen-2",
@@ -258,6 +261,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "阿里云百炼 Qwen-Plus：质量优于 Turbo、128K 上下文、有 90 天免费额度，适合深度中文分析。与其他通义配置共用 Key",
     protocol: "openai",
     freeQuota: "开通后 90 天免费额度：各 Qwen 模型独立 100 万 token（累计超 7000 万）",
+    hidden: true,
   },
   {
     id: "kimi-1",
@@ -273,6 +277,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "月之暗面 Kimi：长文本强项（128K）、中文好、兼容 OpenAI。新用户送 ¥15 免费额度。与其他 Kimi 配置共用 Key",
     protocol: "openai",
     freeQuota: "免费额度：新用户送 ¥15 试用额度（rate-limited free tier）；moonshot-v1-128k 按量 ¥60/MTok",
+    hidden: true,
   },
   {
     id: "doubao-1",
@@ -289,6 +294,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "字节豆包大模型，中文强、便宜。⚠️ 需先在火山方舟创建推理接入点，再把下方「模型/接入点 ID」改为你的 Endpoint ID（ep- 开头）。与其他豆包配置共用 Key",
     protocol: "openai",
     freeQuota: "免费额度：注册送体验额度；doubao-pro-32k 按量计费，doubao-lite 更便宜",
+    hidden: true,
   },
 ];
 
