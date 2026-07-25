@@ -525,13 +525,17 @@ export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> 
       }));
 
     const now = Date.now() / 1000;
+    // 优先保留强推理/长上下文模型：确保 DeepSeek-R1-Distill 与 Kimi K2
+    // 进入前 3，让用户能在 Groq 接入里选到比纯 Llama/Qwen 更强的模型。
+    const PREFERRED = new Set(["deepseek-r1-distill-70b", "kimi-k2-instruct"]);
     return scored
       .map((model: GroqModelInfo) => {
         const daysOld = Math.floor((now - model.createdAt) / (24 * 3600));
         const recencyScore = Math.max(0, 365 - daysOld) * 10;
+        const boost = PREFERRED.has(model.id) ? 2_000_000 : 0;
         return {
           ...model,
-          score: model.contextLength * 0.5 + recencyScore,
+          score: model.contextLength * 0.5 + recencyScore + boost,
         };
       })
       .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
