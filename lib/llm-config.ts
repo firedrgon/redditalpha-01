@@ -45,6 +45,8 @@ export interface ProviderStatus {
 export interface LLMConfig {
   providers: Record<string, ProviderStatus>;
   activeProvider: string | null;
+  /** 用户锁定的具体模型 slug（如 compound-beta）。用于动态刷新重排后稳定活跃模型 */
+  activeModelSlug?: string | null;
   updatedAt: number;
   dynamicGeminiModels?: Array<{ id: string; name: string; slug: string }>;
   dynamicGroqModels?: Array<{ id: string; name: string; slug: string }>;
@@ -66,6 +68,7 @@ const DEFAULT_CONFIG: LLMConfig = {
     ])
   ),
   activeProvider: null,
+  activeModelSlug: null,
   updatedAt: 0,
 };
 
@@ -279,6 +282,7 @@ function mergeStoredConfig(parsed: Partial<LLMConfig>): LLMConfig {
   return {
     providers: { ...DEFAULT_CONFIG.providers, ...migratedProviders },
     activeProvider: validActive,
+    activeModelSlug: parsed.activeModelSlug ?? null,
     updatedAt: parsed.updatedAt ?? 0,
     dynamicGeminiModels: parsed.dynamicGeminiModels,
     dynamicGroqModels: parsed.dynamicGroqModels,
@@ -381,6 +385,24 @@ export async function readConfig(): Promise<LLMConfig> {
   applySharedGeminiKeys(config);
   applySharedGroqKeys(config);
   applyEnvKeys(config, isFreshConfig);
+
+  // 校正活跃模型：用户锁定的是"具体模型 slug"而非槽位。
+  // 动态刷新可能重排槽位内的模型，这里确保 activeProvider 始终指向用户选中的模型。
+  if (config.activeModelSlug) {
+    const cur = config.activeProvider
+      ? LLM_PROVIDERS.find((p) => p.id === config.activeProvider)
+      : null;
+    if (!cur || cur.model !== config.activeModelSlug) {
+      const target = LLM_PROVIDERS.find((p) => p.model === config.activeModelSlug);
+      if (target) {
+        config.activeProvider = target.id;
+      } else {
+        // 该模型已不在任何 provider（如掉出动态前 N），slug 失效
+        config.activeModelSlug = null;
+      }
+    }
+  }
+
   return config;
 }
 
@@ -465,12 +487,21 @@ export async function setProviderEnabled(
   return config;
 }
 
-/** 设置活跃 provider */
+/** 设置活跃 provider，并记录用户选中的具体模型 slug（使动态刷新后活跃模型稳定） */
 export async function setActiveProvider(
-  providerId: string | null
+  providerId: string | null,
+  modelSlug?: string | null
 ): Promise<LLMConfig> {
   const config = await readConfig();
   config.activeProvider = providerId;
+  if (providerId) {
+    // 未显式传入时，自动取该 slot 当前的 model（已应用动态缓存覆盖）
+    const slug =
+      modelSlug ?? LLM_PROVIDERS.find((p) => p.id === providerId)?.model ?? null;
+    config.activeModelSlug = slug;
+  } else {
+    config.activeModelSlug = null;
+  }
   await writeConfig(config);
   return config;
 }

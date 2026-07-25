@@ -10,7 +10,7 @@
  * （"定时收集保存在本地"——结果写回 .llm-config.json）。
  */
 
-import { readConfig, updateConfigSafely } from "./llm-config";
+import { readConfig, updateConfigSafely, setActiveProvider } from "./llm-config";
 import {
   LLM_PROVIDERS,
   type LLMProvider,
@@ -668,6 +668,24 @@ export async function refreshGroqModels(): Promise<{
 
   await saveCachedModels("groq", dbModels);
 
+  // 保持活跃模型稳定：刷新重排了槽位内的模型，
+  // 根据用户锁定的 activeModelSlug 把 activeProvider 重新映射到正确的槽位并持久化。
+  try {
+    const cfg = await readConfig();
+    const slug = cfg.activeModelSlug;
+    if (slug && cfg.activeProvider) {
+      const cur = LLM_PROVIDERS.find((p) => p.id === cfg.activeProvider);
+      if (!cur || cur.model !== slug) {
+        const targetSlot = GROQ_PROVIDER_IDS.find(
+          (id) => LLM_PROVIDERS.find((p) => p.id === id)?.model === slug
+        );
+        if (targetSlot) await setActiveProvider(targetSlot, slug);
+      }
+    }
+  } catch {
+    // 重定位失败不影响刷新主流程
+  }
+
   const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
   if (groqKey) {
     for (const providerId of GROQ_PROVIDER_IDS) {
@@ -730,6 +748,24 @@ export async function refreshGeminiModels(): Promise<{
   }
 
   await saveCachedModels("gemini", dbModels);
+
+  // 保持活跃模型稳定：刷新重排了槽位内的模型，
+  // 根据用户锁定的 activeModelSlug 把 activeProvider 重新映射到正确的槽位并持久化。
+  try {
+    const cfg = await readConfig();
+    const slug = cfg.activeModelSlug;
+    if (slug && cfg.activeProvider) {
+      const cur = LLM_PROVIDERS.find((p) => p.id === cfg.activeProvider);
+      if (!cur || cur.model !== slug) {
+        const targetSlot = GEMINI_PROVIDER_IDS.find(
+          (id) => LLM_PROVIDERS.find((p) => p.id === id)?.model === slug
+        );
+        if (targetSlot) await setActiveProvider(targetSlot, slug);
+      }
+    }
+  } catch {
+    // 重定位失败不影响刷新主流程
+  }
 
   const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
   if (geminiKey) {
