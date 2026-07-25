@@ -125,6 +125,12 @@ function readEnvKeys(): Record<string, string> {
       if (!out[id]) out[id] = groqKey;
     }
   }
+  // DeepSeek 系列共用同一 Key
+  // 统一环境变量 LLM_API_KEY_DEEPSEEK，兼容 DEEPSEEK_API_KEY
+  const deepseekKey =
+    process.env.LLM_API_KEY_DEEPSEEK?.trim() ||
+    process.env.DEEPSEEK_API_KEY?.trim();
+  if (deepseekKey && !out["deepseek-1"]) out["deepseek-1"] = deepseekKey;
   return out;
 }
 
