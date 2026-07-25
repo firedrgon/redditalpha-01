@@ -76,6 +76,73 @@ function getCooldownMs(msg: string): number {
 const PROVIDER_TIMEOUT_MS = 50_000;
 
 /**
+ * 按字符估算 token 数（偏保守，用于防止 413 低估）。
+ * CJK 字符按 ~2 token/字高估（中文 tokenizer 通常 1.3–2 token/字），
+ * ASCII 按 ~4 字符/token 估算。高估只会让 max_tokens 偏小（报告略短），
+ * 低估则可能导致请求超窗被拒（413），故宁高勿低。
+ */
+function estimateTokens(text: string): number {
+  let cjk = 0;
+  let ascii = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) || // CJK 统一表意
+      (code >= 0x3000 && code <= 0x30ff) || // CJK 标点 / 假名
+      (code >= 0xff00 && code <= 0xffef) // 全角字符
+    ) {
+      cjk++;
+    } else {
+      ascii++;
+    }
+  }
+  return Math.ceil(cjk * 2 + ascii / 4);
+}
+
+/**
+ * 已知小窗口 / Agent 模型的上下文窗口兜底表（按 model slug 精确匹配）。
+ * 这些模型经 API 返回的 context_window 不一定可靠，或 Agent 内部会额外
+ * 拼接系统提示/工具定义，故直接用确定的窗口值，避免 413。
+ */
+const MODEL_CONTEXT_OVERRIDES: Record<string, number> = {
+  "compound-beta": 128_000,
+  "compound-beta-mini": 32_000,
+};
+
+/** 未知模型时的保守兜底窗口（够大，不会误伤 Gemini/DeepSeek 等长窗口模型） */
+const SAFE_CONTEXT_WINDOW = 128_000;
+
+/**
+ * 把请求的 maxTokens 钳制在模型上下文窗口内：
+ *   max_tokens ≤ context_window − 估计 prompt token − 余量(headroom)
+ * 余量给模型内部开销（系统提示/工具定义等）留空间；compound 类 Agent 模型
+ * 额外多留，因其会在请求外再拼入工具与检索上下文。
+ * 返回至少为 256，避免模型完全无输出空间。
+ */
+function resolveMaxTokens(
+  provider: LLMProvider,
+  messages: LLMMessage[],
+  requested: number
+): number {
+  const modelLower = provider.model.toLowerCase();
+  const ctx =
+    MODEL_CONTEXT_OVERRIDES[modelLower] ??
+    (provider.contextWindow && provider.contextWindow > 0
+      ? provider.contextWindow
+      : SAFE_CONTEXT_WINDOW);
+
+  let promptTokens = 0;
+  for (const m of messages) promptTokens += estimateTokens(m.content || "");
+
+  let headroom = 1024;
+  if (modelLower.includes("compound")) headroom += 4000;
+
+  const maxAllowed = Math.floor(ctx - promptTokens - headroom);
+  // 上限 8000 防止极小值；下限 256 保证至少有一点输出
+  return Math.max(256, Math.min(requested, maxAllowed, 8000));
+}
+
+/**
  * 包装 callProvider，加上单 provider 子超时。
  * 子超时触发时 abort 当前 fetch 并抛出超时错误，由调用方 catch 后 fallback。
  * 外部 signal（总超时）触发时也会联动 abort。
@@ -278,6 +345,7 @@ async function callOpenAICompatible(
     modelLower.includes("gpt-oss") ||
     modelLower === "openrouter/free";
   const defaultMaxTokens = isReasoningModel ? 4096 : 3072;
+  const maxTokens = resolveMaxTokens(provider, messages, options.maxTokens ?? defaultMaxTokens);
 
   const res = await fetch(provider.endpoint, {
     method: "POST",
@@ -291,7 +359,7 @@ async function callOpenAICompatible(
       model: provider.model,
       messages,
       temperature: options.temperature ?? 0.3,
-      max_tokens: options.maxTokens ?? defaultMaxTokens,
+      max_tokens: maxTokens,
     }),
     signal: options.signal,
   });
@@ -329,11 +397,12 @@ async function callGemini(
       parts: [{ text: m.content }],
     }));
 
+  const maxTokens = resolveMaxTokens(provider, messages, options.maxTokens ?? 3072);
   const body: Record<string, unknown> = {
     contents,
     generationConfig: {
       temperature: options.temperature ?? 0.3,
-      maxOutputTokens: options.maxTokens ?? 3072,
+      maxOutputTokens: maxTokens,
     },
   };
   if (systemMsg) {
@@ -667,6 +736,10 @@ export async function refreshGroqModels(): Promise<{
       provider.name = newModelName;
       updated.push({ providerId, oldModel, newModel: newModelSlug });
     }
+    // 同步真实上下文窗口（compound 等小窗口模型的 413 防护依赖此值）
+    if (model.contextLength && model.contextLength > 0) {
+      provider.contextWindow = model.contextLength;
+    }
     dbModels.push({ providerId, modelSlug: newModelSlug, modelName: newModelName });
   }
 
@@ -747,6 +820,10 @@ export async function refreshGeminiModels(): Promise<{
       provider.model = newModelSlug;
       provider.name = newModelName;
       updated.push({ providerId, oldModel, newModel: newModelSlug });
+    }
+    // 同步真实上下文窗口（compound 等小窗口模型的 413 防护依赖此值）
+    if (model.contextLength && model.contextLength > 0) {
+      provider.contextWindow = model.contextLength;
     }
     dbModels.push({ providerId, modelSlug: newModelSlug, modelName: newModelName });
   }

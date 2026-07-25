@@ -20,6 +20,12 @@ export interface LLMProvider {
   /** 调用方式：openai（OpenAI 兼容协议）/ gemini */
   protocol: "openai" | "gemini";
   freeQuota: string;
+  /**
+   * 模型上下文窗口（token 数）。用于把 max_tokens 钳制在窗口内，
+   * 避免 Groq 等小窗口模型因「prompt + max_tokens 超窗」返回 413。
+   * 缺省时由 resolveMaxTokens 用保守默认值兜底。
+   */
+  contextWindow?: number;
 }
 
 /**
@@ -62,6 +68,7 @@ export const PREFERRED_ACTIVE_ORDER = [
 export const LLM_PROVIDERS: LLMProvider[] = [
   {
     id: "gemini-1",
+    contextWindow: 1_048_576,
     name: "Google Gemini 2.5 Flash",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
     model: "gemini-2.5-flash",
@@ -75,6 +82,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "gemini-2",
+    contextWindow: 1_048_576,
     name: "Google Gemini 2.5 Flash Lite",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/models",
     model: "gemini-2.5-flash-lite",
@@ -88,6 +96,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "openrouter-1",
+    contextWindow: 128_000,
     name: "OpenRouter · Free Models Router",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
     model: "openrouter/free",
@@ -102,6 +111,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "deepseek-1",
+    contextWindow: 64_000,
     name: "DeepSeek · V3 (deepseek-chat)",
     endpoint: "https://api.deepseek.com/v1/chat/completions",
     model: "deepseek-chat",
@@ -116,6 +126,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "groq-1",
+    contextWindow: 40_960,
     name: "Groq · Qwen3 32B",
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "qwen/qwen3-32b",
@@ -129,6 +140,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "groq-2",
+    contextWindow: 131_072,
     name: "Groq · GPT-OSS 120B",
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "openai/gpt-oss-120b",
@@ -142,6 +154,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "groq-3",
+    contextWindow: 131_072,
     name: "Groq · Llama 3.3 70B",
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "llama-3.3-70b-versatile",
