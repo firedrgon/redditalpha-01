@@ -895,14 +895,8 @@ function buildReportPrompt(data: StockAnalysisData): {
 2. 报告使用 Markdown 格式，必须包含以下章节（顺序固定，每节都要有实质内容，含表格或要点列表）：
 ## 执行摘要
 （含：公司一句话定位、核心投资逻辑、关键风险、评级与目标价预览）
-## 公司概览
-（用表格列出：交易所/代码、行业、现价、市值、52 周区间、YTD、Beta、股息与回购政策、业务/资产组合要点）
 ## 投资论点
 （### 看多理由 与 ### 看空理由 两个小节，各列 4–6 条，带具体事实与数据支撑）
-## 基本面分析
-（先用"关键财务数据"表格列出：营业收入、净利润、EBITDA(或 EBIT)、经营现金流、自由现金流、毛利率、净利率、ROE、总债务、现金、EPS。重要：下方 JSON 中凡是已提供的字段（totalRevenue / netIncome / operatingIncome / ebitda / operatingCashFlow / freeCashFlow / grossMargin / profitMargin / roe / totalDebt / totalCash / trailingEps / forwardEps），必须填入对应数值，严禁填 "—" 或留空；仅当该字段在 JSON 中确实为 null 或不存在时才填 "—"。注意：若 ebitda 为 null 但 operatingIncome 有值，应将 operatingIncome 作为 EBIT 填入 "EBITDA(或 EBIT)" 列并注明"数据源未披露 EBITDA，此处为 EBIT"。再用文字解读收入与盈利趋势、利润率变化）
-## 现金流与资产负债表分析
-（结合自由现金流历史趋势、资本开支、债务水平与偿债能力展开；若提供了 netIncomeHistory / freeCashFlowHistory，请用文字描述其趋势；评估杠杆率与流动性风险）
 ## 业务质量与护城河
 （基于提供的新闻标题与公开信息，分析：①护城河类型与强度 ②管理层资本配置与执行力 ③商业模式可持续性；信息缺失处标注"（基于公开信息）"）
 ## 估值分析
