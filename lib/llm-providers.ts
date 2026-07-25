@@ -88,17 +88,17 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   },
   {
     id: "openrouter-1",
-    name: "OpenRouter · GPT-OSS 120B (free)",
+    name: "OpenRouter · Free Models Router",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "openai/gpt-oss-120b:free",
+    model: "openrouter/free",
     free: true,
     needsKey: true,
     signupUrl: "https://openrouter.ai/keys",
-    docsUrl: "https://openrouter.ai/models/openai/gpt-oss-120b",
+    docsUrl: "https://openrouter.ai/docs/cookbook/get-started/free-models-router-playground",
     description:
-      "OpenRouter 上的 OpenAI 开源 120B 推理模型（固定免费档 :free），质量显著强于随机 Free Router，适合长文财务分析。与其他 OpenRouter 配置共用 Key",
+      "OpenRouter 官方 Free Models Router：自动从当前可用的免费模型中挑选最合适的（按是否支持工具调用/结构化输出等特性智能过滤），不会因某个模型下架而 404。与其他 OpenRouter 配置共用 Key",
     protocol: "openai",
-    freeQuota: "免费层 openai/gpt-oss-120b:free，每日有限额但稳定可用",
+    freeQuota: "免费层：路由到多个免费模型，整体配额远高于单一免费模型（充值 $10 后每日上限提升）",
   },
   {
     id: "deepseek-1",

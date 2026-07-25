@@ -348,13 +348,13 @@ async function applyPersistedModels(config: LLMConfig): Promise<void> {
     }
   }
 
-  // OpenRouter 固定使用强免费模型 openai/gpt-oss-120b:free（避免随机 Free Router
-  // 挑到小模型导致报告质量不稳），强制覆盖任何旧配置残留的 slug。
+  // OpenRouter 固定使用官方 Free Models Router（openrouter/free），
+  // 强制覆盖任何旧配置里残留的具体免费模型 slug，确保始终走自动路由、不会 404。
   for (const id of OPENROUTER_PROVIDER_IDS) {
     const provider = LLM_PROVIDERS.find((p) => p.id === id);
     if (provider) {
-      provider.model = "openai/gpt-oss-120b:free";
-      provider.name = "OpenRouter · GPT-OSS 120B (free)";
+      provider.model = "openrouter/free";
+      provider.name = "OpenRouter · Free Models Router";
     }
   }
 }
