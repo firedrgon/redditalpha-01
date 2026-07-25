@@ -48,6 +48,12 @@ export const GROQ_PROVIDER_IDS = [
   "groq-3",
 ] as const;
 
+/** 智谱系列 provider 共享同一 API Key（LLM_API_KEY_ZHIPU / ZHIPU_API_KEY） */
+export const ZHIPU_PROVIDER_IDS = [
+  "zhipu-1",
+  "zhipu-2",
+] as const;
+
 /**
  * 自动选择活跃 provider 时的优先级（配额 + 质量综合优先）。
  *
@@ -58,6 +64,8 @@ export const GROQ_PROVIDER_IDS = [
 export const PREFERRED_ACTIVE_ORDER = [
   "gemini-1",
   "gemini-2",
+  "zhipu-1",
+  "zhipu-2",
   "deepseek-1",
   "groq-1",
   "groq-2",
@@ -165,6 +173,36 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     description: "速度最快（280 t/s），适合兜底；分析深度略逊于 Gemini / Qwen。与其他 Groq 模型共用 Key",
     protocol: "openai",
     freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
+  },
+  {
+    id: "zhipu-1",
+    contextWindow: 128_000,
+    name: "智谱 GLM-4-Flash",
+    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    model: "glm-4-flash",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://open.bigmodel.cn/usercenter/apikeys",
+    docsUrl: "https://open.bigmodel.cn/dev/howuse/introduction",
+    description:
+      "国产智谱 GLM-4-Flash：永久免费、中文强、128K 上下文，适合中文股票分析主力替补。与其他智谱配置共用 Key",
+    protocol: "openai",
+    freeQuota: "免费层：Flash 系列永久免费；注册送 2000 万 token（永久有效），QPS≈2",
+  },
+  {
+    id: "zhipu-2",
+    contextWindow: 128_000,
+    name: "智谱 GLM-4.7-Flash",
+    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    model: "glm-4.7-flash",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://open.bigmodel.cn/usercenter/apikeys",
+    docsUrl: "https://open.bigmodel.cn/dev/howuse/introduction",
+    description:
+      "智谱最新 GLM-4.7-Flash：免费、质量优于 GLM-4-Flash，128K 上下文，适合深度中文分析。与其他智谱配置共用 Key",
+    protocol: "openai",
+    freeQuota: "免费层：GLM-4.7-Flash 永久免费；注册送 2000 万 token（永久有效）",
   },
 ];
 
