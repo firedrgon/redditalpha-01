@@ -66,6 +66,7 @@ export interface StockAnalysisData {
   totalRevenue?: number | null;
   revenueHistory?: Array<{ year: number; revenue: number }>;
   debtToEquity?: number | null;
+  currentRatio?: number | null;
   freeCashFlow?: number | null;
   targetMeanPrice?: number | null;
   targetHighPrice?: number | null;
@@ -122,54 +123,27 @@ async function fetchSAPage(url: string): Promise<string | null> {
   }
 }
 
-/** 从 SvelteKit 内嵌的 financialData JS 对象中提取数据（非标准 JSON，用 new Function 解析） */
-function extractFinancialData(html: string): Record<string, unknown> | null {
-  const marker = "financialData:{";
-  const idx = html.indexOf(marker);
-  if (idx < 0) return null;
-  let depth = 0;
-  const start = idx + "financialData:".length;
-  let end = -1;
-  for (let i = start; i < html.length; i++) {
-    if (html[i] === "{") depth++;
-    else if (html[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        end = i + 1;
-        break;
-      }
-    }
-  }
-  if (end < 0) return null;
-  const jsLiteral = html.substring(start, end);
-  try {
-    // eslint-disable-next-line no-new-func
-    const fn = new Function(`return (${jsLiteral})`);
-    return fn() as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+/**
+ * 通用财务报表表格解析引擎：从 stockanalysis.com 财务报表 HTML 中提取行名与按列对齐的数值。
+ * 兼容两种表头结构：
+ *  - 表头含名称列（如 ["Fiscal Year","TTM","FY 2025",...]）→ 数据值列从 index 0 对齐（offset=0）
+ *  - 表头直接以周期开头（如 ["TTM","FY 2025",...]）→ 数据行首列为名称，值列整体右移一位（offset=1）
+ * 列类型支持 TTM / CURRENT / 具体财年，提供 pickValue(current|latestFY) 与 history。
+ */
+type ColKind = number | "TTM" | "CURRENT" | null;
+
+interface TableCore {
+  rows: string[][];
+  colKinds: ColKind[];
+  offset: number;
+  findRow: (re: RegExp) => string[] | null;
+  pickValue: (row: string[], prefer: "current" | "latestFY") => number | null;
+  history: (row: string[]) => Array<{ year: number; value: number }>;
 }
 
-/**
- * 解析 stockanalysis.com 财务报表 HTML 表格，提取绝对财务数字。
- * 数值单位统一为美元绝对值（表格内为百万美元，×1e6），与 marketCap 口径一致；
- * dividendYield 为小数形式（表格百分比 ÷100），与 Yahoo 口径一致。
- * 注意：stockanalysis 财务表不含 EBITDA / 折旧摊销行，故不在此提取 EBITDA。
- */
-function parseFinancialTables(html: string): {
-  netIncome?: number | null;
-  operatingIncome?: number | null;
-  operatingCashFlow?: number | null;
-  freeCashFlow?: number | null;
-  totalDebt?: number | null;
-  totalCash?: number | null;
-  dividendYield?: number | null;
-  netIncomeHistory?: Array<{ year: number; value: number }>;
-  freeCashFlowHistory?: Array<{ year: number; value: number }>;
-} {
+function tableCore(html: string): TableCore | null {
   const rowsMatch = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
-  if (rowsMatch.length === 0) return {};
+  if (rowsMatch.length === 0) return null;
   const rows = rowsMatch.map((m) =>
     [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((c) =>
       c[1]
@@ -180,21 +154,30 @@ function parseFinancialTables(html: string): {
     )
   );
 
-  // 表头行：含 FY 年份或 TTM
   let header: string[] = [];
   for (const r of rows) {
     if (
       r.some(
-        (c) => /^FY\s*\d{4}$/i.test(c.trim()) || c.trim().toUpperCase() === "TTM"
+        (c) =>
+          /^FY\s*\d{4}$/i.test(c.trim()) ||
+          c.trim().toUpperCase() === "TTM" ||
+          /fiscal year/i.test(c.trim())
       )
     ) {
       header = r;
       break;
     }
   }
-  const colYear: Array<number | "TTM" | null> = header.map((c) => {
+  if (header.length === 0) return null;
+
+  // 表头首列若是 "Fiscal Year"/"Period" 这类名称列，则数据值列与表头列一一对应（offset=0）；
+  // 否则表头首列就是周期（TTM/FY），数据行首列为名称，值列需整体右移一位（offset=1）。
+  const offset = /fiscal year|period/i.test(header[0]?.trim() || "") ? 0 : 1;
+
+  const colKinds: ColKind[] = header.map((c) => {
     const t = c.trim();
     if (t.toUpperCase() === "TTM") return "TTM";
+    if (t.toUpperCase() === "CURRENT") return "CURRENT";
     const m = t.match(/(\d{4})/);
     return m ? parseInt(m[1], 10) : null;
   });
@@ -208,20 +191,31 @@ function parseFinancialTables(html: string): {
     if (!Number.isFinite(n)) return null;
     return neg ? -n : n;
   };
+
   const findRow = (re: RegExp): string[] | null => {
     for (const r of rows) if (r[0] && re.test(r[0])) return r;
     return null;
   };
-  const MILLION = 1e6;
-  // 取最新完整财年（非 TTM）的数值；退回 TTM
-  const pickLatestFY = (row: string[] | null): number | null => {
+
+  const pickValue = (
+    row: string[],
+    prefer: "current" | "latestFY"
+  ): number | null => {
     if (!row) return null;
+    if (prefer === "current") {
+      for (let k = 0; k < colKinds.length; k++) {
+        if (colKinds[k] === "TTM" || colKinds[k] === "CURRENT") {
+          const v = toNum(row[offset + k]);
+          if (v != null) return v;
+        }
+      }
+    }
     let best: number | null = null;
     let bestYear = -1;
-    for (let i = 1; i < row.length && i < colYear.length; i++) {
-      const y = colYear[i];
+    for (let k = 0; k < colKinds.length; k++) {
+      const y = colKinds[k];
       if (typeof y === "number" && y > bestYear) {
-        const v = toNum(row[i]);
+        const v = toNum(row[offset + k]);
         if (v != null) {
           bestYear = y;
           best = v;
@@ -229,95 +223,231 @@ function parseFinancialTables(html: string): {
       }
     }
     if (best != null) return best;
-    const ti = colYear.indexOf("TTM");
-    return ti > 0 ? toNum(row[ti]) : null;
+    for (let k = 0; k < colKinds.length; k++) {
+      if (colKinds[k] === "TTM" || colKinds[k] === "CURRENT") {
+        const v = toNum(row[offset + k]);
+        if (v != null) return v;
+      }
+    }
+    return null;
   };
-  const historyOf = (
-    row: string[] | null
+
+  const history = (
+    row: string[]
   ): Array<{ year: number; value: number }> => {
     const out: Array<{ year: number; value: number }> = [];
     if (!row) return out;
-    for (let i = 1; i < row.length && i < colYear.length; i++) {
-      const y = colYear[i];
+    for (let k = 0; k < colKinds.length; k++) {
+      const y = colKinds[k];
       if (typeof y === "number") {
-        const v = toNum(row[i]);
-        if (v != null) out.push({ year: y, value: v * MILLION });
+        const v = toNum(row[offset + k]);
+        if (v != null) out.push({ year: y, value: v });
       }
     }
     return out.sort((a, b) => a.year - b.year);
   };
 
-  const result: {
+  return { rows, colKinds, offset, findRow, pickValue, history };
+}
+
+/**
+ * 解析 stockanalysis.com 财务表（利润表 / 资产负债表），提取绝对财务数字。
+ * 数值单位统一为美元绝对值（表格内为百万美元，×1e6），与 marketCap 口径一致；
+ * 利润率 / 股息率为小数（百分比 ÷100）。
+ * 注意：stockanalysis 财务表不含 EBITDA / 折旧摊销行，故不在此提取 EBITDA。
+ */
+function parseFinancialTables(html: string): {
+  revenue?: number | null;
+  netIncome?: number | null;
+  operatingIncome?: number | null;
+  operatingCashFlow?: number | null;
+  freeCashFlow?: number | null;
+  totalDebt?: number | null;
+  totalCash?: number | null;
+  grossMargin?: number | null;
+  profitMargin?: number | null;
+  dividendYield?: number | null;
+  revenueHistory?: Array<{ year: number; revenue: number }>;
+  netIncomeHistory?: Array<{ year: number; value: number }>;
+  freeCashFlowHistory?: Array<{ year: number; value: number }>;
+} {
+  const core = tableCore(html);
+  if (!core) return {};
+  const { findRow, pickValue, history } = core;
+  const MILLION = 1e6;
+  const out: Record<string, unknown> = {};
+
+  const rev = findRow(/^revenue\s*$/i);
+  if (rev) {
+    const v = pickValue(rev, "latestFY");
+    if (v != null) out.revenue = v * MILLION;
+    out.revenueHistory = history(rev).map((h) => ({
+      year: h.year,
+      revenue: h.value * MILLION,
+    }));
+  }
+
+  const ni = findRow(/net income/i);
+  if (ni) {
+    const v = pickValue(ni, "latestFY");
+    if (v != null) out.netIncome = v * MILLION;
+    out.netIncomeHistory = history(ni).map((h) => ({
+      year: h.year,
+      value: h.value * MILLION,
+    }));
+  }
+
+  const oi = findRow(/operating income/i);
+  if (oi) {
+    const v = pickValue(oi, "latestFY");
+    if (v != null) out.operatingIncome = v * MILLION;
+  }
+
+  const ocf = findRow(/operating cash flow/i);
+  if (ocf) {
+    const v = pickValue(ocf, "latestFY");
+    if (v != null) out.operatingCashFlow = v * MILLION;
+  }
+
+  const fcf = findRow(/free cash flow/i);
+  if (fcf) {
+    const v = pickValue(fcf, "latestFY");
+    if (v != null) out.freeCashFlow = v * MILLION;
+    out.freeCashFlowHistory = history(fcf).map((h) => ({
+      year: h.year,
+      value: h.value * MILLION,
+    }));
+  }
+
+  const td = findRow(/total debt/i);
+  if (td) {
+    const v = pickValue(td, "latestFY");
+    if (v != null) out.totalDebt = v * MILLION;
+  }
+
+  const cash =
+    findRow(/cash & (short-term investments|equivalents|investments)/i) ||
+    findRow(/^cash\b/i);
+  if (cash) {
+    const v = pickValue(cash, "latestFY");
+    if (v != null) out.totalCash = v * MILLION;
+  }
+
+  const gm = findRow(/gross margin/i);
+  if (gm) {
+    const v = pickValue(gm, "latestFY");
+    if (v != null) out.grossMargin = v / 100;
+  }
+  const pm = findRow(/profit margin/i);
+  if (pm) {
+    const v = pickValue(pm, "latestFY");
+    if (v != null) out.profitMargin = v / 100;
+  }
+
+  const dy = findRow(/dividend yield/i);
+  if (dy) {
+    const v = pickValue(dy, "latestFY");
+    if (v != null) out.dividendYield = v / 100;
+  }
+
+  return out as {
+    revenue?: number | null;
     netIncome?: number | null;
     operatingIncome?: number | null;
     operatingCashFlow?: number | null;
     freeCashFlow?: number | null;
     totalDebt?: number | null;
     totalCash?: number | null;
+    grossMargin?: number | null;
+    profitMargin?: number | null;
     dividendYield?: number | null;
+    revenueHistory?: Array<{ year: number; revenue: number }>;
     netIncomeHistory?: Array<{ year: number; value: number }>;
     freeCashFlowHistory?: Array<{ year: number; value: number }>;
-  } = {};
+  };
+}
 
-  const ni = findRow(/net income/i);
-  if (ni) {
-    const v = pickLatestFY(ni);
-    if (v != null) result.netIncome = v * MILLION;
-    result.netIncomeHistory = historyOf(ni);
+/**
+ * 解析 stockanalysis.com 比率表（/financials/ratios/），提取估值与质量指标。
+ * 优先取 "Current"（最新）列；市值 / 企业价值为百万单位，需 ×1e6。
+ */
+function parseRatiosTable(html: string): {
+  trailingPE?: number | null;
+  forwardPE?: number | null;
+  pegRatio?: number | null;
+  roe?: number | null;
+  marketCap?: number | null;
+  enterpriseValue?: number | null;
+  evEbitda?: number | null;
+  evEbit?: number | null;
+  dividendYield?: number | null;
+  currentRatio?: number | null;
+  debtToEquity?: number | null;
+} {
+  const core = tableCore(html);
+  if (!core) return {};
+  const { findRow, pickValue } = core;
+  const MILLION = 1e6;
+  const out: Record<string, unknown> = {};
+
+  const pe = findRow(/pe ratio|p\/e ratio/i);
+  if (pe) out.trailingPE = pickValue(pe, "current");
+
+  const fpe = findRow(/forward\s*p\s*\/?\s*e/i);
+  if (fpe) out.forwardPE = pickValue(fpe, "current");
+
+  const peg = findRow(/peg ratio|^peg\b/i);
+  if (peg) out.pegRatio = pickValue(peg, "current");
+
+  const roe = findRow(/return on equity|\(roe\)|\broe\b/i);
+  if (roe) {
+    const v = pickValue(roe, "current");
+    if (v != null) out.roe = v / 100;
   }
-  const oi = findRow(/operating income/i);
-  if (oi) {
-    const v = pickLatestFY(oi);
-    if (v != null) result.operatingIncome = v * MILLION;
+
+  const mc = findRow(/market cap/i);
+  if (mc) {
+    const v = pickValue(mc, "current");
+    if (v != null) out.marketCap = v * MILLION;
   }
-  const ocf = findRow(/operating cash flow/i);
-  if (ocf) {
-    const v = pickLatestFY(ocf);
-    if (v != null) result.operatingCashFlow = v * MILLION;
+
+  const ev = findRow(/enterprise value/i);
+  if (ev) {
+    const v = pickValue(ev, "current");
+    if (v != null) out.enterpriseValue = v * MILLION;
   }
-  const fcf = findRow(/free cash flow/i);
-  if (fcf) {
-    const v = pickLatestFY(fcf);
-    if (v != null) result.freeCashFlow = v * MILLION;
-    result.freeCashFlowHistory = historyOf(fcf);
-  }
-  const td = findRow(/total debt/i);
-  if (td) {
-    const v = pickLatestFY(td);
-    if (v != null) result.totalDebt = v * MILLION;
-  }
-  const cash =
-    findRow(/cash & (short-term investments|equivalents|investments)/i) ||
-    findRow(/^cash\b/i);
-  if (cash) {
-    const v = pickLatestFY(cash);
-    if (v != null) result.totalCash = v * MILLION;
-  }
+
+  const evebitda = findRow(/ev\/ebitda/i);
+  if (evebitda) out.evEbitda = pickValue(evebitda, "current");
+
+  const evebit = findRow(/ev\/ebit\b/i);
+  if (evebit) out.evEbit = pickValue(evebit, "current");
+
   const dy = findRow(/dividend yield/i);
   if (dy) {
-    const v = pickLatestFY(dy);
-    if (v != null) result.dividendYield = v / 100; // 百分比→小数
+    const v = pickValue(dy, "current");
+    if (v != null) out.dividendYield = v / 100;
   }
-  return result;
-}
 
-function arrNum(arr: unknown, idx: number): number | null {
-  if (!Array.isArray(arr)) return null;
-  const v = arr[idx];
-  if (v == null) return null;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+  const cr = findRow(/current ratio/i);
+  if (cr) out.currentRatio = pickValue(cr, "current");
 
-function arrNumList(arr: unknown): number[] {
-  if (!Array.isArray(arr)) return [];
-  const out: number[] = [];
-  for (const v of arr) {
-    if (v == null) continue;
-    const n = typeof v === "number" ? v : Number(v);
-    if (Number.isFinite(n)) out.push(n);
-  }
-  return out;
+  const de = findRow(/debt\s*\/\s*equity/i);
+  if (de) out.debtToEquity = pickValue(de, "current");
+
+  return out as {
+    trailingPE?: number | null;
+    forwardPE?: number | null;
+    pegRatio?: number | null;
+    roe?: number | null;
+    marketCap?: number | null;
+    enterpriseValue?: number | null;
+    evEbitda?: number | null;
+    evEbit?: number | null;
+    dividendYield?: number | null;
+    currentRatio?: number | null;
+    debtToEquity?: number | null;
+  };
 }
 
 /* ============================================================
@@ -331,96 +461,80 @@ async function scrapeStockAnalysis(
   const upper = ticker.toUpperCase();
   const lower = ticker.toLowerCase();
 
-  const [incomeHtml, ratiosHtml, overviewHtml] = await Promise.all([
+  const [incomeHtml, ratiosHtml, overviewHtml, balanceHtml] = await Promise.all([
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/`),
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/ratios/`),
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/`),
+    fetchSAPage(
+      `https://stockanalysis.com/stocks/${lower}/financials/balance-sheet/`
+    ),
   ]);
 
   const out: Partial<StockAnalysisData> = {};
 
   // ---- 利润表：营收 / 增长 / 利润率 / 自由现金流 / 负债权益 ----
+  // ---- 利润表 + 资产负债表：HTML 表格解析绝对财务数字（主源，不依赖内嵌 JS 对象） ----
   if (incomeHtml) {
-    const data = extractFinancialData(incomeHtml);
-    if (data) {
-      const revenue = data.revenue as unknown;
-      const revenueGrowth = data.revenueGrowth as unknown;
-      const fiscalYear = data.fiscalYear as unknown;
-      const datekey = data.datekey as unknown;
-
-      const gm = arrNum(data.grossMargin, 1) ?? arrNum(data.grossMargin, 0);
-      const pm = arrNum(data.profitMargin, 1) ?? arrNum(data.profitMargin, 0);
-      if (gm != null) out.grossMargin = gm;
-      if (pm != null) out.profitMargin = pm;
-
-      const yoy = arrNum(revenueGrowth, 1) ?? arrNum(revenueGrowth, 0);
-      if (yoy != null) out.revenueGrowthYoY = yoy;
-
-      const revList = arrNumList(revenue);
-      const yearList = Array.isArray(fiscalYear)
-        ? fiscalYear.map((y: unknown) => parseInt(String(y), 10))
-        : [];
-      const dkList = Array.isArray(datekey) ? datekey : [];
-      if (revList.length > 0) {
-        const history = revList
-          .map((rev, i) => ({
-            year: Number.isFinite(yearList[i]) ? yearList[i] : NaN,
-            revenue: rev,
-            isTTM: String(dkList[i] ?? "").toUpperCase() === "TTM",
-          }))
-          .filter((h) => !h.isTTM && Number.isFinite(h.year))
-          .map(({ year, revenue }) => ({ year, revenue }))
-          .sort((a, b) => a.year - b.year);
-        out.revenueHistory = history;
-        out.totalRevenue = arrNum(revenue, 1) ?? arrNum(revenue, 0);
-      }
-
-      out.freeCashFlow = arrNum(data.freeCashFlow, 1) ?? arrNum(data.freeCashFlow, 0);
-      out.debtToEquity = arrNum(data.debtToEquity, 0) ?? arrNum(data.debtToEquity, 1);
-
-      // 补充：HTML 表格解析绝对财务数字（净利/现金流/债务/现金/股息率）
-      const finTbl = parseFinancialTables(incomeHtml);
-      if (finTbl.netIncome != null) out.netIncome = finTbl.netIncome;
-      if (finTbl.operatingIncome != null) out.operatingIncome = finTbl.operatingIncome;
-      if (finTbl.operatingCashFlow != null) out.operatingCashFlow = finTbl.operatingCashFlow;
-      if (finTbl.freeCashFlow != null) out.freeCashFlow = finTbl.freeCashFlow;
-      if (finTbl.totalDebt != null) out.totalDebt = finTbl.totalDebt;
-      if (finTbl.totalCash != null) out.totalCash = finTbl.totalCash;
-      if (finTbl.dividendYield != null) out.dividendYield = finTbl.dividendYield;
-      if (finTbl.netIncomeHistory?.length) out.netIncomeHistory = finTbl.netIncomeHistory;
-      if (finTbl.freeCashFlowHistory?.length)
-        out.freeCashFlowHistory = finTbl.freeCashFlowHistory;
-      // EV 与 EV/EBIT（stockanalysis 未披露 EBITDA，用 EBIT 替代估值）
-      if (
-        out.marketCap != null &&
-        out.totalDebt != null &&
-        out.totalCash != null
-      ) {
-        out.enterpriseValue = out.marketCap + out.totalDebt - out.totalCash;
-      }
-      if (
-        out.enterpriseValue != null &&
-        out.operatingIncome != null &&
-        out.operatingIncome > 0
-      ) {
-        out.evEbit = out.enterpriseValue / out.operatingIncome;
+    const fin = parseFinancialTables(incomeHtml);
+    if (Object.keys(fin).length > 0) {
+      if (fin.revenue != null) out.totalRevenue = fin.revenue;
+      if (fin.revenueHistory) out.revenueHistory = fin.revenueHistory;
+      if (fin.netIncome != null) out.netIncome = fin.netIncome;
+      if (fin.netIncomeHistory) out.netIncomeHistory = fin.netIncomeHistory;
+      if (fin.operatingIncome != null) out.operatingIncome = fin.operatingIncome;
+      if (fin.operatingCashFlow != null) out.operatingCashFlow = fin.operatingCashFlow;
+      if (fin.freeCashFlow != null) out.freeCashFlow = fin.freeCashFlow;
+      if (fin.freeCashFlowHistory) out.freeCashFlowHistory = fin.freeCashFlowHistory;
+      if (fin.grossMargin != null) out.grossMargin = fin.grossMargin;
+      if (fin.profitMargin != null) out.profitMargin = fin.profitMargin;
+      // 营收同比增长：用最近两个财年推算
+      if (fin.revenueHistory && fin.revenueHistory.length >= 2) {
+        const last = fin.revenueHistory[fin.revenueHistory.length - 1];
+        const prev = fin.revenueHistory[fin.revenueHistory.length - 2];
+        if (prev.revenue > 0)
+          out.revenueGrowthYoY = (last.revenue / prev.revenue - 1) * 100;
       }
     } else {
       notes.push("stockanalysis.com 利润表数据解析失败。");
     }
   }
 
-  // ---- 比率：PE / 前瞻 PE / PEG / ROE / 市值 ----
+  if (balanceHtml) {
+    const bs = parseFinancialTables(balanceHtml);
+    if (bs.totalCash != null) out.totalCash = bs.totalCash;
+    if (bs.totalDebt != null) out.totalDebt = bs.totalDebt;
+  }
+
+  // ---- 比率：PE / 前瞻 PE / PEG / ROE / 市值 / EV / EV-EBITDA（HTML 表格解析） ----
   if (ratiosHtml) {
-    const data = extractFinancialData(ratiosHtml);
-    if (data) {
-      out.trailingPE = arrNum(data.pe, 0) ?? arrNum(data.pe, 1);
-      out.forwardPE = arrNum(data.peForward, 0) ?? arrNum(data.peForward, 1);
-      out.pegRatio = arrNum(data.pegRatio, 0) ?? arrNum(data.pegRatio, 1);
-      out.roe = arrNum(data.roe, 0) ?? arrNum(data.roe, 1);
-      out.marketCap = arrNum(data.marketCap, 0) ?? arrNum(data.marketCap, 1);
+    const r = parseRatiosTable(ratiosHtml);
+    if (Object.keys(r).length > 0) {
+      if (r.trailingPE != null) out.trailingPE = r.trailingPE;
+      if (r.forwardPE != null) out.forwardPE = r.forwardPE;
+      if (r.pegRatio != null) out.pegRatio = r.pegRatio;
+      if (r.roe != null) out.roe = r.roe;
+      if (r.marketCap != null) out.marketCap = r.marketCap;
+      if (r.enterpriseValue != null) out.enterpriseValue = r.enterpriseValue;
+      if (r.evEbitda != null) out.evEbitda = r.evEbitda;
+      if (r.evEbit != null) out.evEbit = r.evEbit;
+      if (r.dividendYield != null) out.dividendYield = r.dividendYield;
+      if (r.currentRatio != null) out.currentRatio = r.currentRatio;
+      if (r.debtToEquity != null) out.debtToEquity = r.debtToEquity;
     } else {
       notes.push("stockanalysis.com 比率数据解析失败。");
+    }
+  }
+
+  // ---- EV / EV-EBIT 兜底计算（比率页未直接给 EV 时，用 市值+债-现金 估算） ----
+  if (out.operatingIncome != null && out.operatingIncome > 0) {
+    const ev =
+      out.enterpriseValue ??
+      (out.marketCap != null
+        ? out.marketCap + (out.totalDebt ?? 0) - (out.totalCash ?? 0)
+        : null);
+    if (ev != null) {
+      out.enterpriseValue = out.enterpriseValue ?? ev;
+      if (out.evEbit == null) out.evEbit = ev / out.operatingIncome;
     }
   }
 
@@ -486,11 +600,14 @@ async function scrapeStockAnalysis(
       if (name && !name.toUpperCase().includes(upper)) out.name = name;
     }
 
-    const finData = extractFinancialData(overviewHtml);
-    if (finData) {
-      const ind =
-        finData.industry || finData.sector || finData.gicsSector || finData.gicsIndustry;
-      if (ind && typeof ind === "string") out.industry = ind;
+    // 行业：从概览页 /industry/.../ 链接还原（stockanalysis 改版后内嵌 industry 字段已失效）
+    const indMatch = overviewHtml.match(/industry\/([a-z0-9-]+)\//i);
+    if (indMatch) {
+      const human = indMatch[1]
+        .split("-")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+      out.industry = human;
     }
 
     const w52 = overviewHtml.match(/week52:\{([^}]+)\}/);
@@ -584,220 +701,6 @@ async function fetchYahooNews(ticker: string): Promise<StockReportNews[]> {
   }
 }
 
-/* ============================================================
- * Yahoo quoteSummary 补充（绝对财务 / 估值 / 同业）
- * 自包含实现，复用 lib/finance.ts 的 crumb 范式
- * ============================================================ */
-
-let yfCrumb: { crumb: string; cookie: string; expires: number } | null = null;
-
-async function yfGetCrumb(): Promise<{ crumb: string; cookie: string } | null> {
-  if (yfCrumb && yfCrumb.expires > Date.now()) {
-    return { crumb: yfCrumb.crumb, cookie: yfCrumb.cookie };
-  }
-  try {
-    const homeRes = await fetch("https://fc-api.yahoo.com/", {
-      headers: { "User-Agent": UA },
-      redirect: "manual",
-    });
-    const setCookie = homeRes.headers.get("set-cookie") || "";
-    const parts: string[] = [];
-    for (const c of setCookie.split(/,\s*(?=[A-Za-z])/)) {
-      const m = c.match(/^([^=]+=[^;]+)/);
-      if (m) parts.push(m[1]);
-    }
-    const cookie = parts.join("; ");
-    if (!cookie) return null;
-    const crumbRes = await fetch(
-      "https://query2.finance.yahoo.com/v1/test/getcrumb",
-      { headers: { "User-Agent": UA, Cookie: cookie } }
-    );
-    if (!crumbRes.ok) return null;
-    const crumb = (await crumbRes.text()).trim();
-    if (!crumb || crumb.length < 4) return null;
-    yfCrumb = { crumb, cookie, expires: Date.now() + 5 * 60 * 1000 };
-    return { crumb, cookie };
-  } catch {
-    return null;
-  }
-}
-
-async function fetchYahooSummary(
-  ticker: string,
-  modules: string[]
-): Promise<Record<string, unknown> | null> {
-  const auth = await yfGetCrumb();
-  const base = auth
-    ? `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
-        ticker
-      )}?modules=${modules.join(",")}&crumb=${encodeURIComponent(auth.crumb)}`
-    : `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
-        ticker
-      )}?modules=${modules.join(",")}`;
-  try {
-    const res = await fetch(base, {
-      headers: {
-        "User-Agent": UA,
-        Accept: "application/json",
-        ...(auth ? { Cookie: auth.cookie } : {}),
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(12000),
-    });
-    if (!res.ok) return null;
-    const d = (await res.json()) as {
-      quoteSummary?: { result?: Array<Record<string, unknown>> };
-    };
-    return d?.quoteSummary?.result?.[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** 取 Yahoo 字段的 raw 值（Yahoo 字段形如 { raw, fmt }） */
-function yh(section: unknown, key: string): number | null {
-  const obj = section as Record<string, unknown> | undefined;
-  if (!obj) return null;
-  const raw = obj[key];
-  if (raw == null) return null;
-  if (typeof raw === "object" && raw !== null && "raw" in raw) {
-    const v = (raw as { raw: unknown }).raw;
-    return typeof v === "number" && Number.isFinite(v) ? v : null;
-  }
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
-}
-
-/** 从 Yahoo 报表的 endDate 取财年 */
-function yhYear(stmt: Record<string, unknown>): number | null {
-  const raw = (stmt.endDate as { raw?: number } | undefined)?.raw;
-  if (typeof raw === "number" && raw > 0) {
-    const y = new Date(raw * 1000).getFullYear();
-    return Number.isNaN(y) ? null : y;
-  }
-  return null;
-}
-
-async function fetchYahooFundamentals(
-  ticker: string,
-  notes: string[]
-): Promise<Partial<StockAnalysisData>> {
-  const summary = await fetchYahooSummary(ticker, [
-    "incomeStatementHistory",
-    "balanceSheetHistory",
-    "cashflowStatementHistory",
-    "defaultKeyStatistics",
-    "summaryDetail",
-    "price",
-  ]);
-  if (!summary) {
-    notes.push("Yahoo 财务补充数据获取失败（quoteSummary 不可用），绝对财务数字可能缺失。");
-    return {};
-  }
-  const out: Partial<StockAnalysisData> = {};
-
-  // 利润表（年度）
-  const incomeStmts =
-    (
-      summary.incomeStatementHistory as
-        | { incomeStatementHistory?: Array<Record<string, unknown>> }
-        | undefined
-    )?.incomeStatementHistory || [];
-  if (incomeStmts.length > 0) {
-    const latest = incomeStmts[0];
-    out.netIncome = yh(latest, "netIncome");
-    out.ebitda = yh(latest, "ebitda");
-    const niHist = incomeStmts
-      .map((s) => ({ year: yhYear(s), value: yh(s, "netIncome") }))
-      .filter((x) => x.year != null && x.value != null)
-      .map((x) => ({ year: x.year as number, value: x.value as number }));
-    if (niHist.length) out.netIncomeHistory = niHist;
-  }
-
-  // 现金流（年度）
-  const cfStmts =
-    (
-      summary.cashflowStatementHistory as
-        | { cashflowStatements?: Array<Record<string, unknown>> }
-        | undefined
-    )?.cashflowStatements || [];
-  if (cfStmts.length > 0) {
-    const latest = cfStmts[0];
-    out.operatingCashFlow = yh(latest, "operatingCashFlow");
-    out.freeCashFlow = yh(latest, "freeCashFlow");
-    const fcfHist = cfStmts
-      .map((s) => ({ year: yhYear(s), value: yh(s, "freeCashFlow") }))
-      .filter((x) => x.year != null && x.value != null)
-      .map((x) => ({ year: x.year as number, value: x.value as number }));
-    if (fcfHist.length) out.freeCashFlowHistory = fcfHist;
-  }
-
-  // 资产负债表（年度）：现金 / 总债务
-  const bsStmts =
-    (
-      summary.balanceSheetHistory as
-        | { balanceSheetStatements?: Array<Record<string, unknown>> }
-        | undefined
-    )?.balanceSheetStatements || [];
-  if (bsStmts.length > 0) {
-    const latest = bsStmts[0];
-    const cash = yh(latest, "cash");
-    const sti = yh(latest, "shortTermInvestments");
-    out.totalCash =
-      cash != null && sti != null ? cash + sti : cash ?? sti;
-    const ltd = yh(latest, "longTermDebt");
-    const std = yh(latest, "shortTermDebt") ?? yh(latest, "currentDebt");
-    out.totalDebt = ltd != null && std != null ? ltd + std : ltd ?? std;
-  }
-
-  // defaultKeyStatistics
-  const dks = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
-  if (dks) {
-    out.enterpriseValue = yh(dks, "enterpriseValue");
-    out.dividendYield = yh(dks, "dividendYield");
-    out.trailingEps = yh(dks, "trailingEps");
-    out.forwardEps = yh(dks, "forwardEps");
-    if (out.ebitda == null) out.ebitda = yh(dks, "ebitda");
-    if (out.totalDebt == null) out.totalDebt = yh(dks, "totalDebt");
-    const ete = yh(dks, "enterpriseToEbitda");
-    if (ete != null) out.evEbitda = ete;
-  }
-
-  // summaryDetail 兜底
-  const sd = summary.summaryDetail as Record<string, unknown> | undefined;
-  if (sd) {
-    if (out.dividendYield == null) out.dividendYield = yh(sd, "dividendYield");
-    if (out.trailingPE == null) out.trailingPE = yh(sd, "trailingPE");
-    if (out.forwardPE == null) out.forwardPE = yh(sd, "forwardPE");
-    if (out.marketCap == null) out.marketCap = yh(sd, "marketCap");
-    if (out.week52High == null) out.week52High = yh(sd, "fiftyTwoWeekHigh");
-    if (out.week52Low == null) out.week52Low = yh(sd, "fiftyTwoWeekLow");
-    if (out.targetMeanPrice == null) out.targetMeanPrice = yh(sd, "targetMeanPrice");
-  }
-
-  // price 模块：52 周、名称
-  const priceMod = summary.price as Record<string, unknown> | undefined;
-  if (priceMod) {
-    if (out.week52High == null) out.week52High = yh(priceMod, "fiftyTwoWeekHigh");
-    if (out.week52Low == null) out.week52Low = yh(priceMod, "fiftyTwoWeekLow");
-    if (!out.name) {
-      const nm = priceMod.shortName ?? priceMod.longName;
-      if (typeof nm === "string") out.name = nm;
-    }
-  }
-
-  // 计算 EV/EBITDA（若 Yahoo 未直接给）
-  if (out.evEbitda == null && out.ebitda != null && out.ebitda > 0) {
-    const ev =
-      out.enterpriseValue ??
-      (out.marketCap != null
-        ? out.marketCap + (out.totalDebt ?? 0) - (out.totalCash ?? 0)
-        : null);
-    if (ev != null) out.evEbitda = ev / out.ebitda;
-  }
-
-  return out;
-}
-
 /* —— 同业对比（按行业分组抓取关键估值指标） —— */
 
 const PEER_GROUPS: Record<string, string[]> = {
@@ -834,38 +737,37 @@ function pickPeerGroup(industry: string | null | undefined): string[] | null {
 }
 
 async function scrapePeer(ticker: string): Promise<PeerComparison | null> {
-  const summary = await fetchYahooSummary(ticker, [
-    "price",
-    "summaryDetail",
-    "defaultKeyStatistics",
+  const lower = ticker.toLowerCase();
+  const [ratiosHtml, overviewHtml] = await Promise.all([
+    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/ratios/`),
+    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/`),
   ]);
-  if (!summary) return null;
-  const priceMod = summary.price as Record<string, unknown> | undefined;
-  const sd = summary.summaryDetail as Record<string, unknown> | undefined;
-  const dks = summary.defaultKeyStatistics as Record<string, unknown> | undefined;
-  const name =
-    (typeof priceMod?.shortName === "string" ? priceMod.shortName : null) ??
-    (typeof priceMod?.longName === "string" ? priceMod.longName : null);
-  const pe = yh(sd, "trailingPE") ?? yh(dks, "trailingPE");
-  const fpe = yh(sd, "forwardPE") ?? yh(dks, "forwardPE");
-  const mc = yh(sd, "marketCap") ?? yh(dks, "marketCap");
-  const ev = yh(dks, "enterpriseValue");
-  const td = yh(dks, "totalDebt");
-  const ebitda = yh(dks, "ebitda");
-  const target = yh(sd, "targetMeanPrice") ?? yh(dks, "targetMeanPrice");
-  let evEbitda = yh(dks, "enterpriseToEbitda");
-  if (evEbitda == null && ebitda != null && ebitda > 0) {
-    const evCalc = ev ?? (mc != null ? mc + (td ?? 0) : null);
-    if (evCalc != null) evEbitda = evCalc / ebitda;
+  const r = ratiosHtml ? parseRatiosTable(ratiosHtml) : {};
+  const nameMatch = overviewHtml?.match(/<h1[^>]*>([^<]+)<\/h1>/);
+  const name = nameMatch ? nameMatch[1].trim() : null;
+  // 分析师目标价：从概览页 analystTarget:{...} 内联对象提取
+  let target: number | null = null;
+  const tMatch = overviewHtml?.match(
+    /analystTarget:\{[^}]*?target["']?\s*:\s*"?\$?([\d.]+)/
+  );
+  if (tMatch) target = parseFloat(tMatch[1]);
+
+  if (
+    r.marketCap == null &&
+    r.trailingPE == null &&
+    r.evEbitda == null &&
+    target == null
+  ) {
+    return null;
   }
   return {
-    ticker,
+    ticker: ticker.toUpperCase(),
     name,
-    price: yh(priceMod, "regularMarketPrice"),
-    marketCap: mc,
-    trailingPE: pe,
-    forwardPE: fpe,
-    evEbitda,
+    price: null,
+    marketCap: r.marketCap ?? null,
+    trailingPE: r.trailingPE ?? null,
+    forwardPE: r.forwardPE ?? null,
+    evEbitda: r.evEbitda ?? null,
     targetMeanPrice: target,
   };
 }
@@ -942,34 +844,8 @@ export async function getStockAnalysisData(
     data.ytdPercent = (data.price / ytdBase - 1) * 100;
   }
 
-  // Yahoo 财务补充：仅作 stockanalysis 的兜底（当前环境 Yahoo crumb 常被封，多数取不到）。
-  // stockanalysis 为主源，仅当对应字段缺失时才用 Yahoo 值覆盖。
-  const yf = await fetchYahooFundamentals(upper, notes).catch(
-    () => ({}) as Partial<StockAnalysisData>
-  );
-  const yfKeys: (keyof StockAnalysisData)[] = [
-    "netIncome",
-    "operatingIncome",
-    "ebitda",
-    "operatingCashFlow",
-    "freeCashFlow",
-    "totalCash",
-    "totalDebt",
-    "enterpriseValue",
-    "evEbitda",
-    "dividendYield",
-    "trailingEps",
-    "forwardEps",
-    "netIncomeHistory",
-    "freeCashFlowHistory",
-  ];
-  for (const k of yfKeys) {
-    const v = (yf as unknown as Record<string, unknown>)[k];
-    const dataRec = data as unknown as Record<string, unknown>;
-    if (v != null && dataRec[k] == null) {
-      dataRec[k] = v;
-    }
-  }
+  // 注：Yahoo quoteSummary 在当前环境（含 Vercel 数据中心 IP）被 crumb 鉴权封锁，
+  // 已不再作为兜底；stockanalysis.com 财务表解析为唯一主数据源。
 
   // 同业对比
   const peers = await scrapePeers(upper, data.industry, notes).catch(
@@ -1051,6 +927,7 @@ function buildReportPrompt(data: StockAnalysisData): {
       totalCash: data.totalCash,
       totalDebt: data.totalDebt,
       debtToEquity: data.debtToEquity,
+      currentRatio: data.currentRatio,
       targetMeanPrice: data.targetMeanPrice,
       targetHighPrice: data.targetHighPrice,
       targetLowPrice: data.targetLowPrice,

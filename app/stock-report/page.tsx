@@ -31,6 +31,8 @@ interface ReportData {
   forwardPE?: number | null;
   evEbitda?: number | null;
   evEbit?: number | null;
+  currentRatio?: number | null;
+  debtToEquity?: number | null;
   roe?: number | null;
   dividendYield?: number | null;
   trailingEps?: number | null;
@@ -316,6 +318,14 @@ export default function StockReportPage() {
                   ) : (
                     <Stat label="EV/EBITDA" value="—" />
                   )}
+                  <Stat
+                    label="流动比率"
+                    value={d.currentRatio != null ? fmt(d.currentRatio) : "—"}
+                  />
+                  <Stat
+                    label="负债/权益"
+                    value={d.debtToEquity != null ? fmt(d.debtToEquity) : "—"}
+                  />
                   <Stat
                     label="ROE"
                     value={d.roe != null ? fmt(d.roe) + "%" : "—"}
