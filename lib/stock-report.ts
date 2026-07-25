@@ -1115,6 +1115,12 @@ export function isValidUSTicker(ticker: string): boolean {
   return /^[A-Z]{1,5}(\.[A-Z]{1,4})?$/.test(ticker.trim().toUpperCase());
 }
 
+/** 校验研报支持的标的：美股字母码 或 A 股 6 位代码（如 AAPL / 600519.SH） */
+export function isValidReportTicker(ticker: string): boolean {
+  const m = detectMarket(ticker.trim().toUpperCase());
+  return m === "US" || m === "CN";
+}
+
 export async function generateStockReport(ticker: string): Promise<StockReport> {
   const clean = ticker.trim().toUpperCase();
   const market = detectMarket(clean);

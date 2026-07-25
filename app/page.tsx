@@ -813,6 +813,23 @@ function FavoriteCard({
                 图解
               </a>
             )}
+            {hasReport ? (
+              <Link
+                href={`/stock-report?ticker=${encodeURIComponent(item.ticker)}`}
+                className="shrink-0 rounded-md border border-orange-500/40 bg-orange-500/10 px-3 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/20"
+                title="查看 AI 研报"
+              >
+                研报
+              </Link>
+            ) : (
+              <Link
+                href={`/stock-report?ticker=${encodeURIComponent(item.ticker)}`}
+                className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+                title="生成 AI 研报"
+              >
+                生成研报
+              </Link>
+            )}
           </>
         ) : (
           <>
@@ -3799,26 +3816,22 @@ export default function Home() {
     };
   }, [sessionStatus]);
 
-  // 批量检查美股研报是否已生成（收藏列表按钮状态用）
+  // 批量检查研报是否已生成（收藏列表按钮状态用，含 A 股）
   useEffect(() => {
     if (sessionStatus !== "authenticated" || favorites.length === 0) {
       setReportsExist({});
       return;
     }
-    const usTickers = Array.from(
-      new Set(
-        favorites
-          .map((f) => f.ticker.toUpperCase())
-          .filter((t) => !isCNTicker(t))
-      )
+    const tickers = Array.from(
+      new Set(favorites.map((f) => f.ticker.toUpperCase()))
     );
-    if (usTickers.length === 0) {
+    if (tickers.length === 0) {
       setReportsExist({});
       return;
     }
     let cancelled = false;
     fetch(
-      `/api/stock-report?exists=1&tickers=${encodeURIComponent(usTickers.join(","))}`,
+      `/api/stock-report?exists=1&tickers=${encodeURIComponent(tickers.join(","))}`,
       { cache: "no-store" }
     )
       .then((r) => r.json())

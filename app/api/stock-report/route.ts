@@ -3,7 +3,7 @@ import {
   generateStockReport,
   getSavedReport,
   getReportsExist,
-  isValidUSTicker,
+  isValidReportTicker,
 } from "@/lib/stock-report";
 
 export const runtime = "nodejs";
@@ -19,12 +19,12 @@ export async function GET(req: NextRequest) {
   const existsParam = sp.get("exists");
   const tickersParam = sp.get("tickers");
 
-  // 批量存在性检查（收藏列表用）：?exists=1&tickers=AAPL,MSFT
+  // 批量存在性检查（收藏列表用）：?exists=1&tickers=AAPL,600519.SH
   if (existsParam === "1" && tickersParam) {
     const tickers = tickersParam
       .split(",")
       .map((t) => t.trim().toUpperCase())
-      .filter(isValidUSTicker);
+      .filter(isValidReportTicker);
     const reports = await getReportsExist(tickers);
     return NextResponse.json({ reports });
   }
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   // 单只：返回已存报告；无则 { exists:false }
   if (ticker && String(ticker).trim()) {
     const clean = String(ticker).trim().toUpperCase();
-    if (!isValidUSTicker(clean)) {
+    if (!isValidReportTicker(clean)) {
       return NextResponse.json({ error: "无效的股票代码" }, { status: 400 });
     }
     const saved = await getSavedReport(clean);
@@ -59,9 +59,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "缺少 ticker 参数" }, { status: 400 });
   }
   const clean = String(ticker).trim();
-  if (!isValidUSTicker(clean)) {
+  if (!isValidReportTicker(clean)) {
     return NextResponse.json(
-      { error: "无效的股票代码（美股应为字母代码，如 AAPL）" },
+      { error: "无效的股票代码（美股字母代码如 AAPL，或 A 股 6 位代码如 600519.SH）" },
       { status: 400 }
     );
   }
