@@ -46,9 +46,17 @@ export async function GET() {
       signupUrl: p.signupUrl,
       docsUrl: p.docsUrl,
       freeQuota: p.freeQuota,
-      apiKeyMasked: status.apiKey
-        ? `${status.apiKey.slice(0, 4)}****${status.apiKey.slice(-4)}`
-        : "",
+      apiKeyMasked: (() => {
+        const keys = (status.apiKey || "")
+          .split(/[\s,;]+/)
+          .map((k: string) => k.trim())
+          .filter(Boolean);
+        if (keys.length === 0) return "";
+        if (keys.length === 1) {
+          return `${keys[0].slice(0, 4)}****${keys[0].slice(-4)}`;
+        }
+        return `${keys.length} 个 Key`;
+      })(),
       hasKey: status.apiKey !== "",
       keySource: status.keySource, // "env" | "local" | "none"
       envVarName: `LLM_API_KEY_${p.id.toUpperCase().replace(/-/g, "_")}`,

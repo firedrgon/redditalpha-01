@@ -2301,7 +2301,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                             [p.id]: e.target.value,
                           }))
                         }
-                        placeholder="输入 API Key"
+                        placeholder="输入 API Key（支持多个，逗号/换行分隔）"
                         className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white placeholder-zinc-600 focus:border-orange-500/60 focus:outline-none"
                       />
                       <button
@@ -2313,6 +2313,11 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                         保存
                       </button>
                     </div>
+                  )}
+                  {p.needsKey && p.keySource !== "env" && (
+                    <p className="mt-1 text-[10px] text-zinc-600">
+                      支持配置多个 Key（用逗号或换行分隔），系统自动轮询以放大免费额度，并在单个 Key 限流时自动切换。
+                    </p>
                   )}
                   {p.needsKey && p.keySource === "env" && (
                     <div className="mt-2 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300/80">

@@ -85,6 +85,82 @@ const CN_PROVIDER_IDS = [
   "doubao-1",
 ];
 
+/**
+ * 解析原始 API Key 字符串为 key 池。
+ * 支持用逗号 / 分号 / 换行 / 空格分隔多个 key，便于同一 provider 配置多个 key 轮询：
+ * 成倍放大免费额度，并在单个 key 限流时自动切换到下一个。
+ */
+function parseKeyPool(apiKeyRaw: string | undefined): string[] {
+  return (apiKeyRaw ?? "")
+    .split(/[\s,;]+/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+/** 多 key 轮询游标（模块级，同实例内尽量均匀分配请求到不同 key） */
+let keyCursor = 0;
+/** 每 key 瞬时错误冷却（内存，仅用于同实例内跳过已知限流的 key；冷启动会重置，不影响正确性） */
+const keyCooldowns = new Map<string, Map<string, number>>();
+
+/**
+ * 用 key 池调用 provider：
+ * - 轮询选取当前未冷却的 key；
+ * - 遇到限流(429)/瞬时错误自动换下一个 key 重试；
+ * - 全部 key 失败后抛出，由调用方决定是否冷却整个 provider。
+ */
+async function callWithKeyPool(
+  provider: LLMProvider,
+  apiKeyRaw: string | undefined,
+  messages: LLMMessage[],
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
+): Promise<string> {
+  const pool = parseKeyPool(apiKeyRaw);
+  if (pool.length === 0) {
+    throw new Error(`活跃模型 ${provider.name} 未配置 API Key。`);
+  }
+
+  const now = Date.now();
+  let cds = keyCooldowns.get(provider.id);
+  if (!cds) {
+    cds = new Map<string, number>();
+    keyCooldowns.set(provider.id, cds);
+  }
+
+  // 选起始 key：从游标起找第一个未冷却的 key
+  let start = 0;
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (keyCursor + i) % pool.length;
+    const cd = cds.get(pool[idx]);
+    if (!cd || cd <= now) {
+      start = idx;
+      break;
+    }
+  }
+
+  let lastErr: Error | null = null;
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (start + i) % pool.length;
+    const key = pool[idx];
+    try {
+      const text = await callProviderWithTimeout(provider, key, messages, options);
+      keyCursor = (idx + 1) % pool.length;
+      return text;
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      lastErr = e;
+      // 限流：记录该 key 冷却，避免短期内重复打满同一 key
+      if (/429|rate.?limit/i.test(e.message)) {
+        cds.set(key, now + getCooldownMs(e.message));
+      }
+      // 继续尝试下一个 key
+    }
+  }
+
+  throw new Error(
+    `${provider.name} 全部 ${pool.length} 个 Key 均调用失败：${lastErr?.message ?? "无可用 Key"}`
+  );
+}
+
 
 /**
  * 按字符估算 token 数（偏保守，用于防止 413 低估）。
@@ -252,7 +328,7 @@ export async function chatCompletion(
   }
 
   try {
-    const text = await callProviderWithTimeout(provider, status.apiKey, messages, options);
+    const text = await callWithKeyPool(provider, status.apiKey, messages, options);
     // 重新读取最新配置后再更新运行时状态。
     // LLM 调用可能耗时 30-45s，期间用户可能切换了 activeProvider，
     // 如果直接写回旧 config 会覆盖用户的切换操作。
@@ -493,7 +569,7 @@ export async function testProvider(
       modelLower.includes("gpt-oss") ||
       modelLower.includes("hy3") ||
       modelLower === "openrouter/free";
-    const text = await callProvider(
+    const text = await callWithKeyPool(
       provider,
       status.apiKey,
       [{ role: "user", content: "请回复 OK。" }],
