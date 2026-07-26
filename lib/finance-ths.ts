@@ -1,9 +1,10 @@
 /**
  * A 股财务数据获取（同花顺 10jqka 数据源）
  *
- * 本模块是「仅研报路径」替换东方财富用的薄适配层：返回与东方财富版完全一致的
- * FinancialMetrics 结构，使 lib/stock-report.ts 的 getCNAnalysisData 仅改调用源即可。
- * 五因子策略（lib/finance.ts → fetchCNFinancialMetrics）不受影响，仍走东方财富。
+ * 本模块是「仅研报路径」的 A 股数据源适配层：以同花顺为主源，对同花顺原生未提供
+ * 的字段（如 52 周高低、财报预约披露日、分析师评级分布/家数、同业可比 boardCode、
+ * Forward PE、EBITDA、自由现金流等）回退东方财富兜底，最终返回统一的 FinancialMetrics。
+ * 五因子策略（lib/finance.ts → fetchCNFinancialMetrics）不受影响，仍单独走东方财富。
  *
  * 数据来源（均为同花顺公开 F10 / 研报接口，无需鉴权，需带 UA + Referer）：
  *   1. index_source   —— 实时指标（PE/PB/EPS/营收同比/净利同比/毛利率/净利率/ROE/资产负债率/股息率）
@@ -18,12 +19,15 @@
  *   - index_source：金额=元（绝对值），比率=百分比原值（如 86.5986 表示 86.5986%，需 /100）
  *   - importance/benefit/debt/cash 财务报表：金额单位=亿（需 ×1e8），比率=百分比（/100）
  *
- * 缺口（同花顺给定接口未覆盖，置 null，由报告模型跳过）：
- *   总市值（用 PE×TTM净利润 推算）、现价/涨跌幅（取自目标价序列 stock_price）、
- *   52 周高低、财报预约披露日、分析师评级分布、同业可比列表（boardCode）。
+ * 兜底策略：以下字段同花顺原生未提供，将自动从东方财富 fetchCNFinancialMetrics 取值：
+ *   52 周高低、财报预约披露日、分析师评级分布/家数、同业可比 boardCode、Forward PE、
+ *   EBITDA、自由现金流、EV/EBITDA、目标价中位数、分析师详细评级、YTD 等。
+ * 其余字段（市值由 PE×TTM净利润 推算、现价/涨跌幅取自目标价序列 stock_price）同花顺已有值，
+ * 优先使用同花顺。
  */
 
 import type { FinancialMetrics } from "./finance";
+import { fetchCNFinancialMetrics } from "./finance-cn";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -196,7 +200,7 @@ function parseReports(json: any): {
  * 从同花顺获取 A 股完整财务数据，返回统一 FinancialMetrics 结构。
  * 任一子接口失败仅置相关字段为 null，不整体中断。
  */
-export async function fetchCNThsFinancialMetrics(
+export async function fetchThsCore(
   ticker: string
 ): Promise<FinancialMetrics> {
   const m = ticker.match(/^(\d{6})(?:\.(SH|SZ|SS))?$/i);
@@ -443,4 +447,55 @@ export async function fetchCNThsFinancialMetrics(
     dataSource: "ths",
     warnings,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 兜底合并：同花顺优先，缺口字段用东方财富补齐                          */
+/* ------------------------------------------------------------------ */
+
+function mergeMetrics(
+  ths: FinancialMetrics,
+  em: FinancialMetrics
+): FinancialMetrics {
+  const merged: Record<string, any> = { ...em };
+  for (const k of Object.keys(ths) as (keyof FinancialMetrics)[]) {
+    const v = (ths as any)[k];
+    if (v !== null && v !== undefined) merged[k] = v;
+  }
+  merged.dataSource = "ths";
+  merged.warnings = [
+    ...(ths.warnings ?? []),
+    ...(em.warnings ?? []).map((w) => `东方财富兜底：${w}`),
+  ];
+  return merged as FinancialMetrics;
+}
+
+/**
+ * A 股研报路径主入口：同花顺优先，缺口字段回退东方财富。
+ * - 同花顺任一子接口失败仅置相关字段 null；
+ * - 缺失（null）字段由东方财富 fetchCNFinancialMetrics 补齐；
+ * - 两者皆失败返回 null，由上游走失败流程。
+ */
+export async function fetchCNThsFinancialMetrics(
+  ticker: string
+): Promise<FinancialMetrics | null> {
+  const upper = ticker.toUpperCase();
+  const [ths, em] = await Promise.all([
+    fetchThsCore(upper).catch(() => null),
+    fetchCNFinancialMetrics(upper).catch(() => null),
+  ]);
+
+  if (!ths && !em) return null;
+  if (!ths) {
+    return {
+      ...em!,
+      dataSource: "eastmoney",
+      warnings: [
+        ...(em!.warnings ?? []),
+        "同花顺数据源不可用，整体回退东方财富",
+      ],
+    };
+  }
+  if (!em) return ths; // 东方财富兜底失败，仅用同花顺
+  return mergeMetrics(ths, em);
 }

@@ -906,7 +906,7 @@ export async function getCNAnalysisData(
   ]);
 
   if (!metrics) {
-    notes.push("同花顺 A 股数据获取失败，无法生成报告。");
+    notes.push("数据源（同花顺/东方财富）均获取失败，无法生成报告。");
     return { ticker: upper, name: null, currency: "CNY", notes };
   }
 
