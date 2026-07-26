@@ -664,7 +664,6 @@ export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> 
   return [
     { id: "openai/gpt-oss-120b", name: "openai/gpt-oss-120b", slug: "openai/gpt-oss-120b", contextLength: 131072, createdAt: 0 },
     { id: "kimi-k2-instruct", name: "kimi-k2-instruct", slug: "kimi-k2-instruct", contextLength: 262144, createdAt: 0 },
-    { id: "deepseek-r1-distill-70b", name: "deepseek-r1-distill-70b", slug: "deepseek-r1-distill-70b", contextLength: 131072, createdAt: 0 },
   ];
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
@@ -786,7 +785,7 @@ export async function fetchGeminiModels(apiKey: string): Promise<GeminiModelInfo
 }
 
 /**
- * 刷新 Groq 模型：用固定的 3 个模型（见 fetchGroqModels）同步所有 Groq provider 的
+ * 刷新 Groq 模型：用固定的模型（见 fetchGroqModels）同步所有 Groq provider 的
  * 模型标识与上下文窗口，并测试每个 provider 的可用性。
  */
 export async function refreshGroqModels(): Promise<{

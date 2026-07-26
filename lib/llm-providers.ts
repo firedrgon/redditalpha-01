@@ -57,7 +57,6 @@ export const GEMINI_PROVIDER_IDS = [
 export const GROQ_PROVIDER_IDS = [
   "groq-1",
   "groq-2",
-  "groq-3",
 ] as const;
 
 /** 智谱系列 provider 共享同一 API Key（LLM_API_KEY_ZHIPU / ZHIPU_API_KEY） */
@@ -91,7 +90,6 @@ export const PREFERRED_ACTIVE_ORDER = [
   "deepseek-1",
   "groq-1",
   "groq-2",
-  "groq-3",
   "openrouter-1",
 ] as const;
 
@@ -179,20 +177,6 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     signupUrl: "https://console.groq.com/keys",
     docsUrl: "https://console.groq.com/docs",
     description: "月之暗面 Kimi K2，262K 超长上下文 + 262K 输出，Groq 免费档最适合生成长篇研报的模型。与其他 Groq 模型共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
-  },
-  {
-    id: "groq-3",
-    contextWindow: 131_072,
-    name: "Groq · DeepSeek R1 Distill 70B",
-    endpoint: "https://api.groq.com/openai/v1/chat/completions",
-    model: "deepseek-r1-distill-70b",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://console.groq.com/keys",
-    docsUrl: "https://console.groq.com/docs",
-    description: "推理模型（先输出思考过程再给结论），财务归因/逻辑分析强；⚠️ 最大输出约 8K，生成长研报易被截断，建议仅用于分析段落或调低 maxTokens。与其他 Groq 模型共用 Key",
     protocol: "openai",
     freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
   },

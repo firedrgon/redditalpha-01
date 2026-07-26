@@ -382,7 +382,7 @@ function migrateOldProviderIds(providers: Record<string, ProviderStatus>): Recor
     "gemini-2.0": "gemini-2",
     "groq": "groq-1",
     "groq-qwen3-32b": "groq-2",
-    "groq-gpt-oss-120b": "groq-3",
+    "groq-gpt-oss-120b": "groq-1",
     "duckduckgo": "groq-1", // DuckDuckGo 已移除，映射到 groq-1 作为兜底
     "openrouter-2": "openrouter-1",
     "openrouter-3": "openrouter-1",
@@ -407,7 +407,7 @@ function migrateActiveProvider(activeProvider: string | null | undefined): strin
     "gemini-2.0": "gemini-2",
     "groq": "groq-1",
     "groq-qwen3-32b": "groq-2",
-    "groq-gpt-oss-120b": "groq-3",
+    "groq-gpt-oss-120b": "groq-1",
     "duckduckgo": null, // DuckDuckGo 已移除
     "openrouter-2": "openrouter-1",
     "openrouter-3": "openrouter-1",
