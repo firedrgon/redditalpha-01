@@ -655,16 +655,16 @@ interface GroqModelInfo {
 }
 
 /**
- * 获取 Groq 当前可用的模型列表，按财务分析适配度评分排序，返回前3个。
- * 调用 OpenAI 兼容的 /openai/v1/models 接口，需要 API Key。
+ * 获取 Groq 固定模型列表（与 lib/llm-providers.ts 保持一致）。
+ * 模型为静态固定，不再调用 API 评分排序，避免复杂度与意外覆盖槽位。
  */
 export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> {
   // Groq 模型固定为静态定义（与 lib/llm-providers.ts 保持一致），
   // 不再调用 API 评分获取，避免复杂度与意外覆盖槽位。
   return [
-    { id: "qwen/qwen3-32b", name: "qwen/qwen3-32b", slug: "qwen/qwen3-32b", contextLength: 40960, createdAt: 0 },
     { id: "openai/gpt-oss-120b", name: "openai/gpt-oss-120b", slug: "openai/gpt-oss-120b", contextLength: 131072, createdAt: 0 },
-    { id: "llama-3.3-70b-versatile", name: "llama-3.3-70b-versatile", slug: "llama-3.3-70b-versatile", contextLength: 131072, createdAt: 0 },
+    { id: "kimi-k2-instruct", name: "kimi-k2-instruct", slug: "kimi-k2-instruct", contextLength: 262144, createdAt: 0 },
+    { id: "deepseek-r1-distill-70b", name: "deepseek-r1-distill-70b", slug: "deepseek-r1-distill-70b", contextLength: 131072, createdAt: 0 },
   ];
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
@@ -786,8 +786,8 @@ export async function fetchGeminiModels(apiKey: string): Promise<GeminiModelInfo
 }
 
 /**
- * 动态刷新 Groq 模型：获取前3个评分最高的模型，直接替换所有 Groq provider。
- * 同时测试每个 provider 的可用性。
+ * 刷新 Groq 模型：用固定的 3 个模型（见 fetchGroqModels）同步所有 Groq provider 的
+ * 模型标识与上下文窗口，并测试每个 provider 的可用性。
  */
 export async function refreshGroqModels(): Promise<{
   updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
