@@ -153,7 +153,8 @@ export interface FinancialMetrics {
     | "xueqiu"
     | "eastmoney"
     | "tonghuashun"
-    | "tencent";
+    | "tencent"
+    | "ths";
   warnings: string[];
   // 同花顺财务图解 URL（A 股动态获取）
   thsVisualUrl?: string | null;

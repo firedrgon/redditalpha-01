@@ -27,8 +27,9 @@ import {
 import { fetchQuote } from "./quote";
 import { chatCompletion } from "./llm";
 import { getPrisma } from "@/lib/db/prisma";
-import { fetchCNFinancialMetrics, fetchCNPeers } from "./finance-cn";
+import { fetchCNPeers } from "./finance-cn";
 import type { CNPeer } from "./finance-cn";
+import { fetchCNThsFinancialMetrics } from "./finance-ths";
 import { detectMarket } from "./market";
 
 const UA =
@@ -899,13 +900,13 @@ export async function getCNAnalysisData(
   const upper = ticker.trim().toUpperCase();
 
   const [metrics, technical, chip] = await Promise.all([
-    fetchCNFinancialMetrics(upper).catch(() => null),
+    fetchCNThsFinancialMetrics(upper).catch(() => null),
     fetchCNTradingViewTechnicals(upper).catch(() => null),
     fetchChipSituation(upper).catch(() => null),
   ]);
 
   if (!metrics) {
-    notes.push("东方财富 A 股数据获取失败，无法生成报告。");
+    notes.push("同花顺 A 股数据获取失败，无法生成报告。");
     return { ticker: upper, name: null, currency: "CNY", notes };
   }
 
