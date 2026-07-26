@@ -440,6 +440,8 @@ async function applyPersistedModels(config: LLMConfig): Promise<void> {
   const cachedModels = await getCachedModels();
   if (cachedModels.length > 0) {
     for (const cached of cachedModels) {
+      // Groq 模型固定为静态定义，忽略可能过期的动态缓存，避免覆盖
+      if ((GROQ_PROVIDER_IDS as readonly string[]).includes(cached.providerId)) continue;
       const provider = LLM_PROVIDERS.find((p) => p.id === cached.providerId);
       if (provider) {
         provider.model = cached.modelSlug;

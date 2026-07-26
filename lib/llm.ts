@@ -659,7 +659,13 @@ interface GroqModelInfo {
  * 调用 OpenAI 兼容的 /openai/v1/models 接口，需要 API Key。
  */
 export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> {
-  if (!apiKey?.trim()) return [];
+  // Groq 模型固定为静态定义（与 lib/llm-providers.ts 保持一致），
+  // 不再调用 API 评分获取，避免复杂度与意外覆盖槽位。
+  return [
+    { id: "qwen/qwen3-32b", name: "qwen/qwen3-32b", slug: "qwen/qwen3-32b", contextLength: 40960, createdAt: 0 },
+    { id: "openai/gpt-oss-120b", name: "openai/gpt-oss-120b", slug: "openai/gpt-oss-120b", contextLength: 131072, createdAt: 0 },
+    { id: "llama-3.3-70b-versatile", name: "llama-3.3-70b-versatile", slug: "llama-3.3-70b-versatile", contextLength: 131072, createdAt: 0 },
+  ];
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
       headers: {
