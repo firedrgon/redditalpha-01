@@ -225,8 +225,12 @@ function resolveMaxTokens(
   if (modelLower.includes("compound")) headroom += 4000;
 
   const maxAllowed = Math.floor(ctx - promptTokens - headroom);
+  // TPM 倒推的单次输出硬性上限（仅部分模型设置，如 Groq gpt-oss-120b TPM=8000）
+  const outCap = provider.maxOutputTokens && provider.maxOutputTokens > 0
+    ? provider.maxOutputTokens
+    : Infinity;
   // 上限 12000 防止极小值；下限 256 保证至少有一点输出（Gemini/gpt-oss 支持 32K~65K 输出）
-  return Math.max(256, Math.min(requested, maxAllowed, 12000));
+  return Math.max(256, Math.min(requested, maxAllowed, 12000, outCap));
 }
 
 /**

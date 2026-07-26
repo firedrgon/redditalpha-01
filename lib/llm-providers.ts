@@ -33,6 +33,16 @@ export interface LLMProvider {
    */
   contextWindow?: number;
   /**
+   * 单次请求允许的最大「输出」token 数（由 TPM 限制倒推）。
+   * Groq 免费档按 TPM（tokens per minute，含 input+output）限流，且单请求
+   * input+output 不得超过 TPM，否则直接 413。部分模型 TPM 很小
+   * （如 openai/gpt-oss-120b 仅 8000），即便上下文窗口 128K，单请求输出
+   * 也必须压到 TPM − 输入估算 以下。设置此值后 resolveMaxTokens 会把它作为
+   * 硬性输出上限（与上下文窗口上限取较小者），避免 413。
+   * 缺省为不限（仅靠上下文窗口钳制）。
+   */
+  maxOutputTokens?: number;
+  /**
    * 是否在设置页的模型列表中隐藏。
    * 用于收起在海外部署下不可用/不稳定的国产模型（智谱、通义、Kimi、豆包）。
    * 隐藏后仍保留配置与调用能力，仅不展示在 UI 列表；置 false 即可恢复显示。
@@ -155,6 +165,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   {
     id: "groq-1",
     contextWindow: 131_072,
+    maxOutputTokens: 4000,
     name: "Groq · GPT-OSS 120B",
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "openai/gpt-oss-120b",
