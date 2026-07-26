@@ -655,69 +655,14 @@ interface GroqModelInfo {
 }
 
 /**
- * 获取 Groq 固定模型列表（与 lib/llm-providers.ts 保持一致）。
- * 模型为静态固定，不再调用 API 评分排序，避免复杂度与意外覆盖槽位。
+ * Groq 模型为静态固定（与 lib/llm-providers.ts 保持一致），
+ * 直接返回固定数组，不再调用 API 评分/动态拉取，避免复杂度与意外覆盖槽位。
  */
-export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> {
-  // Groq 模型固定为静态定义（与 lib/llm-providers.ts 保持一致），
-  // 不再调用 API 评分获取，避免复杂度与意外覆盖槽位。
+export async function fetchGroqModels(_apiKey: string): Promise<GroqModelInfo[]> {
   return [
     { id: "openai/gpt-oss-120b", name: "openai/gpt-oss-120b", slug: "openai/gpt-oss-120b", contextLength: 131072, createdAt: 0 },
-    { id: "moonshotai/kimi-k2-instruct", name: "moonshotai/kimi-k2-instruct", slug: "moonshotai/kimi-k2-instruct", contextLength: 131072, createdAt: 0 },
+    { id: "llama-3.3-70b-versatile", name: "llama-3.3-70b-versatile", slug: "llama-3.3-70b-versatile", contextLength: 131072, createdAt: 0 },
   ];
-  try {
-    const res = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "User-Agent": "Reddit-Alpha/1.0",
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const models = data?.data ?? [];
-    const excludeKeywords = /whisper|guard|tts|safety|vision|audio|moderation|embedding|preview-tool/i;
-
-    const scored = models
-      .filter((m: Record<string, unknown>) => {
-        const id = String(m.id ?? "");
-        return !excludeKeywords.test(id);
-      })
-      .map((m: Record<string, unknown>) => ({
-        id: String(m.id ?? ""),
-        name: String(m.id ?? ""),
-        slug: String(m.id ?? ""),
-        contextLength: Number(m.context_window ?? m.context_length ?? 0),
-        createdAt: Number(m.created ?? 0),
-      }));
-
-    const now = Date.now() / 1000;
-    // 优先保留强推理/长上下文模型：确保 DeepSeek-R1-Distill 与 Kimi K2
-    // 进入前 3，让用户能在 Groq 接入里选到比纯 Llama/Qwen 更强的模型。
-    const PREFERRED = new Set(["deepseek-r1-distill-70b", "kimi-k2-instruct"]);
-    return scored
-      .map((model: GroqModelInfo) => {
-        const daysOld = Math.floor((now - model.createdAt) / (24 * 3600));
-        const recencyScore = Math.max(0, 365 - daysOld) * 10;
-        const boost = PREFERRED.has(model.id) ? 2_000_000 : 0;
-        return {
-          ...model,
-          score: model.contextLength * 0.5 + recencyScore + boost,
-        };
-      })
-      .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
-      .slice(0, 3)
-      .map((m: GroqModelInfo & { score: number }) => ({
-        id: m.id,
-        name: m.name,
-        slug: m.slug,
-        contextLength: m.contextLength,
-        createdAt: m.createdAt,
-      }));
-  } catch {
-    return [];
-  }
 }
 
 interface GeminiModelInfo {
