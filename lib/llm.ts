@@ -744,8 +744,18 @@ export async function fetchGeminiModels(apiKey: string): Promise<GeminiModelInfo
     const data = await res.json();
     const models = data?.models ?? [];
 
+    const DEPRECATED = new Set([
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-1.5-pro",
+      "gemini-1.5-flash",
+    ]);
     const scored = models
       .filter((m: Record<string, unknown>) => {
+        const id = String(m.name ?? "").replace(/^models\//, "");
+        if (DEPRECATED.has(id)) return false;
         const supportedMethods = (m.supportedGenerationMethods as string[]) ?? [];
         return supportedMethods.includes("generateContent");
       })

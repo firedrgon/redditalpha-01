@@ -439,9 +439,21 @@ async function applyPersistedModels(config: LLMConfig): Promise<void> {
   // 从数据库读取动态模型缓存
   const cachedModels = await getCachedModels();
   if (cachedModels.length > 0) {
+    const DEPRECATED_GEMINI = new Set([
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-lite",
+    ]);
     for (const cached of cachedModels) {
       // Groq 模型固定为静态定义，忽略可能过期的动态缓存，避免覆盖
       if ((GROQ_PROVIDER_IDS as readonly string[]).includes(cached.providerId)) continue;
+      // Gemini 已退市模型（如 gemini-2.5-flash 于 2026-06-17 下线）的缓存也忽略，
+      // 避免旧缓存把静态定义覆盖回已不可用的模型。
+      if (
+        (GEMINI_PROVIDER_IDS as readonly string[]).includes(cached.providerId) &&
+        DEPRECATED_GEMINI.has(cached.modelSlug)
+      ) continue;
       const provider = LLM_PROVIDERS.find((p) => p.id === cached.providerId);
       if (provider) {
         provider.model = cached.modelSlug;
