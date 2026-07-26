@@ -663,7 +663,7 @@ export async function fetchGroqModels(apiKey: string): Promise<GroqModelInfo[]> 
   // 不再调用 API 评分获取，避免复杂度与意外覆盖槽位。
   return [
     { id: "openai/gpt-oss-120b", name: "openai/gpt-oss-120b", slug: "openai/gpt-oss-120b", contextLength: 131072, createdAt: 0 },
-    { id: "kimi-k2-instruct", name: "kimi-k2-instruct", slug: "kimi-k2-instruct", contextLength: 262144, createdAt: 0 },
+    { id: "moonshotai/kimi-k2-instruct", name: "moonshotai/kimi-k2-instruct", slug: "moonshotai/kimi-k2-instruct", contextLength: 131072, createdAt: 0 },
   ];
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
