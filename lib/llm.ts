@@ -225,8 +225,8 @@ function resolveMaxTokens(
   if (modelLower.includes("compound")) headroom += 4000;
 
   const maxAllowed = Math.floor(ctx - promptTokens - headroom);
-  // 上限 8000 防止极小值；下限 256 保证至少有一点输出
-  return Math.max(256, Math.min(requested, maxAllowed, 8000));
+  // 上限 12000 防止极小值；下限 256 保证至少有一点输出（Gemini/gpt-oss 支持 32K~65K 输出）
+  return Math.max(256, Math.min(requested, maxAllowed, 12000));
 }
 
 /**
@@ -497,6 +497,9 @@ async function callGemini(
     generationConfig: {
       temperature: options.temperature ?? 0.3,
       maxOutputTokens: maxTokens,
+      // Gemini 3.x 默认开启 thinking（medium），thinking token 会计入 maxOutputTokens 预算，
+      // 导致研报正文被挤出、内容不全。研报重格式组织而非深度推理，关闭思考让整个预算给正文。
+      thinkingConfig: { thinkingLevel: "minimal" },
     },
   };
   if (systemMsg) {
