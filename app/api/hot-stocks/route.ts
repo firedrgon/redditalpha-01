@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
-import { fetchHotStocks, storeHotStocks, beijingDate } from "@/lib/hot-stocks";
+import { fetchHotStocks, storeHotStocks, enrichHotStocks, beijingDate } from "@/lib/hot-stocks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/hot-stocks
  * 手动触发一次同花顺热榜抓取并存储（公开，便于前端"刷新"按钮即时更新）。
+ * 与每日 cron 行为一致：抓取后会一并补充技术信号 + 筹码（Top 50）。
  */
 export async function POST(request: NextRequest) {
   try {
@@ -62,6 +63,14 @@ export async function POST(request: NextRequest) {
     if (!result) {
       return NextResponse.json({ error: "抓取同花顺热榜失败" }, { status: 502 });
     }
+
+    // 手动刷新也一并补充技术信号 + 筹码（Top 50），与每日 cron 行为一致
+    try {
+      result.items = await enrichHotStocks(result.items, 50);
+    } catch (e) {
+      console.warn(`[hot-stocks POST] enrich 失败(已忽略，仅存基础热榜):`, e);
+    }
+
     const count = await storeHotStocks(result);
     return NextResponse.json({ success: true, date: result.date, count });
   } catch (err) {
