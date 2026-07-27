@@ -83,9 +83,9 @@ function chipClass(k: string | null): string {
   return "bg-zinc-700/40 text-zinc-400 border-zinc-700";
 }
 
-function tradingViewUrl(board: string | null, code: string): string {
-  const prefix = board === "SH" ? "SSE" : board === "SZ" ? "SZSE" : "SSE";
-  return `https://cn.tradingview.com/symbols/${prefix}-${code}/`;
+function baiduGushitongUrl(board: string | null, code: string): string {
+  const prefix = board === "SH" ? "sh" : board === "SZ" ? "sz" : "sh";
+  return `https://gushitong.baidu.com/stock/${prefix}-${code}`;
 }
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -138,7 +138,7 @@ function HotStockCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <a
-              href={tradingViewUrl(stock.board, stock.code)}
+              href={baiduGushitongUrl(stock.board, stock.code)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-lg font-bold text-white transition-colors hover:text-orange-400"
