@@ -239,6 +239,14 @@ model HotStock {
   board         String?
   conceptTags   String?
   popularityTag String?
+  /// TradingView 中国区技术信号（5 级）：strong_buy/buy/neutral/sell/strong_sell
+  signalOverall      String?
+  signalOscillators  String?
+  signalMovingAvg    String?
+  /// 同花顺筹码状态完整描述（纯文本）
+  chipSituation String?
+  /// 同花顺筹码状态关键词（如 高度密集/分散），用于前端快速展示
+  chipKeyword   String?
   fetchedAt     DateTime @default(now())
 
   @@unique([date, code])

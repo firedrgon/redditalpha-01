@@ -20,6 +20,12 @@
  */
 
 import { getPrisma } from "@/lib/db/prisma";
+import {
+  fetchCNTradingViewTechnicalsBatch,
+  fetchChipSituation,
+  extractChipKeyword,
+} from "@/lib/technical";
+import type { TechnicalSignals } from "@/lib/technical";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -37,6 +43,13 @@ export interface HotStockItem {
   board: "SH" | "SZ" | null;
   conceptTags: string[];
   popularityTag: string | null;
+  /** TradingView 中国区技术信号（enrich 时填充） */
+  signalOverall?: TechnicalSignals["overall"] | null;
+  signalOscillators?: TechnicalSignals["oscillators"] | null;
+  signalMovingAvg?: TechnicalSignals["movingAverages"] | null;
+  /** 同花顺筹码状态 */
+  chipSituation?: string | null;
+  chipKeyword?: string | null;
 }
 
 export interface HotStocksResult {
@@ -139,6 +152,58 @@ export async function fetchHotStocks(): Promise<HotStocksResult | null> {
 }
 
 /**
+ * 为热榜股票补充技术信号（TradingView 中国区）与筹码状态（同花顺）。
+ * 为控制外部请求量，只对前 limit 条（默认 50，与前端展示量一致）获取；
+ * 信号用一次批量请求拿全部，筹码按并发上限逐只获取。任一只失败仅置 null，不影响其他。
+ *
+ * @param items fetchHotStocks 返回的原始列表（会被就地补充字段）
+ * @param limit 补充范围（取排名前 limit 条）
+ * @returns 同一数组（已补充字段）
+ */
+export async function enrichHotStocks(
+  items: HotStockItem[],
+  limit = 50
+): Promise<HotStockItem[]> {
+  const top = items.slice(0, limit);
+  // 仅对能构造出合法 A 股 ticker 的项补充
+  const targets = top.filter((it) => it.board === "SH" || it.board === "SZ");
+  const tickers = targets.map((it) => `${it.code}.${it.board}`);
+
+  // 1) 批量技术信号：一次 TradingView 请求拿全部
+  const sigMap = await fetchCNTradingViewTechnicalsBatch(tickers).catch(
+    () => new Map<string, TechnicalSignals>()
+  );
+
+  // 2) 筹码状态：逐只并发（限制并发数，避免同花顺限流）
+  const CHIP_CONCURRENCY = 8;
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(CHIP_CONCURRENCY, targets.length) },
+    async () => {
+      while (cursor < targets.length) {
+        const i = cursor++;
+        const it = targets[i];
+        const tk = tickers[i];
+        try {
+          const sig = sigMap.get(tk) ?? null;
+          it.signalOverall = sig?.overall ?? null;
+          it.signalOscillators = sig?.oscillators ?? null;
+          it.signalMovingAvg = sig?.movingAverages ?? null;
+          const chip = await fetchChipSituation(tk);
+          it.chipSituation = chip;
+          it.chipKeyword = extractChipKeyword(chip);
+        } catch {
+          // 单只失败保持 null
+        }
+      }
+    }
+  );
+  await Promise.all(workers);
+
+  return items;
+}
+
+/**
  * 将当日热榜写入 DB（按 date+code upsert）。返回实际写入条数。
  * DB 不可用时返回 0（不抛错，调用方继续）。
  */
@@ -164,6 +229,11 @@ export async function storeHotStocks(result: HotStocksResult): Promise<number> {
           board: it.board,
           conceptTags: it.conceptTags.length ? it.conceptTags.join(",") : null,
           popularityTag: it.popularityTag,
+          signalOverall: it.signalOverall ?? null,
+          signalOscillators: it.signalOscillators ?? null,
+          signalMovingAvg: it.signalMovingAvg ?? null,
+          chipSituation: it.chipSituation ?? null,
+          chipKeyword: it.chipKeyword ?? null,
         },
         update: {
           rank: it.rank,
@@ -173,6 +243,11 @@ export async function storeHotStocks(result: HotStocksResult): Promise<number> {
           board: it.board,
           conceptTags: it.conceptTags.length ? it.conceptTags.join(",") : null,
           popularityTag: it.popularityTag,
+          signalOverall: it.signalOverall ?? null,
+          signalOscillators: it.signalOscillators ?? null,
+          signalMovingAvg: it.signalMovingAvg ?? null,
+          chipSituation: it.chipSituation ?? null,
+          chipKeyword: it.chipKeyword ?? null,
         },
       });
       written++;

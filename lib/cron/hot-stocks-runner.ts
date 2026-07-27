@@ -7,7 +7,7 @@
 
 import { getPrisma } from "@/lib/db/prisma";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
-import { fetchHotStocks, storeHotStocks } from "@/lib/hot-stocks";
+import { fetchHotStocks, storeHotStocks, enrichHotStocks } from "@/lib/hot-stocks";
 
 const JOB_NAME = "hot-stocks";
 
@@ -44,6 +44,13 @@ export async function runHotStocksJob(
         errorMessage: "抓取同花顺热榜失败（接口异常或超时）",
       });
       return { runId, success: false, count: 0, error: "fetch failed" };
+    }
+
+    // 调度触发时一并补充技术信号 + 筹码（Top 50，与前端展示量一致）
+    try {
+      result.items = await enrichHotStocks(result.items, 50);
+    } catch (e) {
+      console.warn(`[hot-stocks-runner] enrich 失败(已忽略，仅存基础热榜):`, e);
     }
 
     const count = await storeHotStocks(result);

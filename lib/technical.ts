@@ -118,18 +118,28 @@ export async function fetchCNTradingViewTechnicals(
   return fetchTradingViewScan("china", toCNTradingViewTickers(ticker));
 }
 
+export interface TVScanRow {
+  /** TradingView symbol，如 "SSE:600276" */
+  s: string;
+  signals: TechnicalSignals;
+}
+
 /**
- * 共享核心：请求 TradingView scanner（america / china 等分区），
- * 用官方 Recommend 周线值映射为 5 级信号。
+ * 共享核心（批量）：请求 TradingView scanner（america / china 等分区），
+ * 用官方 Recommend 周线值映射为 5 级信号，返回所有命中的行（含 symbol 映射）。
+ * 一次请求可拿回多只股票的信号，适合热榜等批量场景。
  */
-async function fetchTradingViewScan(
+async function fetchTradingViewScanMulti(
   endpoint: string,
   tvTickers: string[]
-): Promise<TechnicalSignals | null> {
+): Promise<TVScanRow[]> {
+  if (tvTickers.length === 0) return [];
   const startTime = Date.now();
 
   try {
-    console.log(`[technical] 请求 TradingView(${endpoint}): ${tvTickers.join(", ")}`);
+    console.log(
+      `[technical] 请求 TradingView(${endpoint}) x${tvTickers.length}: ${tvTickers.slice(0, 5).join(", ")}…`
+    );
     const res = await fetch(`https://scanner.tradingview.com/${endpoint}/scan`, {
       method: "POST",
       headers: {
@@ -147,52 +157,84 @@ async function fetchTradingViewScan(
 
     if (!res.ok) {
       console.warn(`[technical] TradingView(${endpoint}) 响应非 200: ${res.status}`);
-      return null;
+      return [];
     }
 
     const json = (await res.json()) as {
       data?: Array<{ s?: string; d?: (number | string | null)[] }>;
     };
 
-    const row = json.data?.find((r) => r.d && r.d.length > 0);
-    if (!row || !row.d) {
-      console.warn(`[technical] TradingView(${endpoint}) 返回空数据`);
-      return null;
-    }
-
-    // 构建字段名 → 值的映射
+    const rows = json.data ?? [];
     const idx = Object.fromEntries(COLUMNS.map((name, i) => [name, i]));
-    const v: Record<string, number | null> = {};
-    for (const col of COLUMNS) {
-      // 移除 |1W 后缀，这样后面访问时用原始字段名
-      const key = col.replace("|1W", "");
-      v[key] = num(row.d[idx[col]]);
+
+    const out: TVScanRow[] = [];
+    for (const row of rows) {
+      if (!row.s || !row.d || row.d.length === 0) continue;
+      const v: Record<string, number | null> = {};
+      for (const col of COLUMNS) {
+        const key = col.replace("|1W", "");
+        v[key] = num(row.d[idx[col]]);
+      }
+      if (v["close"] == null) continue; // 无价格数据的行跳过
+      out.push({
+        s: row.s,
+        signals: {
+          oscillators: recommendToSignal(v["Recommend.Other"]),
+          movingAverages: recommendToSignal(v["Recommend.MA"]),
+          overall: recommendToSignal(v["Recommend.All"]),
+        },
+      });
     }
-
-    const price = v["close"];
-    if (price == null) {
-      console.warn(`[technical] 无价格数据`);
-      return null;
-    }
-
-    // 直接使用 TradingView 官方 Recommend 值映射信号（与网站显示一致）
-    const oscillators = recommendToSignal(v["Recommend.Other"]);
-    const movingAverages = recommendToSignal(v["Recommend.MA"]);
-    const overall = recommendToSignal(v["Recommend.All"]);
-
-    const result = { oscillators, movingAverages, overall };
     console.log(
-      `[technical] 成功(${endpoint}) (${Date.now() - startTime}ms): ` +
-      `价格=${price}, ` +
-      `振荡=${oscillators}(raw=${v["Recommend.Other"]?.toFixed(4)}), ` +
-      `均线=${movingAverages}(raw=${v["Recommend.MA"]?.toFixed(4)}), ` +
-      `综合=${overall}(raw=${v["Recommend.All"]?.toFixed(4)})`
+      `[technical] 成功(${endpoint}) (${Date.now() - startTime}ms): ${out.length}/${tvTickers.length} 命中`
     );
-    return result;
+    return out;
   } catch (err) {
     console.error(`[technical] 失败(${endpoint}) (${Date.now() - startTime}ms):`, err instanceof Error ? err.message : err);
-    return null;
+    return [];
   }
+}
+
+/** 单只版本：取批量结果的第一条（保持与旧调用方兼容） */
+async function fetchTradingViewScan(
+  endpoint: string,
+  tvTickers: string[]
+): Promise<TechnicalSignals | null> {
+  const rows = await fetchTradingViewScanMulti(endpoint, tvTickers);
+  return rows[0]?.signals ?? null;
+}
+
+/**
+ * 批量获取 A 股 TradingView 中国区技术信号。
+ * 一次 scanner 请求拿回所有 ticker 的信号，避免对 n 只各发一次请求。
+ *
+ * @param tickers A 股 ticker 数组，如 ["600276.SH", "000651.SZ"]
+ * @returns Map<ticker, TechnicalSignals>；未命中/失败的 ticker 不在 Map 中
+ */
+export async function fetchCNTradingViewTechnicalsBatch(
+  tickers: string[]
+): Promise<Map<string, TechnicalSignals>> {
+  const result = new Map<string, TechnicalSignals>();
+  if (tickers.length === 0) return result;
+
+  const tvToTicker = new Map<string, string>();
+  const tvTickers: string[] = [];
+  for (const t of tickers) {
+    const m = t.match(/^(\d{6})\.(SH|SZ)$/);
+    if (!m) continue;
+    const exchange = m[2] === "SZ" ? "SZSE" : "SSE";
+    const sym = `${exchange}:${m[1]}`;
+    tvTickers.push(sym);
+    tvToTicker.set(sym, t);
+  }
+  if (tvTickers.length === 0) return result;
+
+  const rows = await fetchTradingViewScanMulti("china", tvTickers);
+  for (const row of rows) {
+    const tk = tvToTicker.get(row.s);
+    if (tk) result.set(tk, row.signals);
+  }
+  return result;
 }
 
 /* ------------------------------------------------------------------ */

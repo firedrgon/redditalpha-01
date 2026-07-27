@@ -14,6 +14,11 @@ interface HotStock {
   board: string | null;
   conceptTags: string | null;
   popularityTag: string | null;
+  signalOverall: string | null;
+  signalOscillators: string | null;
+  signalMovingAvg: string | null;
+  chipKeyword: string | null;
+  chipSituation: string | null;
 }
 
 interface HotStocksResponse {
@@ -43,6 +48,39 @@ function changeColor(pct: number | null): string {
   if (pct > 0) return "text-red-400";
   if (pct < 0) return "text-green-400";
   return "text-zinc-400";
+}
+
+/** 技术信号中文文案（与 TradingView 5 级一致） */
+const SIGNAL_TEXT: Record<string, string> = {
+  strong_buy: "强烈买入",
+  buy: "买入",
+  neutral: "中立",
+  sell: "卖出",
+  strong_sell: "强烈卖出",
+};
+
+/** 综合信号配色：买入类红、卖出类绿、中立灰（A股惯例） */
+function signalClass(s: string | null): string {
+  switch (s) {
+    case "strong_buy":
+      return "bg-red-500/20 text-red-300 border-red-500/40";
+    case "buy":
+      return "bg-red-500/10 text-red-400 border-red-500/30";
+    case "sell":
+      return "bg-green-500/10 text-green-400 border-green-500/30";
+    case "strong_sell":
+      return "bg-green-500/20 text-green-300 border-green-500/40";
+    default:
+      return "bg-zinc-700/40 text-zinc-400 border-zinc-700";
+  }
+}
+
+/** 筹码关键词配色：密集红、分散绿（与 A股筹码约定一致） */
+function chipClass(k: string | null): string {
+  if (!k) return "bg-zinc-700/40 text-zinc-400 border-zinc-700";
+  if (k.includes("密集")) return "bg-red-500/10 text-red-400 border-red-500/30";
+  if (k.includes("分散")) return "bg-green-500/10 text-green-400 border-green-500/30";
+  return "bg-zinc-700/40 text-zinc-400 border-zinc-700";
 }
 
 function tradingViewUrl(board: string | null, code: string): string {
@@ -137,6 +175,26 @@ function HotStockCard({
                 {t}
               </span>
             ))}
+          </div>
+
+          {/* 技术信号 + 筹码状态（调度时预取） */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {stock.signalOverall && (
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${signalClass(stock.signalOverall)}`}
+                title="TradingView 中国区综合技术信号"
+              >
+                {SIGNAL_TEXT[stock.signalOverall] ?? stock.signalOverall}
+              </span>
+            )}
+            {stock.chipKeyword && (
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${chipClass(stock.chipKeyword)}`}
+                title={stock.chipSituation ?? stock.chipKeyword}
+              >
+                筹:{stock.chipKeyword}
+              </span>
+            )}
           </div>
         </div>
 
