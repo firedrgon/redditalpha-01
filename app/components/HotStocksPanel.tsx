@@ -85,7 +85,8 @@ function chipClass(k: string | null): string {
 
 function baiduGushitongUrl(board: string | null, code: string): string {
   const prefix = board === "SH" ? "sh" : board === "SZ" ? "sz" : "sh";
-  return `https://gushitong.baidu.com/stock/${prefix}-${code}`;
+  // 百度股市通已迁移到 finance.baidu.com（旧域名 gushitong.baidu.com 现 301 失效）
+  return `https://finance.baidu.com/stock/${prefix}-${code}`;
 }
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {

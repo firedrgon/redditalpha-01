@@ -33,11 +33,13 @@ const futuUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://www.futunn.com/stock/${ticker}`
     : `https://www.futunn.com/stock/${ticker}-US`;
-// 百度股市通：仅 A 股
+// 百度股市通：仅 A 股（旧域名 gushitong.baidu.com 已 301，改用官方 finance.baidu.com）
 const baiduStockUrl = (ticker: string) => {
-  if (!isCNTicker(ticker)) return "";
-  const code = cnCode(ticker);
-  return code ? `https://gushitong.baidu.com/stock/ab-${code}` : "";
+  const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
+  if (!m) return "";
+  const code = m[1];
+  const prefix = m[2] === "SH" ? "sh" : "sz";
+  return `https://finance.baidu.com/stock/${prefix}-${code}`;
 };
 // 同花顺财务诊断：仅 A 股
 const thsDiagnosisUrl = (ticker: string) => {
