@@ -83,10 +83,10 @@ function chipClass(k: string | null): string {
   return "bg-zinc-700/40 text-zinc-400 border-zinc-700";
 }
 
-function baiduGushitongUrl(board: string | null, code: string): string {
+function baiduSearchUrl(board: string | null, code: string): string {
   const prefix = board === "SH" ? "sh" : board === "SZ" ? "sz" : "sh";
-  // 百度股市通已迁移到 finance.baidu.com（旧域名 gushitong.baidu.com 现 301 失效）
-  return `https://finance.baidu.com/stock/${prefix}-${code}`;
+  // 改用百度搜索个股页（服务端渲染，稳定可显示；百度股市通 gushitong/finance 为 SPA 易白屏）
+  return `https://www.baidu.com/s?wd=${prefix}${code}`;
 }
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -139,7 +139,7 @@ function HotStockCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <a
-              href={baiduGushitongUrl(stock.board, stock.code)}
+              href={baiduSearchUrl(stock.board, stock.code)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-lg font-bold text-white transition-colors hover:text-orange-400"
