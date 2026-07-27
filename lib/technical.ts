@@ -131,7 +131,8 @@ export interface TVScanRow {
  */
 async function fetchTradingViewScanMulti(
   endpoint: string,
-  tvTickers: string[]
+  tvTickers: string[],
+  timeoutMs = 10000
 ): Promise<TVScanRow[]> {
   if (tvTickers.length === 0) return [];
   const startTime = Date.now();
@@ -152,7 +153,7 @@ async function fetchTradingViewScanMulti(
         symbols: { tickers: tvTickers },
         columns: COLUMNS,
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!res.ok) {
@@ -233,6 +234,43 @@ export async function fetchCNTradingViewTechnicalsBatch(
   for (const row of rows) {
     const tk = tvToTicker.get(row.s);
     if (tk) result.set(tk, row.signals);
+  }
+  return result;
+}
+
+/**
+ * 批量获取美股 TradingView 技术信号（america 分区）。
+ * 一次 scanner 请求拿回所有 ticker 的信号，避免对 n 只各发一次请求。
+ * 美股 symbol 前缀为 NASDAQ:/NYSE:，两者都尝试，命中其一即记录。
+ *
+ * @param tickers 美股 ticker 数组，如 ["NVDA", "AAPL", "TSLA"]
+ * @param timeoutMs 单次 scanner 请求超时（毫秒），默认 10s；调用方可传更长时间（如 Reddit 批量抓取时）
+ * @returns Map<ticker(大写), TechnicalSignals>；未命中/失败的 ticker 不在 Map 中
+ */
+export async function fetchTradingViewTechnicalsBatch(
+  tickers: string[],
+  timeoutMs = 10000
+): Promise<Map<string, TechnicalSignals>> {
+  const result = new Map<string, TechnicalSignals>();
+  if (tickers.length === 0) return result;
+
+  const tvToTicker = new Map<string, string>();
+  const tvTickers: string[] = [];
+  for (const t of tickers) {
+    const up = t.toUpperCase();
+    for (const ex of ["NASDAQ", "NYSE"]) {
+      const sym = `${ex}:${up}`;
+      tvTickers.push(sym);
+      tvToTicker.set(sym, up);
+    }
+  }
+  if (tvTickers.length === 0) return result;
+
+  const rows = await fetchTradingViewScanMulti("america", tvTickers, timeoutMs);
+  for (const row of rows) {
+    const tk = tvToTicker.get(row.s);
+    // 同一 ticker 可能 NASDAQ/NYSE 都返回，取第一个命中的
+    if (tk && !result.has(tk)) result.set(tk, row.signals);
   }
   return result;
 }

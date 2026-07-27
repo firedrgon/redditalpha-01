@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrichTickersWithNames } from "@/lib/ticker-names";
+import { fetchTradingViewTechnicalsBatch } from "@/lib/technical";
 
 const SUBREDDITS = [
   "wallstreetbets",
@@ -21,6 +22,10 @@ interface TickerRow {
   totalCount: number | null;
   lastUpdated: string | null;
   name?: string | null;
+  /** TradingView 美股技术信号（抓取时实时获取，best-effort） */
+  signalOverall?: string | null;
+  signalOscillators?: string | null;
+  signalMovingAvg?: string | null;
 }
 
 interface FetchResult {
@@ -80,6 +85,26 @@ async function fetchSubreddit(subreddit: string): Promise<FetchResult> {
     const text = await res.text();
     const { rows, lastUpdated } = parseCSV(text);
     const enrichedRows = await enrichTickersWithNames(rows);
+
+    // 抓取时一并获取 TradingView 美股技术信号（Top 15，一次批量请求）
+    // timeout 放宽到 30s：Reddit 股票较多，给信号获取更充裕的时间
+    try {
+      const sigMap = await fetchTradingViewTechnicalsBatch(
+        enrichedRows.map((r) => r.ticker),
+        30000
+      );
+      for (const r of enrichedRows) {
+        const sig = sigMap.get(r.ticker.toUpperCase());
+        if (sig) {
+          r.signalOverall = sig.overall;
+          r.signalOscillators = sig.oscillators;
+          r.signalMovingAvg = sig.movingAverages;
+        }
+      }
+    } catch (e) {
+      console.warn(`[tickers ${subreddit}] 技术信号获取失败(已忽略):`, e);
+    }
+
     return { subreddit, tickers: enrichedRows, lastUpdated };
   } catch (err) {
     return {

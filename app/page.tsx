@@ -58,6 +58,10 @@ interface Ticker {
   totalCount: number | null;
   lastUpdated: string | null;
   name?: string | null;
+  /** TradingView 美股技术信号（数据抓取时实时获取） */
+  signalOverall?: Signal | null;
+  signalOscillators?: Signal | null;
+  signalMovingAvg?: Signal | null;
 }
 
 interface SubredditData {
@@ -426,6 +430,7 @@ function TickerCard({
   isFavorite,
   onToggleFavorite,
   quote,
+  signalSnapshot,
 }: {
   ticker: Ticker;
   maxCount: number;
@@ -433,6 +438,7 @@ function TickerCard({
   isFavorite: boolean;
   onToggleFavorite: (ticker: Ticker) => void;
   quote?: Quote;
+  signalSnapshot?: TechnicalSnapshotRow;
 }) {
   const pct = maxCount > 0 ? (ticker.countPast24h / maxCount) * 100 : 0;
   const t = ticker.ticker;
@@ -446,11 +452,12 @@ function TickerCard({
             <span className="text-lg font-bold text-white tracking-wide">
               {ticker.ticker}
             </span>
-            {ticker.name && (
-              <span className="text-xs text-zinc-400">{ticker.name}</span>
-            )}
-            <QuoteMini q={quote} />
-          </div>
+          {ticker.name && (
+            <span className="text-xs text-zinc-400">{ticker.name}</span>
+          )}
+          <QuoteMini q={quote} />
+          {signalSnapshot && <SignalBadge snapshot={signalSnapshot} isUS />}
+        </div>
           <span className="text-sm font-mono text-orange-400 font-semibold">
             {ticker.countPast24h.toLocaleString()}
           </span>
@@ -3917,7 +3924,17 @@ export default function Home() {
         for (const row of json.snapshots as TechnicalSnapshotRow[]) {
           map[row.ticker.toUpperCase()] = row;
         }
-        setSignalSnapshots(map);
+        // 合并而非整体替换：避免覆盖 Reddit 列表抓取时写入的更新鲜实时信号
+        setSignalSnapshots((prev) => {
+          const merged = { ...prev };
+          for (const [k, row] of Object.entries(map)) {
+            const existing = merged[k];
+            if (!existing || row.fetchedAt > existing.fetchedAt) {
+              merged[k] = row;
+            }
+          }
+          return merged;
+        });
       })
       .catch((err) => console.warn("[technical-snapshots] 加载失败:", err));
     return () => {
@@ -4271,11 +4288,39 @@ export default function Home() {
     setValidateHint(null);
   }, [isAuthenticated, manualTicker, manualName, addFavorite, promptSignIn]);
 
+  /**
+   * 把 /api/tickers 返回的新鲜技术信号并入 signalSnapshots，
+   * 使 Reddit 热度列表卡片在「数据抓取时」即显示最新 TradingView 信号
+   * （优先于 DB 中的旧快照；美股无筹码，chipSituation 置 null）。
+   */
+  const mergeTickerSignals = useCallback((tickers: Ticker[]) => {
+    const fresh: Record<string, TechnicalSnapshotRow> = {};
+    for (const t of tickers) {
+      if (!t.signalOverall) continue;
+      const key = t.ticker.toUpperCase();
+      fresh[key] = {
+        ticker: key,
+        tickerName: t.name ?? null,
+        oscillators: (t.signalOscillators ?? "neutral") as Signal,
+        movingAverages: (t.signalMovingAvg ?? "neutral") as Signal,
+        overall: t.signalOverall as Signal,
+        chipSituation: null,
+        price: null,
+        fetchedAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+    }
+    if (Object.keys(fresh).length > 0) {
+      setSignalSnapshots((prev) => ({ ...prev, ...fresh }));
+    }
+  }, []);
+
   const fetchData = useCallback(async (subreddit: string) => {
     try {
       const res = await fetch(`/api/tickers?subreddit=${subreddit}`);
       const json: SubredditData = await res.json();
       setData((prev) => ({ ...prev, [subreddit]: json }));
+      mergeTickerSignals(json.tickers);
       setLastRefresh(new Date());
       setCountdown(REFRESH_INTERVAL);
     } catch (err) {
@@ -4283,7 +4328,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mergeTickerSignals]);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -4293,6 +4338,7 @@ export default function Home() {
         const newData: Record<string, SubredditData> = {};
         for (const sub of json.subreddits) {
           newData[sub.subreddit] = sub;
+          mergeTickerSignals(sub.tickers);
         }
         setData(newData);
         setLastRefresh(new Date());
@@ -4303,7 +4349,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mergeTickerSignals]);
 
   useEffect(() => {
     // 挂载时拉取一次数据；loading 初始已为 true
@@ -4566,6 +4612,7 @@ export default function Home() {
                     isFavorite={isFavorite(ticker.ticker)}
                     onToggleFavorite={handleToggleFromCard}
                     quote={quotes[ticker.ticker.toUpperCase()]}
+                    signalSnapshot={signalSnapshots[ticker.ticker.toUpperCase()]}
                   />
                 ))}
               </div>
