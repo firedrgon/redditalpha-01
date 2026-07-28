@@ -33,13 +33,13 @@ const futuUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://www.futunn.com/stock/${ticker}`
     : `https://www.futunn.com/stock/${ticker}-US`;
-// A 股跳转：百度股市通（finance.baidu.com）
-const baiduStockUrl = (ticker: string) => {
+// A 股跳转：东方财富个股页（服务端渲染，稳定可显示；百度股市通为 SPA 易白屏）
+const eastmoneyStockUrl = (ticker: string) => {
   const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
   if (!m) return "";
   const code = m[1];
   const prefix = m[2] === "SH" ? "sh" : "sz";
-  return `https://finance.baidu.com/stock/${prefix}-${code}`;
+  return `https://quote.eastmoney.com/${prefix}${code}.html`;
 };
 // 同花顺财务诊断：仅 A 股
 const thsDiagnosisUrl = (ticker: string) => {
@@ -695,9 +695,9 @@ function FavoriteCard({
   quote?: Quote;
   hasReport?: boolean;
 }) {
-  // A 股标题跳百度股市通，美股跳 Reddit 搜索
+  // A 股标题跳东方财富个股页，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
-    ? baiduStockUrl(item.ticker)
+    ? eastmoneyStockUrl(item.ticker)
     : `https://www.reddit.com/search?q=${encodeURIComponent(item.ticker)}&sort=relevance&t=week`;
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
