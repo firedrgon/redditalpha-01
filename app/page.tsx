@@ -33,9 +33,43 @@ const futuUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://www.futunn.com/stock/${ticker}`
     : `https://www.futunn.com/stock/${ticker}-US`;
-// CoinGecko：加密货币搜索页（Crypto 板块专用，富途不适用于币种）
-const coingeckoSearchUrl = (ticker: string) =>
-  `https://www.coingecko.com/en/search?query=${encodeURIComponent(ticker)}`;
+// CoinGecko：加密货币币种页（Crypto 板块专用，富途不适用于币种）。
+// CoinGecko 币种页用的是 slug（如 bitcoin/ethereum），不是交易符号，
+// 故维护一份常用符号→slug 映射；未收录的符号退回搜索页。
+const COINGECKO_SLUG: Record<string, string> = {
+  BTC: "bitcoin", ETH: "ethereum", USDT: "tether", BNB: "binancecoin",
+  SOL: "solana", XRP: "ripple", USDC: "usd-coin", ADA: "cardano",
+  DOGE: "dogecoin", TRX: "tron", AVAX: "avalanche-2", DOT: "polkadot",
+  MATIC: "matic-network", LINK: "chainlink", SHIB: "shiba-inu",
+  LTC: "litecoin", BCH: "bitcoin-cash", UNI: "uniswap", ATOM: "cosmos",
+  XLM: "stellar", NEAR: "near", APT: "aptos", ARB: "arbitrum",
+  OP: "optimism", PEPE: "pepe", WBTC: "wrapped-bitcoin", TON: "toncoin",
+  ICP: "internet-computer", FIL: "filecoin", INJ: "injective", SUI: "sui",
+  AAVE: "aave", MKR: "maker", RNDR: "render-token", LDO: "lido-dao",
+  CRV: "curve-dao-token", SAND: "the-sandbox", AXS: "axie-infinity",
+  MANA: "decentraland", ETC: "ethereum-classic", XMR: "monero",
+  ALGO: "algorand", VET: "vechain", FTM: "fantom", GRT: "the-graph",
+  THETA: "theta-token", FLOW: "flow", CHZ: "chiliz", XTZ: "tezos",
+  KAVA: "kava", ZEC: "zcash", DASH: "dash", EOS: "eos", NEO: "neo",
+  IOTA: "iota", ZIL: "zilliqa", BAT: "basic-attention-token",
+  ENJ: "enjincoin", KSM: "kusama", COMP: "compound-governance-token",
+  SNX: "havven", DYDX: "dydx", IMX: "immutable-x", GALA: "gala",
+  STX: "blockstack", HBAR: "hedera-hashgraph", RUNE: "thorchain",
+  MINA: "mina-protocol", ROSE: "oasis-network", ONE: "harmony",
+  CRO: "crypto-com-chain", QNT: "quant-network", KCS: "kucoin-token",
+  OKB: "okb", LEO: "leo-token", CAKE: "pancakeswap-token", GMT: "stepn",
+  APE: "apecoin", FLOKI: "floki", WIF: "dogwifcoin", BONK: "bonk",
+  SEI: "sei-network", TIA: "celestia", JUP: "jupiter", PYTH: "pyth-network",
+  ONDO: "ondo-finance", WLD: "worldcoin-wld", RAY: "raydium",
+  ORDI: "ordinals", BLUR: "blur", JTO: "jito-governance-token",
+  STRK: "starknet", WETH: "weth", L2: "layer2-finance", ENS: "ethereum-name-service",
+};
+const coingeckoUrl = (ticker: string) => {
+  const slug = COINGECKO_SLUG[ticker.toUpperCase()];
+  return slug
+    ? `https://www.coingecko.com/en/coins/${slug}`
+    : `https://www.coingecko.com/en/search?query=${encodeURIComponent(ticker)}`;
+};
 // A 股跳转：东方财富个股页（服务端渲染，稳定可显示；百度股市通为 SPA 易白屏）
 const eastmoneyStockUrl = (ticker: string) => {
   const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
@@ -487,7 +521,7 @@ function TickerCard({
             <span className="text-zinc-700">·</span>
             {subreddit === "cryptocurrency" ? (
               <a
-                href={coingeckoSearchUrl(t)}
+                href={coingeckoUrl(t)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-orange-400/70 hover:text-orange-400"
