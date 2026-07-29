@@ -33,6 +33,9 @@ const futuUrl = (ticker: string) =>
   isCNTicker(ticker)
     ? `https://www.futunn.com/stock/${ticker}`
     : `https://www.futunn.com/stock/${ticker}-US`;
+// CoinGecko：加密货币搜索页（Crypto 板块专用，富途不适用于币种）
+const coingeckoSearchUrl = (ticker: string) =>
+  `https://www.coingecko.com/en/search?query=${encodeURIComponent(ticker)}`;
 // A 股跳转：东方财富个股页（服务端渲染，稳定可显示；百度股市通为 SPA 易白屏）
 const eastmoneyStockUrl = (ticker: string) => {
   const m = ticker.match(/^(\d{6})\.(SH|SZ)$/);
@@ -482,14 +485,25 @@ function TickerCard({
               Reddit
             </a>
             <span className="text-zinc-700">·</span>
-            <a
-              href={futuUrl(t)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-orange-400/70 hover:text-orange-400"
-            >
-              富途
-            </a>
+            {subreddit === "cryptocurrency" ? (
+              <a
+                href={coingeckoSearchUrl(t)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-orange-400/70 hover:text-orange-400"
+              >
+                CoinGecko
+              </a>
+            ) : (
+              <a
+                href={futuUrl(t)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-orange-400/70 hover:text-orange-400"
+              >
+                富途
+              </a>
+            )}
             <span className="text-zinc-700">·</span>
             <a
               href={tradingViewUrl(t)}
