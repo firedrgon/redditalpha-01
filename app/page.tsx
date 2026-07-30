@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { signIn, signOut, useSession } from "next-auth/react";
 import NotificationBell from "@/app/components/NotificationBell";
 import HotStocksPanel from "@/app/components/HotStocksPanel";
+import PositionsPanel from "@/app/components/PositionsPanel";
 import Link from "next/link";
 
 const SUBREDDITS = [
@@ -3828,7 +3829,7 @@ function AuthModal({ onClose }: { onClose: () => void }) {
 export default function Home() {
   const { data: session, status: sessionStatus } = useSession();
   const [activeSub, setActiveSub] = useState("wallstreetbets");
-  const [view, setView] = useState<"subreddit" | "favorites" | "hot">("subreddit");
+  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions">("subreddit");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
@@ -4596,6 +4597,19 @@ export default function Home() {
               </svg>
               热榜
             </button>
+            <button
+              onClick={() => setView("positions")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all flex items-center gap-1.5 ${
+                view === "positions"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+              </svg>
+              持仓
+            </button>
             <div className="mx-1 self-center text-zinc-700">|</div>
             {SUBREDDITS.map((sub) => (
               <button
@@ -4690,6 +4704,8 @@ export default function Home() {
           </>
         ) : view === "hot" ? (
           <HotStocksPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
+        ) : view === "positions" ? (
+          <PositionsPanel isAuthenticated={isAuthenticated} />
         ) : (
           <>
             <div className="mb-6 flex items-center justify-between">

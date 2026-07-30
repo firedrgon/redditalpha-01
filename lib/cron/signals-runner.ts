@@ -46,6 +46,12 @@ import { detectMarket, type Market } from "@/lib/market";
 import { upsertTechnicalSnapshot } from "@/lib/db/technical-snapshot";
 import { createSignalNotification } from "@/lib/notify";
 import {
+  openPosition,
+  closePosition,
+  fetchSignalPrice,
+  getCapitalPerTrade,
+} from "@/lib/db/positions";
+import {
   startCronRun,
   finishCronRun,
   type CronRunErrorItem,
@@ -188,7 +194,7 @@ async function writeSignalAlertAndNotify(
     (chipDesc ? `; 筹码状态: ${chipDesc.slice(0, 60)}` : "");
 
   try {
-    await prisma.signalAlert.create({
+    const alert = await prisma.signalAlert.create({
       data: {
         userId,
         ticker,
@@ -201,6 +207,43 @@ async function writeSignalAlertAndNotify(
         note,
       },
     });
+
+    // 取信号时刻价格（失败则跳过持仓金额，仅记信号）
+    const price = await fetchSignalPrice(ticker);
+
+    // 模拟持仓：建仓开 OPEN，平仓关闭最新 OPEN 并算盈亏
+    if (phase === "enter") {
+      if (price != null) {
+        const capital = await getCapitalPerTrade(prisma);
+        await openPosition(prisma, {
+          userId,
+          ticker,
+          tickerName: name,
+          price,
+          alertId: alert.id,
+          capital,
+        });
+        // 回填 alert 价格，便于核对
+        await prisma.signalAlert.update({
+          where: { id: alert.id },
+          data: { price },
+        });
+      }
+    } else if (phase === "exit") {
+      await closePosition(prisma, {
+        userId,
+        ticker,
+        price,
+        alertId: alert.id,
+      });
+      if (price != null) {
+        await prisma.signalAlert.update({
+          where: { id: alert.id },
+          data: { price },
+        });
+      }
+    }
+
     // 站内通知 + 外部投递（异常内部消化）
     await createSignalNotification(prisma, {
       userId,

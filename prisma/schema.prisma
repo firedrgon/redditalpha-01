@@ -322,3 +322,35 @@ model StockReport {
 
   @@index([ticker])
 }
+
+/// 模拟持仓（信号自动建仓/平仓）。每笔买入信号开一个 OPEN 持仓，
+/// 对应卖出信号关闭最新 OPEN 持仓并计算盈亏。纯模拟，不涉及真实交易。
+model Position {
+  id           String   @id @default(cuid())
+  userId       String
+  ticker       String
+  tickerName   String?
+  /// OPEN | CLOSED
+  status       String   @db.VarChar(10)
+  entryPrice   Float
+  entryAt      DateTime @default(now())
+  /// 关联 SignalAlert（建仓那条）
+  entryAlertId String?
+  /// 按资金模型算出的股数（= capital / entryPrice）
+  shares       Float
+  /// 本笔投入的虚拟本金
+  capital      Float
+  exitPrice    Float?
+  exitAt       DateTime?
+  exitAlertId  String?
+  /// 平仓时计算：持有天数
+  holdDays     Int?
+  /// 平仓时计算：(exitPrice - entryPrice) * shares
+  pnl          Float?
+  pnlPct       Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, ticker])
+}
