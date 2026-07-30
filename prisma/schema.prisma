@@ -330,6 +330,10 @@ model Position {
   userId       String
   ticker       String
   tickerName   String?
+  /// 资产市场：CN | US（区分本金币种，A 股 ¥ / 美股 $）
+  assetType    String   @db.VarChar(6)
+  /// 本金币种：CNY | USD（与 assetType 对应）
+  currency     String   @db.VarChar(4)
   /// OPEN | CLOSED
   status       String   @db.VarChar(10)
   entryPrice   Float

@@ -49,7 +49,9 @@ import {
   openPosition,
   closePosition,
   fetchSignalPrice,
-  getCapitalPerTrade,
+  getCapitalForMarket,
+  currencyOf,
+  type AssetMarket,
 } from "@/lib/db/positions";
 import {
   startCronRun,
@@ -184,9 +186,11 @@ async function writeSignalAlertAndNotify(
     chipDesc?: string | null;
     state: PositionState;
     phase: "enter" | "exit";
+    /** 资产市场：CN | US（决定本金币种） */
+    market: AssetMarket;
   }
 ): Promise<{ ok: boolean; error?: string }> {
-  const { userId, ticker, name, signalType, overall, oscillators, movingAverages, chipDesc, state, phase } = args;
+  const { userId, ticker, name, signalType, overall, oscillators, movingAverages, chipDesc, state, phase, market } = args;
   const actionLabel = phase === "enter" ? "建仓" : "平仓";
   const note =
     `${actionLabel}信号（${state} → ${phase === "enter" ? "HOLD" : "OUT"}）; ` +
@@ -214,13 +218,15 @@ async function writeSignalAlertAndNotify(
     // 模拟持仓：建仓开 OPEN，平仓关闭最新 OPEN 并算盈亏
     if (phase === "enter") {
       if (price != null) {
-        const capital = await getCapitalPerTrade(prisma);
+        const capital = await getCapitalForMarket(prisma, market);
         await openPosition(prisma, {
           userId,
           ticker,
           tickerName: name,
           price,
           alertId: alert.id,
+          assetType: market,
+          currency: currencyOf(market),
           capital,
         });
         // 回填 alert 价格，便于核对
@@ -355,6 +361,7 @@ export async function processStarredStock(
         chipDesc,
         state,
         phase,
+        market,
       });
       if (!r.ok) {
         return {
@@ -465,6 +472,7 @@ export async function processStarredStock(
       chipDesc: null,
       state,
       phase,
+      market,
     });
     if (!r.ok) {
       return {

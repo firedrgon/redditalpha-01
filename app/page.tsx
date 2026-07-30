@@ -1877,9 +1877,9 @@ function AnalysisModal({
 }
 
 // ============================================================
-// 设置弹窗（LLM 提供商 + 财务数据源）
+// 设置弹窗（LLM 提供商 + 财务数据源 + 模拟持仓）
 // ============================================================
-type SettingsTab = "llm" | "finance";
+type SettingsTab = "llm" | "finance" | "sim";
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("llm");
@@ -1920,6 +1920,13 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const [savingTiingo, setSavingTiingo] = useState(false);
   const [savingFinnhub, setSavingFinnhub] = useState(false);
 
+  // 模拟持仓配置相关状态
+  const [simCn, setSimCn] = useState<string>("");
+  const [simUs, setSimUs] = useState<string>("");
+  const [simLoading, setSimLoading] = useState(true);
+  const [simSaving, setSimSaving] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+
   const reloadLLM = useCallback(async () => {
     setLlmLoading(true);
     try {
@@ -1956,11 +1963,27 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
+  const reloadSim = useCallback(async () => {
+    setSimLoading(true);
+    try {
+      const res = await fetch("/api/sim-settings", { cache: "no-store" });
+      const json = await res.json();
+      setSimCn(json.cn != null ? String(json.cn) : "10000");
+      setSimUs(json.us != null ? String(json.us) : "10000");
+      setSimError(null);
+    } catch (err) {
+      setSimError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSimLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     reloadLLM();
     reloadFinance();
-  }, [reloadLLM, reloadFinance]);
+    reloadSim();
+  }, [reloadLLM, reloadFinance, reloadSim]);
 
   const updateProvider = async (
     providerId: string,
@@ -2169,6 +2192,38 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const handleSaveSim = async () => {
+    const cn = Number(simCn);
+    const us = Number(simUs);
+    if (!Number.isFinite(cn) || cn <= 0 || !Number.isFinite(us) || us <= 0) {
+      setSimError("每笔本金必须为正数");
+      return;
+    }
+    setSimSaving(true);
+    setSimError(null);
+    try {
+      const res = await fetch("/api/sim-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cn, us }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt);
+      }
+      const json = await res.json();
+      setSimCn(String(json.cn));
+      setSimUs(String(json.us));
+      showToast("模拟持仓本金已保存");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSimError(msg);
+      showToast(msg, "err");
+    } finally {
+      setSimSaving(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
@@ -2203,6 +2258,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           {[
             { id: "llm" as const, label: "LLM 提供商" },
             { id: "finance" as const, label: "财务数据源" },
+            { id: "sim" as const, label: "模拟持仓" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -2744,6 +2800,82 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 <li>Yahoo Finance v7/quote（字段较少）</li>
               </ol>
             </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === "sim" && (
+          <div className="space-y-4">
+            {simError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+                {simError}
+              </div>
+            )}
+
+            <p className="text-xs text-zinc-400">
+              每次出现买入信号时，按以下「每笔虚拟本金」自动建仓（股数 = 本金 ÷ 信号时刻价），
+              出现卖出信号时自动平仓并核算盈亏。A 股以人民币计、美股以美元计，二者独立配置。
+            </p>
+
+            {simLoading ? (
+              <div className="py-8 text-center text-sm text-zinc-500">加载中...</div>
+            ) : (
+              <>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">A 股每笔本金</span>
+                    <span className="rounded border border-orange-500/30 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-400">
+                      ¥ 人民币
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex flex-1 items-center rounded border border-zinc-700 bg-zinc-950 px-2 focus-within:border-orange-500/60">
+                      <span className="text-xs text-zinc-500">¥</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={100}
+                        value={simCn}
+                        onChange={(e) => setSimCn(e.target.value)}
+                        className="flex-1 bg-transparent px-2 py-1 text-xs text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="font-semibold text-zinc-100">美股每笔本金</span>
+                    <span className="rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-400">
+                      $ 美元
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex flex-1 items-center rounded border border-zinc-700 bg-zinc-950 px-2 focus-within:border-orange-500/60">
+                      <span className="text-xs text-zinc-500">$</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={100}
+                        value={simUs}
+                        onChange={(e) => setSimUs(e.target.value)}
+                        className="flex-1 bg-transparent px-2 py-1 text-xs text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveSim}
+                    disabled={simSaving}
+                    className="rounded-lg border border-orange-500/40 bg-orange-500/20 px-4 py-1.5 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/30 disabled:opacity-40"
+                  >
+                    {simSaving ? "保存中..." : "保存"}
+                  </button>
+                </div>
               </>
             )}
           </div>

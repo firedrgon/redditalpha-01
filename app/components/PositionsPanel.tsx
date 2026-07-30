@@ -7,6 +7,8 @@ interface PositionRow {
   ticker: string;
   tickerName: string | null;
   status: string;
+  assetType: string;
+  currency: string;
   entryPrice: number;
   entryAt: string;
   shares: number;
@@ -44,12 +46,14 @@ function extUrl(t: string): string {
   return `https://www.futunn.com/stock/${t}-US`;
 }
 
-const symbol = (t: string) => (isCN(t) ? "¥" : "$");
+/** 按持仓币种返回符号：CNY→¥，USD→$，空→无符号（汇总跨币种时不显示统一符号） */
+const moneySymbol = (cur?: string | null) =>
+  cur === "CNY" ? "¥" : cur === "USD" ? "$" : "";
 
-const fmtMoney = (n: number | null | undefined, t = "") =>
+const fmtMoney = (n: number | null | undefined, cur = "") =>
   n == null || Number.isNaN(n)
     ? "—"
-    : `${symbol(t)}${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+    : `${moneySymbol(cur)}${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
 const fmtPct = (n: number | null | undefined) =>
   n == null || Number.isNaN(n) ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
@@ -217,19 +221,19 @@ export default function PositionsPanel({
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">
-                    {fmtMoney(o.entryPrice, o.ticker)}
+                    {fmtMoney(o.entryPrice, o.currency)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">
-                    {o.currentPrice == null ? "—" : fmtMoney(o.currentPrice, o.ticker)}
+                    {o.currentPrice == null ? "—" : fmtMoney(o.currentPrice, o.currency)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">
                     {o.shares.toFixed(4)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">
-                    {fmtMoney(o.capital, o.ticker)}
+                    {fmtMoney(o.capital, o.currency)}
                   </td>
                   <td className={`px-4 py-3 text-right font-mono ${pnlClass(o.unrealizedPnl)}`}>
-                    {fmtMoney(o.unrealizedPnl, o.ticker)}
+                    {fmtMoney(o.unrealizedPnl, o.currency)}
                   </td>
                   <td className={`px-4 py-3 text-right font-mono ${pnlClass(o.unrealizedPnlPct)}`}>
                     {fmtPct(o.unrealizedPnlPct)}
@@ -288,16 +292,16 @@ export default function PositionsPanel({
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">
-                    {fmtMoney(c.entryPrice, c.ticker)}
+                    {fmtMoney(c.entryPrice, c.currency)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">
-                    {c.exitPrice == null ? "—" : fmtMoney(c.exitPrice, c.ticker)}
+                    {c.exitPrice == null ? "—" : fmtMoney(c.exitPrice, c.currency)}
                   </td>
                   <td className={`px-4 py-3 text-right font-mono ${pnlClass(c.pnlPct)}`}>
                     {fmtPct(c.pnlPct)}
                   </td>
                   <td className={`px-4 py-3 text-right font-mono ${pnlClass(c.pnl)}`}>
-                    {fmtMoney(c.pnl, c.ticker)}
+                    {fmtMoney(c.pnl, c.currency)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-400">
                     {c.holdDays ?? "—"}
