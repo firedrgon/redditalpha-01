@@ -93,7 +93,7 @@ async function fetchUSQuote(ticker: string): Promise<Quote> {
           price?: number; change?: number; changesPercentage?: number;
         }>;
         const d = arr?.[0];
-        if (d && typeof d.price === "number") {
+        if (d && typeof d.price === "number" && d.price > 0) {
           return {
             ticker,
             price: d.price,
@@ -146,6 +146,39 @@ async function fetchUSQuote(ticker: string): Promise<Quote> {
             changePercent: (price / prev - 1) * 100,
             currency: typeof m.currency === "string" ? m.currency : "USD",
             name: typeof m.shortName === "string" ? m.shortName : null,
+            market: "US",
+            ok: true,
+          };
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 4) 腾讯财经兜底（国内/Vercel 均可达、免 key；Yahoo 被墙或限流时仍能取美股价）
+  try {
+    const sym = ticker.replace(/\W/g, "").toUpperCase();
+    const res = await fetch(`https://qt.gtimg.cn/q=us${sym}`, {
+      headers: { "User-Agent": UA, Referer: "https://finance.qq.com" },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      const txt = new TextDecoder("gbk").decode(buf);
+      const m = txt.match(/="([^"]*)"/);
+      if (m) {
+        const f = m[1].split("~");
+        const price = Number(f[3]);
+        if (Number.isFinite(price) && price > 0) {
+          return {
+            ticker,
+            price,
+            change: null,
+            changePercent: null,
+            currency: "USD",
+            name: f[1] || null,
             market: "US",
             ok: true,
           };

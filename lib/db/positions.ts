@@ -48,11 +48,13 @@ export async function getCapitalForMarket(
   return fallback;
 }
 
-/** 取信号时刻价格；失败/无值返回 null（此时跳过持仓金额，仅记信号） */
+/** 取信号时刻价格；失败/无值/价格<=0 返回 null（此时跳过持仓金额，仅记信号）。
+ *  注意：价格 0 不是有效信号价（可能是数据源返回 0 占位），必须排除，否则会建出
+ *  entryPrice=0、shares=0 的「幽灵持仓」。 */
 export async function fetchSignalPrice(ticker: string): Promise<number | null> {
   try {
     const q: Quote = await fetchQuote(ticker);
-    return typeof q.price === "number" ? q.price : null;
+    return typeof q.price === "number" && q.price > 0 ? q.price : null;
   } catch {
     return null;
   }
