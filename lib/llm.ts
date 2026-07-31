@@ -471,7 +471,11 @@ export async function chatCompletion(
     }
 
     throw new Error(
-      `活跃模型 ${provider.name} 调用失败：${lastErr.message}。已尝试所有备用模型仍不可用，请在 ⚙ 设置中检查 Key 或切换模型。`
+      `活跃模型 ${provider.name} 调用失败：${lastErr.message}。` +
+        (shouldFallback
+          ? "已尝试所有备用模型仍不可用，"
+          : "该错误未触发备用模型（超时/网络类错误为避免串联击穿函数上限不自动兜底），") +
+        `请在 ⚙ 设置中检查 Key 或切换模型。`
     );
   }
 }
