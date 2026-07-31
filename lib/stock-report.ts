@@ -1160,16 +1160,16 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
 
   // 研报使用用户在 ⚙ 设置中选择的活跃模型（不再强制 Gemini：Gemini 免费额度
   // 容易被 429 打满导致研报直接失败）。长输出 + 60s 函数上限的超时风险由
-  // PROVIDER_TIMEOUT_MS(50s) 与 maxTokens(8000) 控制，超时返回清晰报错而非静默网络错误。
-  // 8000 让报告充分展开（财务表/同业对比/催化剂等）；llm.ts 的 resolveMaxTokens 会按模型上下文窗口自动钳制，避免 413。
+  // PROVIDER_TIMEOUT_MS(50s) 与 maxTokens(5000) 控制，超时返回清晰报错而非静默网络错误。
+  // 5000 让报告聚焦核心（财务表/同业对比/催化剂等），同时缩短生成时长以适配慢模型（如 qwen3.7-max）的 50s 子超时；resolveMaxTokens 仍按模型上下文窗口自动钳制，避免 413。
   // 注意：Gemini 3.x 默认开启 thinking，thinking token 会占用 maxOutputTokens 预算导致正文被截断；
-  // llm.ts 已对 Gemini 传 thinkingLevel:"minimal" 关闭思考，确保 8000 预算基本全给正文。
+  // llm.ts 已对 Gemini 传 thinkingLevel:"minimal" 关闭思考，确保 5000 预算基本全给正文。
   const res = await chatCompletion(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 8000 }
+    { temperature: 0.3, maxTokens: 5000 }
   );
 
   // 落库（失败不应阻断返回，仅记录）
