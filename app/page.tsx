@@ -2057,11 +2057,12 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
       }
       const json = await res.json();
       await reloadLLM();
+      const item = json?.results?.[0];
       const p = providers.find((x) => x.id === providerId);
-      if (json.ok) {
+      if (item?.ok) {
         showToast(`✓ ${p?.name ?? providerId} 测试通过`);
       } else {
-        showToast(`✗ ${p?.name ?? providerId} 测试失败：${json.error ?? "未知错误"}`, "err");
+        showToast(`✗ ${p?.name ?? providerId} 测试失败：${item?.error ?? "未知错误"}`, "err");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
