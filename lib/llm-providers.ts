@@ -86,6 +86,16 @@ export const QWEN_BASE_URL =
   process.env.QWEN_BASE_URL?.trim() ||
   "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions";
 
+// 安全网：若 QWEN_BASE_URL 指向中国大陆端点（含 cn-<region> 区域、非 intl 的
+// aliyuncs 域名），在 Vercel 等海外部署会被 GFW 阻断导致 50s 超时。此时国内
+// 免费额度无法使用，需改用默认 intl 端点，或将应用部署到中国大陆/香港节点。
+if (/cn-[a-z]+/i.test(QWEN_BASE_URL) || (QWEN_BASE_URL.includes("aliyuncs.com") && !QWEN_BASE_URL.includes("intl"))) {
+  console.warn(
+    "[llm] QWEN_BASE_URL 指向中国大陆端点，Vercel 等海外部署将因 GFW 阻断而 50s 超时。" +
+      "国内免费额度需改用默认 intl 端点（删除 QWEN_BASE_URL 环境变量），或将应用部署到中国大陆/香港节点。"
+  );
+}
+
 export const QWEN_PROVIDER_IDS = [
   "qwen-1",
   "qwen-2",
