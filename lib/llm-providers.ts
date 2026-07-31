@@ -247,7 +247,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-flash-2026-07-15",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
@@ -263,7 +263,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-plus",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
@@ -279,7 +279,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-max",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
@@ -295,7 +295,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-max-2026-05-17",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
@@ -311,7 +311,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-max-2026-05-20",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
@@ -327,7 +327,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-max-2026-06-08",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
@@ -343,7 +343,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     model: "qwen3.7-max-preview",
     free: true,
     needsKey: true,
-    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
