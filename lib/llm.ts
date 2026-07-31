@@ -16,6 +16,8 @@ import {
   type LLMProvider,
   GROQ_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
+  QWEN_PROVIDER_IDS,
+  PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
 import { saveCachedModels, getCachedModels } from "./db/llm-model-cache";
 
@@ -63,6 +65,21 @@ function getCooldownMs(msg: string): number {
   return 2 * 60 * 1000;
 }
 
+/** 备用链路单 provider 子超时（毫秒）。主模型额度/限流为快速失败（非 50s 拖死），剩余时间足够兜底一个或多个模型，同时严守 Vercel 60s 函数上限。 */
+const FALLBACK_TIMEOUT_MS = 30_000;
+
+/**
+ * 判断错误是否为「免费额度耗尽」（区别于普通限流）。
+ * 百炼额度耗尽通常返回 HTTP 429，报文含余额/额度/quota/insufficient 等字眼；
+ * 也覆盖模型在所选站点不存在（404 / not found）的情况——同样应跳过该模型兜底。
+ * 这类错误短期内不会因重试恢复，应跳过该模型、切换到同家族其他模型或其他家族。
+ */
+function isQuotaExhausted(msg: string): boolean {
+  return /余额|额度|balance|quota|insufficient|free.{0,6}quota|exhausted|资源.*不足|account.*limit|exceeded/i.test(
+    msg
+  );
+}
+
 /**
  * 单个 provider 调用的子超时（毫秒）。
  *
@@ -75,12 +92,14 @@ function getCooldownMs(msg: string): number {
  */
 const PROVIDER_TIMEOUT_MS = 50_000;
 
-/** 中国大陆 API 的 provider（部署在海外节点如 Vercel 默认区域时可能网络不可达/超时） */
+/**
+ * 中国大陆 API 的 provider（部署在海外节点如 Vercel 默认区域时可能网络不可达/超时）。
+ * 注意：通义千问/百炼已改用国际站端点（dashscope-intl，新加坡），海外可直连，
+ * 故 qwen-* 不再列入此名单（其超时不再是 GFW 阻断，无需中国特色报错）。
+ */
 const CN_PROVIDER_IDS = [
   "zhipu-1",
   "zhipu-2",
-  "qwen-1",
-  "qwen-2",
   "kimi-1",
   "doubao-1",
 ];
@@ -112,7 +131,12 @@ async function callWithKeyPool(
   provider: LLMProvider,
   apiKeyRaw: string | undefined,
   messages: LLMMessage[],
-  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
+  options: {
+    temperature?: number;
+    maxTokens?: number;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  }
 ): Promise<string> {
   const pool = parseKeyPool(apiKeyRaw);
   if (pool.length === 0) {
@@ -242,7 +266,12 @@ async function callProviderWithTimeout(
   provider: LLMProvider,
   apiKey: string,
   messages: LLMMessage[],
-  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
+  options: {
+    temperature?: number;
+    maxTokens?: number;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  }
 ): Promise<string> {
   const controller = new AbortController();
   // 外部 signal 联动：总超时触发时也取消当前 provider 调用
@@ -253,7 +282,10 @@ async function callProviderWithTimeout(
       options.signal.addEventListener("abort", () => controller.abort(), { once: true });
     }
   }
-  const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  const timer = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? PROVIDER_TIMEOUT_MS
+  );
   try {
     return await callProvider(provider, apiKey, messages, {
       ...options,
@@ -401,10 +433,123 @@ export async function chatCompletion(
       console.error("[llm] writeConfig 失败（错误状态更新）:", writeErr instanceof Error ? writeErr.message : String(writeErr));
     }
 
+    // 免费额度耗尽 / 限流 / 模型不存在：尝试备用链路
+    // （同家族其他 Qwen 模型额度独立、优先；再兜底到其他家族 Gemini/DeepSeek/Groq/OpenRouter）
+    const shouldFallback =
+      isQuotaExhausted(msg) ||
+      /429|rate.?limit|HTTP 404|not found|模型不存在|无此模型/i.test(msg);
+    if (shouldFallback) {
+      try {
+        const fallbackResp = await tryFallbackChain(provider.id, messages, options);
+        if (fallbackResp) return fallbackResp;
+      } catch (fbErr) {
+        console.error(
+          "[llm] 备用链路异常:",
+          fbErr instanceof Error ? fbErr.message : String(fbErr)
+        );
+      }
+    }
+
     throw new Error(
-      `活跃模型 ${provider.name} 调用失败：${lastErr.message}。请在 ⚙ 设置中切换其他模型后重试。`
+      `活跃模型 ${provider.name} 调用失败：${lastErr.message}。已尝试所有备用模型仍不可用，请在 ⚙ 设置中检查 Key 或切换模型。`
     );
   }
+}
+
+/**
+ * 备用模型链路：活跃模型额度耗尽 / 限流 / 模型不存在时调用。
+ *   1. 同家族（Qwen）其他模型：百炼各模型免费额度相互独立，优先尝试；
+ *   2. 其他家族（按 PREFERRED_ACTIVE_ORDER）：Gemini / DeepSeek / Groq / OpenRouter 兜底。
+ * 任一候选成功即返回其结果；全部失败返回 null（由调用方抛错）。
+ * 候选选择会跳过：未启用、永久失败(working=false)、冷却中、无 Key、未初始化模型的 provider。
+ */
+async function tryFallbackChain(
+  failedId: string,
+  messages: LLMMessage[],
+  options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
+): Promise<LLMResponse | null> {
+  const config = await readConfig();
+  const now = Date.now();
+  const candidates: LLMProvider[] = [];
+
+  const pushIfUsable = (id: string) => {
+    if (id === failedId) return;
+    const p = LLM_PROVIDERS.find((x) => x.id === id);
+    const s = p ? config.providers[id] : null;
+    if (!p || !s || !s.enabled) return;
+    if (s.working === false) return; // 永久失败
+    if (s.cooldownUntil && s.cooldownUntil > now) return; // 冷却中
+    if (p.needsKey && !s.apiKey) return;
+    if (!p.model) return;
+    candidates.push(p);
+  };
+
+  // 1) 同家族 Qwen：额度相互独立，优先尝试
+  for (const id of QWEN_PROVIDER_IDS) pushIfUsable(id);
+  // 2) 其他家族兜底（跳过已处理的 Qwen）
+  for (const id of PREFERRED_ACTIVE_ORDER) {
+    if ((QWEN_PROVIDER_IDS as readonly string[]).includes(id)) continue;
+    pushIfUsable(id);
+  }
+
+  for (const cand of candidates) {
+    const candStatus = config.providers[cand.id];
+    if (!candStatus) continue;
+    try {
+      const text = await callWithKeyPool(cand, candStatus.apiKey, messages, {
+        ...options,
+        timeoutMs: FALLBACK_TIMEOUT_MS,
+      });
+      // 成功：标记该备用模型可用
+      try {
+        await updateConfigSafely((freshConfig) => {
+          const s = freshConfig.providers[cand.id];
+          if (s) {
+            s.working = true;
+            s.lastTested = Date.now();
+            s.lastError = null;
+            s.cooldownUntil = null;
+          }
+        });
+      } catch {
+        // 状态写回失败不影响返回结果
+      }
+      return {
+        text,
+        providerId: cand.id,
+        providerName: cand.name,
+        model: cand.model,
+      };
+    } catch (e2) {
+      const m2 = e2 instanceof Error ? e2.message : String(e2);
+      try {
+        await updateConfigSafely((freshConfig) => {
+          const s = freshConfig.providers[cand.id];
+          if (!s) return;
+          s.lastTested = Date.now();
+          s.lastError = m2;
+          if (isPermanentError(m2)) {
+            s.working = false;
+            s.cooldownUntil = null;
+          } else if (isQuotaExhausted(m2) || /429|rate.?limit/i.test(m2)) {
+            // 该备用模型额度也耗尽：冷却 5 分钟并跳过，继续下一个候选
+            s.working = null;
+            s.cooldownUntil = now + 5 * 60 * 1000;
+          } else if (isTransientError(m2)) {
+            s.working = null;
+            s.cooldownUntil = now + getCooldownMs(m2);
+          } else {
+            s.working = null;
+            s.cooldownUntil = now + 2 * 60 * 1000;
+          }
+        });
+      } catch {
+        // 状态写回失败不影响继续尝试下一个候选
+      }
+      // 继续下一个候选
+    }
+  }
+  return null;
 }
 
 /** 单 provider 调用：根据协议分发 */

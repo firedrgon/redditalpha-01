@@ -75,10 +75,25 @@ export const ZHIPU_PROVIDER_IDS = [
   "zhipu-2",
 ] as const;
 
-/** 通义千问系列 provider 共享同一 API Key（LLM_API_KEY_QWEN / DASHSCOPE_API_KEY） */
+/**
+ * 通义千问 / 阿里云百炼系列 provider 共享同一 API Key（LLM_API_KEY_QWEN / DASHSCOPE_API_KEY）。
+ *
+ * 端点默认走百炼【国际站】（dashscope-intl，新加坡），可在 Vercel 等海外节点直连。
+ * 如需改用国内站（用自己的百炼免费额度，但 Vercel 海外会被 GFW 阻断超时），
+ * 设环境变量 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions 即可。
+ */
+export const QWEN_BASE_URL =
+  process.env.QWEN_BASE_URL?.trim() ||
+  "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions";
+
 export const QWEN_PROVIDER_IDS = [
   "qwen-1",
   "qwen-2",
+  "qwen-3",
+  "qwen-4",
+  "qwen-5",
+  "qwen-6",
+  "qwen-7",
 ] as const;
 
 /** Kimi（月之暗面）系列 provider 共享同一 API Key（LLM_API_KEY_KIMI / MOONSHOT_API_KEY） */
@@ -97,6 +112,7 @@ export const DOUBAO_PROVIDER_IDS = ["doubao-1"] as const;
 export const PREFERRED_ACTIVE_ORDER = [
   "gemini-1",
   "gemini-2",
+  "qwen-1",
   "deepseek-1",
   "groq-1",
   "groq-2",
@@ -226,37 +242,114 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   {
     id: "qwen-1",
     contextWindow: 128_000,
-    name: "通义千问 Qwen-Turbo",
-    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model: "qwen-turbo",
+    name: "阿里云百炼 · Qwen3.7-Flash (2026-07-15)",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-flash-2026-07-15",
     free: true,
     needsKey: true,
     signupUrl: "https://bailian.console.aliyun.com/#/home",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
-      "阿里云百炼 Qwen-Turbo：永久免费（每月 100 万 token）、128K 上下文、中文强、速度快，适合轻量中文分析。与其他通义配置共用 Key",
+      "百炼国际站 Qwen3.7-Flash 快照版：快、便宜，免费额度用尽会自动切换下一个 Qwen 模型再兜底其他家族。与其他通义配置共用 Key",
     protocol: "openai",
-    freeQuota:
-      "永久免费：qwen-turbo 每月 100 万 token（需阿里云实名）；其他 Qwen 模型各有 90 天免费额度",
-    hidden: true,
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
   },
   {
     id: "qwen-2",
     contextWindow: 128_000,
-    name: "通义千问 Qwen-Plus",
-    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model: "qwen-plus",
+    name: "阿里云百炼 · Qwen3.7-Plus",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-plus",
     free: true,
     needsKey: true,
     signupUrl: "https://bailian.console.aliyun.com/#/home",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
-      "阿里云百炼 Qwen-Plus：质量优于 Turbo、128K 上下文、有 90 天免费额度，适合深度中文分析。与其他通义配置共用 Key",
+      "百炼国际站 Qwen3.7-Plus：均衡型，质量优于 Flash，免费额度与其他 Qwen 模型相互独立。与其他通义配置共用 Key",
     protocol: "openai",
-    freeQuota: "开通后 90 天免费额度：各 Qwen 模型独立 100 万 token（累计超 7000 万）",
-    hidden: true,
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+  },
+  {
+    id: "qwen-3",
+    contextWindow: 128_000,
+    name: "阿里云百炼 · Qwen3.7-Max",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-max",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "百炼国际站 Qwen3.7-Max（最新稳定版）：旗舰质量，适合深度研报，免费额度独立。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+  },
+  {
+    id: "qwen-4",
+    contextWindow: 128_000,
+    name: "阿里云百炼 · Qwen3.7-Max (2026-05-17)",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-max-2026-05-17",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "百炼国际站 Qwen3.7-Max 早期快照（2026-05-17）：Max 系列额度兜底替补。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+  },
+  {
+    id: "qwen-5",
+    contextWindow: 128_000,
+    name: "阿里云百炼 · Qwen3.7-Max (2026-05-20)",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-max-2026-05-20",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "百炼国际站 Qwen3.7-Max 快照（2026-05-20）：Max 系列额度兜底替补。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+  },
+  {
+    id: "qwen-6",
+    contextWindow: 128_000,
+    name: "阿里云百炼 · Qwen3.7-Max (2026-06-08)",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-max-2026-06-08",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "百炼国际站 Qwen3.7-Max 快照（2026-06-08）：Max 系列额度兜底替补。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+  },
+  {
+    id: "qwen-7",
+    contextWindow: 128_000,
+    name: "阿里云百炼 · Qwen3.7-Max-Preview",
+    endpoint: QWEN_BASE_URL,
+    model: "qwen3.7-max-preview",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://bailian.console.aliyun.com/#/home",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "百炼国际站 Qwen3.7-Max-Preview（预览版）：最新能力尝鲜，免费额度独立。与其他通义配置共用 Key",
+    protocol: "openai",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
   },
   {
     id: "kimi-1",
