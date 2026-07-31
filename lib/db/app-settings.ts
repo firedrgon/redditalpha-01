@@ -2,14 +2,37 @@ import { getPrisma } from "./prisma";
 
 const LLM_CONFIG_KEY = "llm_config";
 
-export async function getAppSetting<T>(key: string): Promise<T | null> {
-  const prisma = getPrisma();
-  if (!prisma) return null;
+/**
+ * 带重试的数据库读取：吸收 serverless 冷启动时 Postgres 连接池未热身的瞬时失败。
+ * 否则 readConfig 会把异常吞成 null → 退回空配置 → 活跃模型被环境变量兜底成 gemini，
+ * 表现为「redeploy 后活跃模型变回 gemini」。
+ */
+async function readRowWithRetry(key: string, retries = 3): Promise<string | null> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const prisma = getPrisma();
+    if (!prisma) return null; // 未配置 DB（dev 降级），直接返回
+    try {
+      const row = await prisma.appSetting.findUnique({ where: { key } });
+      return row ? row.value : null;
+    } catch (err) {
+      lastErr = err;
+      // 末次失败不再等待
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+      }
+    }
+  }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  console.warn(`[app-settings] 读取 key=${key} 失败（已重试 ${retries} 次）：${msg}`);
+  return null;
+}
 
+export async function getAppSetting<T>(key: string): Promise<T | null> {
+  const raw = await readRowWithRetry(key);
+  if (raw == null) return null;
   try {
-    const row = await prisma.appSetting.findUnique({ where: { key } });
-    if (!row) return null;
-    return JSON.parse(row.value) as T;
+    return JSON.parse(raw) as T;
   } catch {
     return null;
   }
