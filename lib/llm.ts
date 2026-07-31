@@ -261,6 +261,23 @@ function resolveMaxTokens(
 }
 
 /**
+ * 判断端点是否落在中国大陆（Vercel 等海外部署节点访问会被 GFW 阻断/严重丢包）。
+ * 通义系列的 QWEN_BASE_URL 可被环境变量覆盖为国内站/北京 MaaS 端点，此时虽已从
+ * CN_PROVIDER_IDS 移除，仍应在超时时给出「网络受限」提示而非光秃秃的超时信息。
+ */
+function isChinaHost(endpoint: string): boolean {
+  const h = endpoint.toLowerCase();
+  if (h.includes("intl")) return false; // 国际站（新加坡/美东等）非大陆
+  if (/(^|\.)cn-[a-z]+[\.\-]/.test(h)) return true; // cn-beijing / cn-hangzhou 等区域
+  if (h.includes("aliyuncs.com") || h.includes("aliyun.com")) return true; // dashscope.aliyuncs.com 默认北京
+  if (h.includes("dashscope")) return true;
+  if (h.includes("volces.com")) return true; // 火山方舟（豆包）
+  if (h.includes("bigmodel.cn")) return true; // 智谱
+  if (h.includes("moonshot.cn")) return true; // Kimi
+  return false;
+}
+
+/**
  * 包装 callProvider，加上单 provider 子超时。
  * 子超时触发时 abort 当前 fetch 并抛出超时错误，由调用方 catch 后 fallback。
  * 外部 signal（总超时）触发时也会联动 abort。
@@ -297,7 +314,7 @@ async function callProviderWithTimeout(
   } catch (err) {
     // 区分：子超时 vs 外部 signal 触发 vs 其他错误
     if (controller.signal.aborted && !options.signal?.aborted) {
-      if (CN_PROVIDER_IDS.includes(provider.id)) {
+      if (CN_PROVIDER_IDS.includes(provider.id) || isChinaHost(provider.endpoint)) {
         throw new Error(
           `${provider.name} 单次调用超时 (${PROVIDER_TIMEOUT_MS}ms)：该模型 API 位于中国大陆，` +
             `当前部署节点（如 Vercel 海外区域）可能网络受限无法访问。建议改用 Gemini / OpenRouter / Groq，` +
