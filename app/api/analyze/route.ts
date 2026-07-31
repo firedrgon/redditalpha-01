@@ -149,6 +149,9 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
     const controller = new AbortController();
     const llmPromise = chatCompletion(messages, {
       temperature: 0.4,
+      // 叙述性分析无需过长：限制 maxTokens 缩短 qwen 等慢模型生成时间，
+      // 避免在 LLM_TIMEOUT_MS(35s) 内未完成。默认 3072 对免费共享算力的慢模型偏长易超时。
+      maxTokens: 2000,
       signal: controller.signal,
     });
     const resp = await withTimeout(
