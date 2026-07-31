@@ -46,8 +46,11 @@ function isTransientError(msg: string): boolean {
 /**
  * 判断错误是否为永久错误（Key 无效 / 模型不存在 / 鉴权失败）。
  * 这类错误不会因重试而消失，应直接标记 working=false 跳过。
+ * 注意：额度耗尽（HTTP 403 "Free quota exhausted" 等）不是永久错误，
+ * 应走冷却/跳过逻辑，故此处排除 isQuotaExhausted 命中的情况。
  */
 function isPermanentError(msg: string): boolean {
+  if (isQuotaExhausted(msg)) return false;
   return /HTTP 401|HTTP 403|HTTP 404|invalid api key|unauthorized|forbidden|not found|模型不存在/i.test(
     msg
   );
