@@ -27,9 +27,10 @@ export const revalidate = 0;
 // 每个 API 2-3 秒，7 秒极易超时。改为 20 秒给足时间获取完整数据（含新闻）。
 // A 股并行请求同花顺+腾讯（各 8s），20s 足够覆盖并行 + 潜在降级。
 const FETCH_TIMEOUT_MS = 20000;
-// Nemotron 3 Ultra 550B / DeepSeek R1 等大参数推理模型生成较慢，
-// 30s 易超时。提升至 35s（与 maxDuration=60 配合，留 25s 给 fetch + 落库）。
-const LLM_TIMEOUT_MS = 35000;
+// Nemotron 3 Ultra 550B / DeepSeek R1 / qwen 免费共享算力等大模型生成较慢，
+// 原 35s 对慢模型偏紧。提升至 45s（与 maxDuration=60 配合，正常 fetch 3-8s+生成≤40s+落库2s≈50s 安全；
+// 仅当 fetch 触顶 20s 最坏场景才临界，属罕见）。
+const LLM_TIMEOUT_MS = 45000;
 
 function withTimeout<T>(
   promise: Promise<T>,
@@ -149,9 +150,10 @@ async function regenerateAnalysis(ticker: string): Promise<StockAnalysis> {
     const controller = new AbortController();
     const llmPromise = chatCompletion(messages, {
       temperature: 0.4,
-      // 叙述性分析无需过长：限制 maxTokens 缩短 qwen 等慢模型生成时间，
-      // 避免在 LLM_TIMEOUT_MS(35s) 内未完成。默认 3072 对免费共享算力的慢模型偏长易超时。
-      maxTokens: 2000,
+      // 叙述性分析无需过长：限制 maxTokens 缩短 qwen 等免费共享算力慢模型的生成时间。
+      // 免费 qwen 实测约 20-35 tokens/s，35s 仅能生成 ~1000 tokens，故压到 1000 确保在窗口内完成。
+      // 配合下方 LLM_TIMEOUT_MS=45s，正常 fetch(3-8s)+生成(≤35s)+落库(2s)≈50s < maxDuration=60s。
+      maxTokens: 1000,
       signal: controller.signal,
     });
     const resp = await withTimeout(

@@ -313,7 +313,16 @@ async function callProviderWithTimeout(
     });
   } catch (err) {
     // 区分：子超时 vs 外部 signal 触发 vs 其他错误
-    if (controller.signal.aborted && !options.signal?.aborted) {
+    if (controller.signal.aborted) {
+      // 外部调用方中止（analyze 路由上游超时 / 用户取消等）：给出友好提示而非原始 AbortError
+      if (options.signal?.aborted) {
+        throw new Error(
+          `${provider.name} 调用超时：上游未在限定时间内返回（请求被中止）。` +
+            `qwen 等免费共享算力模型生成较慢，请尝试更低输出长度、更快的模型，` +
+            `或将 Vercel 函数区域设近新加坡（sin1/hkg1）降低延迟。`
+        );
+      }
+      // 内部 PROVIDER_TIMEOUT_MS 触发
       if (CN_PROVIDER_IDS.includes(provider.id) || isChinaHost(provider.endpoint)) {
         throw new Error(
           `${provider.name} 单次调用超时 (${PROVIDER_TIMEOUT_MS}ms)：该模型 API 位于中国大陆，` +
