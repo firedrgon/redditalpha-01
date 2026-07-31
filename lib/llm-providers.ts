@@ -91,9 +91,6 @@ export const QWEN_PROVIDER_IDS = [
   "qwen-2",
   "qwen-3",
   "qwen-4",
-  "qwen-5",
-  "qwen-6",
-  "qwen-7",
 ] as const;
 
 /** Kimi（月之暗面）系列 provider 共享同一 API Key（LLM_API_KEY_KIMI / MOONSHOT_API_KEY） */
@@ -242,18 +239,18 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   {
     id: "qwen-1",
     contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Flash (2026-07-15)",
+    name: "阿里云百炼 · Qwen3.6-Flash",
     endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-flash-2026-07-15",
+    model: "qwen3.6-flash",
     free: true,
     needsKey: true,
     signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
-      "百炼国际站 Qwen3.7-Flash 快照版：快、便宜，免费额度用尽会自动切换下一个 Qwen 模型再兜底其他家族。与其他通义配置共用 Key",
+      "百炼国际站 Qwen3.6-Flash：快、便宜，免费额度用尽会自动切换下一个模型再兜底其他家族。与其他通义配置共用 Key",
     protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
   },
   {
     id: "qwen-2",
@@ -269,7 +266,7 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     description:
       "百炼国际站 Qwen3.7-Plus：均衡型，质量优于 Flash，免费额度与其他 Qwen 模型相互独立。与其他通义配置共用 Key",
     protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
   },
   {
     id: "qwen-3",
@@ -285,71 +282,23 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     description:
       "百炼国际站 Qwen3.7-Max（最新稳定版）：旗舰质量，适合深度研报，免费额度独立。与其他通义配置共用 Key",
     protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
   },
   {
     id: "qwen-4",
     contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Max (2026-05-17)",
+    name: "阿里云百炼 · DeepSeek-V4-Flash (第三方)",
     endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-max-2026-05-17",
+    model: "deepseek-v4-flash",
     free: true,
     needsKey: true,
     signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
-      "百炼国际站 Qwen3.7-Max 早期快照（2026-05-17）：Max 系列额度兜底替补。与其他通义配置共用 Key",
+      "百炼国际站第三方模型 DeepSeek-V4-Flash：与 Qwen 共用国际站 Key 与端点，免费额度独立，适合做 Qwen 额度用尽后的同家族兜底",
     protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
-  },
-  {
-    id: "qwen-5",
-    contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Max (2026-05-20)",
-    endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-max-2026-05-20",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://www.alibabacloud.com/product/model-studio",
-    docsUrl:
-      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
-    description:
-      "百炼国际站 Qwen3.7-Max 快照（2026-05-20）：Max 系列额度兜底替补。与其他通义配置共用 Key",
-    protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
-  },
-  {
-    id: "qwen-6",
-    contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Max (2026-06-08)",
-    endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-max-2026-06-08",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://www.alibabacloud.com/product/model-studio",
-    docsUrl:
-      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
-    description:
-      "百炼国际站 Qwen3.7-Max 快照（2026-06-08）：Max 系列额度兜底替补。与其他通义配置共用 Key",
-    protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
-  },
-  {
-    id: "qwen-7",
-    contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Max-Preview",
-    endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-max-preview",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://www.alibabacloud.com/product/model-studio",
-    docsUrl:
-      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
-    description:
-      "百炼国际站 Qwen3.7-Max-Preview（预览版）：最新能力尝鲜，免费额度独立。与其他通义配置共用 Key",
-    protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个 Qwen 模型）",
+    freeQuota: "百炼国际站免费额度（与 Qwen 同家族，共用 LLM_API_KEY_QWEN）",
   },
   {
     id: "kimi-1",
