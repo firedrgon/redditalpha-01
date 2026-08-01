@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
-import { runSignalsJob } from "@/lib/cron/signals-runner";
+import { runSignalsJob, collectScanTargets } from "@/lib/cron/signals-runner";
 import { runHotStocksJob } from "@/lib/cron/hot-stocks-runner";
 
 export const runtime = "nodejs";
@@ -57,18 +57,13 @@ async function handleCron(request: NextRequest) {
   }
 
   try {
-    // 所有收藏的股票都更新技术信号（不再限定 starred=true）
-    const allFavorites = await prisma.favorite.findMany({
-      select: { ticker: true, name: true },
-    });
-
-    const validFavorites = allFavorites.filter(
-      (f): f is { ticker: string; name: string | null } => f.ticker != null
-    );
+    // 扫描范围 = 所有收藏 ∪ 所有仍持仓(OPEN)的 ticker。
+    // 并上持仓是必需的：否则「已建仓但被取消收藏」的股票永远等不到卖出信号、无法平仓。
+    const targets = await collectScanTargets(prisma);
 
     const result = await runSignalsJob({
       jobName: JOB_NAME,
-      favorites: validFavorites,
+      favorites: targets,
     });
 
     // 顺带刷新同花顺热榜（best-effort，独立 CronRun 记录，失败不影响信号扫描）

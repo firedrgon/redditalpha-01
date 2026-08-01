@@ -1,0 +1,66 @@
+name: Signals Cron (backup trigger)
+
+# 为什么需要它：
+#   Vercel Hobby 计划的 Cron 不保证稳定触发（2026-07-30 起曾连续多日完全未触发，
+#   数据库里连 auth-fail 记录都没有，说明请求根本没发出）。
+#   GitHub Actions 作为独立、可观测的备用触发通道，确保卖出信号能按时平仓。
+#
+# 幂等性：signals 的状态机基于当前持仓状态决策（OUT+BUY→建仓 / HOLD+SELL→平仓），
+#   重复触发不会重复建仓或重复平仓，因此与 Vercel Cron 并存是安全的。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 配置两个 secret：
+#   PROD_URL     生产站点地址，例如 https://your-app.vercel.app（结尾不要带 /）
+#   CRON_SECRET  与 Vercel Production 环境变量 CRON_SECRET 完全一致
+
+on:
+  schedule:
+    # UTC 21:00（工作日）= 北京时间次日 05:00，美股收盘后
+    # 夏令时收盘 20:00 UTC → 收盘后 1 小时；冬令时收盘 21:00 UTC → 刚收盘
+    - cron: "0 21 * * 1-5"
+  workflow_dispatch: # 支持在 Actions 页面手动点击立即触发（用于验证）
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger signals scan
+        env:
+          PROD_URL: ${{ secrets.PROD_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PROD_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::缺少 secret：请配置 PROD_URL 与 CRON_SECRET"
+            exit 1
+          fi
+
+          echo "POST ${PROD_URL}/api/cron/signals"
+          http_code=$(curl -sS -o response.json -w "%{http_code}" \
+            -X POST "${PROD_URL}/api/cron/signals" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            --max-time 300)
+
+          echo "HTTP ${http_code}"
+          echo "----- response -----"
+          cat response.json || true
+          echo ""
+          echo "--------------------"
+
+          if [ "$http_code" = "401" ]; then
+            echo "::error::401 未授权 —— GitHub secret 里的 CRON_SECRET 与 Vercel Production 的值不一致"
+            exit 1
+          fi
+
+          if [ "$http_code" != "200" ]; then
+            echo "::error::信号扫描失败，HTTP ${http_code}"
+            exit 1
+          fi
+
+          # 业务层失败（HTTP 200 但 success 不为 true）也要让 workflow 变红
+          if ! grep -q '"success":true' response.json; then
+            echo "::error::接口返回 200 但业务执行失败，详见上面的响应内容"
+            exit 1
+          fi
+
+          echo "✅ 信号扫描完成"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
-import { runSignalsJob } from "@/lib/cron/signals-runner";
+import { runSignalsJob, collectScanTargets } from "@/lib/cron/signals-runner";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
 
 export const runtime = "nodejs";
@@ -43,14 +43,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 找所有收藏（公开化后不再按用户区分）
-  const allFavorites = await prisma.favorite.findMany({
-    select: { ticker: true, name: true },
-  });
-
-  const validFavorites = allFavorites.filter(
-    (f): f is { ticker: string; name: string | null } => !!f.ticker
-  );
+  // 扫描范围 = 所有收藏 ∪ 所有仍持仓(OPEN)的 ticker（与 cron 入口保持一致）。
+  // 并上持仓是必需的：否则「已建仓但被取消收藏」的股票永远等不到卖出信号、无法平仓。
+  const validFavorites = await collectScanTargets(prisma);
 
   if (validFavorites.length === 0) {
     return NextResponse.json({

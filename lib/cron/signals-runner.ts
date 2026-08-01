@@ -91,6 +91,44 @@ export interface ProcessResult {
   today?: SignalClass;
 }
 
+/** 扫描目标：ticker + 名称 */
+export interface ScanTarget {
+  ticker: string;
+  name: string | null;
+}
+
+/**
+ * 收集需要扫描的标的 = 所有收藏 ∪ 所有仍持仓(OPEN)的 ticker。
+ *
+ * 为什么要并上持仓：只扫收藏会漏掉「已建仓但之后被取消收藏」的股票，
+ * 那些仓位将永远等不到 SELL 信号、永远无法平仓（历史上出现过持仓一直挂着的情况）。
+ * 只要还持有，就必须持续监控它的卖出信号。
+ */
+export async function collectScanTargets(prisma: PrismaClient): Promise<ScanTarget[]> {
+  const [favorites, openPositions] = await Promise.all([
+    prisma.favorite.findMany({ select: { ticker: true, name: true } }),
+    prisma.position.findMany({
+      where: { status: "OPEN" },
+      select: { ticker: true, tickerName: true },
+      distinct: ["ticker"],
+    }),
+  ]);
+
+  const merged = new Map<string, ScanTarget>();
+  for (const f of favorites) {
+    if (!f.ticker) continue;
+    const key = f.ticker.toUpperCase();
+    if (!merged.has(key)) merged.set(key, { ticker: f.ticker, name: f.name ?? null });
+  }
+  for (const p of openPositions) {
+    if (!p.ticker) continue;
+    const key = p.ticker.toUpperCase();
+    // 收藏里已有则保留收藏的名称，避免覆盖
+    if (!merged.has(key)) merged.set(key, { ticker: p.ticker, name: p.tickerName ?? null });
+  }
+  return Array.from(merged.values());
+}
+
 /** 3 档信号分类 */
 function classifySignal(s: Signal): SignalClass {
   if (s === "strong_buy" || s === "buy") return "BUY";
