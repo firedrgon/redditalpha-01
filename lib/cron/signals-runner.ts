@@ -163,6 +163,7 @@ async function writeNeutralAlert(
 ): Promise<void> {
   await prisma.signalAlert.create({
     data: {
+      userId: ANON_USER_ID,
       ticker,
       tickerName: name || undefined,
       signalType: "neutral",
@@ -206,6 +207,7 @@ async function writeSignalAlertAndNotify(
   try {
     const alert = await prisma.signalAlert.create({
       data: {
+        userId: ANON_USER_ID,
         ticker,
         tickerName: name || undefined,
         signalType,

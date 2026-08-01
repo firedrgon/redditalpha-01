@@ -136,6 +136,8 @@ model FinanceSnapshot {
 /// 信号告警（公开化后不再按用户隔离，全站共享同一份数据）。
 model SignalAlert {
   id              String   @id @default(cuid())
+  userId          String // 信号归属：公开资金池信号挂在匿名哨兵 __anon__ 下（NOT NULL + FK 到 User）
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker          String
   tickerName      String?
   signalType      String   @db.VarChar(20)
@@ -285,6 +287,7 @@ model User {
   favorites     Favorite[]
   positions     Position[]
   notifications Notification[]
+  signalAlerts  SignalAlert[]
 }
 
 model Account {
@@ -332,7 +335,9 @@ model Notification {
   title     String
   body      String?
   url       String?  // 点击跳转，如 /signals?ticker=AAPL
+  link      String?  // 历史兼容列（prod 已有，代码现用 url）
   ticker    String?
+  tickerName String? // 历史兼容列（prod 已有）
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 

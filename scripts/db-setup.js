@@ -52,6 +52,14 @@ function main() {
   } catch (err) {
     console.warn("⚠️  anon migration failed (non-fatal, continuing):", err.message);
   }
+
+  // 确保匿名哨兵用户 __anon__ 存在（公开池外键归属所必需，幂等，非致命）。
+  console.log("👤 Ensuring anon sentinel user exists...");
+  try {
+    execSync("node scripts/ensure-anon-user.js", { stdio: "inherit" });
+  } catch (err) {
+    console.warn("⚠️  ensure anon user failed (non-fatal, continuing):", err.message);
+  }
 }
 
 main();
