@@ -3800,6 +3800,8 @@ function StrategyForm({
 
 export default function Home() {
   const [activeSub, setActiveSub] = useState("wallstreetbets");
+  const [subMenuOpen, setSubMenuOpen] = useState(false);
+  const subMenuRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions">("subreddit");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
@@ -3855,6 +3857,17 @@ export default function Home() {
     } catch (err) {
       console.warn("[quote] 加载失败:", err);
     }
+  }, []);
+
+  // 板块下拉菜单：点击外部关闭
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (subMenuRef.current && !subMenuRef.current.contains(e.target as Node)) {
+        setSubMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
   // 初始化：从后端 API 读取收藏（公开数据，所有访客共享）
@@ -4510,26 +4523,65 @@ export default function Home() {
               持仓
             </button>
             <div className="mx-1 self-center text-zinc-700">|</div>
-            {SUBREDDITS.map((sub) => (
+            <div className="relative" ref={subMenuRef}>
               <button
-                key={sub.id}
-                onClick={() => {
-                  setActiveSub(sub.id);
-                  setView("subreddit");
-                  if (!data[sub.id]) {
-                    setLoading(true);
-                    fetchData(sub.id);
-                  }
-                }}
-                className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-                  view === "subreddit" && activeSub === sub.id
+                onClick={() => setSubMenuOpen((o) => !o)}
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                  view === "subreddit"
                     ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
                     : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent"
                 }`}
               >
-                {sub.label}
+                {SUBREDDITS.find((s) => s.id === activeSub)?.label ?? "板块"}
+                <svg
+                  viewBox="0 0 24 24"
+                  className={`h-3.5 w-3.5 transition-transform ${subMenuOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-            ))}
+              {subMenuOpen && (
+                <div className="absolute left-0 z-50 mt-2 w-48 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+                  {SUBREDDITS.map((sub) => (
+                    <button
+                      key={sub.id}
+                      onClick={() => {
+                        setActiveSub(sub.id);
+                        setView("subreddit");
+                        setSubMenuOpen(false);
+                        if (!data[sub.id]) {
+                          setLoading(true);
+                          fetchData(sub.id);
+                        }
+                      }}
+                      className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition ${
+                        activeSub === sub.id
+                          ? "bg-orange-500/15 text-orange-400"
+                          : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                      }`}
+                    >
+                      <span>{sub.full}</span>
+                      {activeSub === sub.id && (
+                        <svg
+                          viewBox="0 0 24 24"
+                          className="h-3.5 w-3.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2.5}
+                          aria-hidden="true"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </nav>
