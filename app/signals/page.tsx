@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { signIn, useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 
 type Signal = "strong_buy" | "buy" | "neutral" | "sell" | "strong_sell";
@@ -245,7 +244,6 @@ function LoadingSkeleton() {
 }
 
 export default function SignalsPage() {
-  const { data: session, status } = useSession();
   const [signals, setSignals] = useState<SignalAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -266,8 +264,6 @@ export default function SignalsPage() {
   }, [cooldownSec]);
 
   const fetchSignals = useCallback(async (fetchOffset = 0) => {
-    if (!session?.user) return;
-
     try {
       const url = `/api/signals?offset=${fetchOffset}&limit=20`;
       const res = await fetch(url, { cache: "no-store" });
@@ -290,13 +286,11 @@ export default function SignalsPage() {
     } finally {
       setLoading(false);
     }
-  }, [session?.user]);
+  }, []);
 
   useEffect(() => {
-    if (session?.user) {
-      fetchSignals(0);
-    }
-  }, [session?.user, fetchSignals]);
+    fetchSignals(0);
+  }, [fetchSignals]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -356,31 +350,6 @@ export default function SignalsPage() {
 
   const buyCount = signals.filter((s) => s.signalType === "buy").length;
   const sellCount = signals.filter((s) => s.signalType === "sell").length;
-
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-zinc-400">加载中...</div>
-      </div>
-    );
-  }
-
-  if (!session?.user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-white mb-2">请登录查看信号提醒</h2>
-          <button
-            type="button"
-            onClick={() => signIn()}
-            className="rounded-lg border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-400 transition-all hover:bg-orange-500/20"
-          >
-            登录
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>

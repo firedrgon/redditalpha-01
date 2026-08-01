@@ -17,6 +17,7 @@ import {
   GROQ_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
   QWEN_PROVIDER_IDS,
+  OPENROUTER_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
 } from "./llm-providers";
 import { saveCachedModels, getCachedModels } from "./db/llm-model-cache";
@@ -1017,6 +1018,42 @@ export async function refreshGroqModels(): Promise<{
   }
 
   return { updated, availableModels: availableSlugs, testResults };
+}
+
+/**
+ * 刷新 OpenRouter 模型。OpenRouter 使用官方 Free Models Router（openrouter/free），
+ * 由 OpenRouter 自动从可用免费模型中挑选，无需自行筛选/打分，因此没有可变的模型列表。
+ * 这里仅做连通性测试，将固定 router slug 作为可用模型返回。
+ */
+export async function refreshOpenRouterModels(): Promise<{
+  updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+  availableModels: string[];
+  testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+}> {
+  const config = await readConfig();
+  let key = "";
+  for (const id of OPENROUTER_PROVIDER_IDS) {
+    const s = config.providers[id];
+    if (s?.apiKey?.trim()) {
+      key = s.apiKey.trim();
+      break;
+    }
+  }
+  if (!key) return { updated: [], availableModels: [], testResults: [] };
+
+  const testResults: Array<{ providerId: string; working: boolean; error?: string }> = [];
+  for (const providerId of OPENROUTER_PROVIDER_IDS) {
+    const provider = LLM_PROVIDERS.find((p) => p.id === providerId);
+    if (!provider || !provider.model) continue;
+    try {
+      const result = await testProvider(providerId);
+      testResults.push({ providerId, working: result.ok, error: result.error });
+    } catch (err) {
+      testResults.push({ providerId, working: false, error: String(err) });
+    }
+  }
+
+  return { updated: [], availableModels: ["openrouter/free"], testResults };
 }
 
 /**

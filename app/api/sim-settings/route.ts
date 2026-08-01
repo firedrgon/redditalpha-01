@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
-import { requireAdmin } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 
@@ -24,11 +23,8 @@ async function readCapital(
   }
 }
 
-/** GET /api/sim-settings：读取美股/ A 股每笔虚拟本金（admin） */
+/** GET /api/sim-settings：读取美股/ A 股每笔虚拟本金（公开，无需登录） */
 export async function GET() {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json({ cn: DEFAULT_CN, us: DEFAULT_US });
@@ -47,11 +43,8 @@ interface PatchBody {
   us?: number | string;
 }
 
-/** PATCH /api/sim-settings：更新每笔虚拟本金（admin） */
+/** PATCH /api/sim-settings：更新每笔虚拟本金（公开，无需登录） */
 export async function PATCH(request: NextRequest) {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json({ error: "数据库未配置" }, { status: 500 });

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
-import { requireAdmin } from "@/lib/auth-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +12,6 @@ export const dynamic = "force-dynamic";
  * 使用方式：部署后访问 /api/db-sync
  */
 export async function GET() {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json(

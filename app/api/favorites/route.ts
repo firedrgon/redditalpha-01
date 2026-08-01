@@ -7,9 +7,10 @@ import {
   updateFavorite,
   setPinned,
   setStarred,
+  clearAnalysis,
+  clearFinanceSnapshot,
 } from "@/lib/db";
 import { detectMarket, normalizeCNTicker } from "@/lib/market";
-import { requireUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,29 +26,16 @@ function normalizeTicker(raw: string): string {
 }
 
 export async function GET(request: NextRequest) {
-  const { user } = await requireUser();
   const { searchParams } = new URL(request.url);
   const ticker = searchParams.get("ticker");
 
-  if (!user) {
-    if (ticker) {
-      const normalized = normalizeTicker(ticker);
-      return NextResponse.json({
-        ticker: normalized,
-        isFavorite: false,
-        requiresAuth: true,
-      });
-    }
-    return NextResponse.json({ favorites: [], requiresAuth: true });
-  }
-
   if (ticker) {
     const normalized = normalizeTicker(ticker);
-    const fav = await isFavorite(user.id, normalized);
+    const fav = await isFavorite(normalized);
     return NextResponse.json({ ticker: normalized, isFavorite: fav });
   }
 
-  const favorites = await listFavorites(user.id);
+  const favorites = await listFavorites();
   return NextResponse.json({ favorites });
 }
 
@@ -59,9 +47,6 @@ interface AddBody {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response } = await requireUser();
-  if (response || !user) return response;
-
   const body = (await request.json().catch(() => ({}))) as AddBody;
   const ticker = normalizeTicker(body.ticker ?? "");
 
@@ -69,7 +54,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "缺少 ticker" }, { status: 400 });
   }
 
-  const fav = await addFavorite(user.id, ticker, {
+  const fav = await addFavorite(ticker, {
     name: body.name,
     note: body.note,
     tags: body.tags,
@@ -88,9 +73,6 @@ interface PatchBody {
 }
 
 export async function PATCH(request: NextRequest) {
-  const { user, response } = await requireUser();
-  if (response || !user) return response;
-
   const body = (await request.json().catch(() => ({}))) as PatchBody;
   const ticker = normalizeTicker(body.ticker ?? "");
 
@@ -101,7 +83,7 @@ export async function PATCH(request: NextRequest) {
   // 置顶 / 取消置顶走独立逻辑（不影响 name/note/tags）
   if (typeof body.pinned === "boolean") {
     try {
-      const fav = await setPinned(user.id, ticker, body.pinned);
+      const fav = await setPinned(ticker, body.pinned);
       return NextResponse.json({ favorite: fav });
     } catch (err) {
       return NextResponse.json(
@@ -114,7 +96,7 @@ export async function PATCH(request: NextRequest) {
   // 关注 / 取消关注走独立逻辑
   if (typeof body.starred === "boolean") {
     try {
-      const fav = await setStarred(user.id, ticker, body.starred);
+      const fav = await setStarred(ticker, body.starred);
       return NextResponse.json({ favorite: fav });
     } catch (err) {
       return NextResponse.json(
@@ -125,7 +107,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const fav = await updateFavorite(user.id, ticker, {
+    const fav = await updateFavorite(ticker, {
       name: body.name,
       note: body.note,
       tags: body.tags,
@@ -140,9 +122,6 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { user, response } = await requireUser();
-  if (response || !user) return response;
-
   const { searchParams } = new URL(request.url);
   const rawTicker = searchParams.get("ticker");
 
@@ -160,7 +139,21 @@ export async function DELETE(request: NextRequest) {
   try {
     let totalDeleted = 0;
     for (const t of candidates) {
-      totalDeleted += await removeFavorite(user.id, t);
+      totalDeleted += await removeFavorite(t);
+    }
+
+    // 同步清除该 ticker 的分析记录和财务快照
+    for (const t of candidates) {
+      try {
+        await clearAnalysis(t);
+      } catch (cacheErr) {
+        console.error("[favorites] clearAnalysis failed:", cacheErr);
+      }
+      try {
+        await clearFinanceSnapshot(t);
+      } catch (snapshotErr) {
+        console.error("[favorites] clearFinanceSnapshot failed:", snapshotErr);
+      }
     }
 
     return NextResponse.json({

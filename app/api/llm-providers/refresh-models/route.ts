@@ -1,8 +1,6 @@
 /**
- * 定时刷新 Groq / Gemini 可用的免费大模型
+ * 定时刷新 OpenRouter / Groq / Gemini 可用的免费大模型
  *
- * OpenRouter 固定使用官方 Free Models Router（openrouter/free），由 OpenRouter
- * 自动选模型，无需动态刷新；故此处仅刷新 Groq / Gemini。
  * 调用各平台的 /models 接口获取最新模型列表，
  * 按评分排序取前 N 个，自动替换 provider 的 model slug，
  * 并测试每个 provider 的可用性。
@@ -12,11 +10,7 @@
  *   2. 手动 POST /api/llm-providers/refresh-models
  */
 import { NextResponse } from "next/server";
-import { refreshGroqModels, refreshGeminiModels } from "@/lib/llm";
-import { requireAdmin } from "@/lib/auth-guards";
-import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
-
-const JOB_NAME = "refresh-llm-models";
+import { refreshOpenRouterModels, refreshGroqModels, refreshGeminiModels } from "@/lib/llm";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -34,12 +28,14 @@ export async function POST() {
 }
 
 async function runRefresh() {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
-  const runId = await startCronRun({ jobName: JOB_NAME });
   const now = Date.now();
   const errors: string[] = [];
+
+  let openrouter: {
+    updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
+    availableModels: string[];
+    testResults: Array<{ providerId: string; working: boolean; error?: string }>;
+  } = { updated: [], availableModels: [], testResults: [] };
 
   let groq: {
     updated: Array<{ providerId: string; oldModel: string; newModel: string }>;
@@ -54,6 +50,14 @@ async function runRefresh() {
   } = { updated: [], availableModels: [], testResults: [] };
 
   try {
+    openrouter = await refreshOpenRouterModels();
+  } catch (err) {
+    errors.push(
+      `OpenRouter: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  try {
     groq = await refreshGroqModels();
   } catch (err) {
     errors.push(`Groq: ${err instanceof Error ? err.message : String(err)}`);
@@ -65,22 +69,17 @@ async function runRefresh() {
     errors.push(`Gemini: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  const ok = errors.length === 0;
-  await finishCronRun(runId, {
-    status: ok ? "success" : "error",
-    total: 2,
-    processed: 2 - errors.length,
-    skipped: 0,
-    errorCount: errors.length,
-    errors: errors.map((e) => ({ ticker: "-", error: e })),
-    errorMessage: ok ? undefined : errors.join("; "),
-  });
-
   return NextResponse.json({
-    ok,
+    ok: errors.length === 0,
     updatedAt: now,
     errors,
     summary: {
+      openrouter: {
+        availableCount: openrouter.availableModels.length,
+        updatedCount: openrouter.updated.length,
+        testedCount: openrouter.testResults.length,
+        workingCount: openrouter.testResults.filter((r) => r.working).length,
+      },
       groq: {
         availableCount: groq.availableModels.length,
         updatedCount: groq.updated.length,
@@ -94,6 +93,7 @@ async function runRefresh() {
         workingCount: gemini.testResults.filter((r) => r.working).length,
       },
     },
+    openrouter,
     groq,
     gemini,
   });

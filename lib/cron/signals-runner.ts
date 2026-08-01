@@ -44,7 +44,6 @@ import { getPrisma } from "@/lib/db/prisma";
 import { fetchTradingViewTechnicals, fetchCNTradingViewTechnicals, fetchChipSituation, SIGNAL_LABELS } from "@/lib/technical";
 import { detectMarket, type Market } from "@/lib/market";
 import { upsertTechnicalSnapshot } from "@/lib/db/technical-snapshot";
-import { createSignalNotification } from "@/lib/notify";
 import {
   openPosition,
   closePosition,
@@ -98,7 +97,6 @@ function classifySignal(s: Signal): SignalClass {
 }
 
 export interface StarredFavorite {
-  userId: string;
   ticker: string;
   name: string | null;
 }
@@ -116,18 +114,16 @@ export interface StarredFavorite {
  */
 export async function getCurrentState(
   prisma: PrismaClient,
-  userId: string,
   ticker: string
 ): Promise<PositionState> {
   const openPosition = await prisma.position.findFirst({
-    where: { userId, ticker, status: "OPEN" },
+    where: { ticker, status: "OPEN" },
     select: { id: true },
   });
   if (openPosition) return "HOLD";
 
   const last = await prisma.signalAlert.findFirst({
     where: {
-      userId,
       ticker,
       signalType: { in: ["buy", "sell"] },
     },
@@ -159,14 +155,12 @@ function buildAlertNote(signals: TechnicalSignals): string {
 /** 写一条 neutral 占位 alert（非美股 / 拉取失败）。不动 state。 */
 async function writeNeutralAlert(
   prisma: PrismaClient,
-  userId: string,
   ticker: string,
   name: string | null,
   reason: string
 ): Promise<void> {
   await prisma.signalAlert.create({
     data: {
-      userId,
       ticker,
       tickerName: name || undefined,
       signalType: "neutral",
@@ -187,7 +181,6 @@ async function writeNeutralAlert(
 async function writeSignalAlertAndNotify(
   prisma: PrismaClient,
   args: {
-    userId: string;
     ticker: string;
     name: string | null;
     signalType: "buy" | "sell";
@@ -201,7 +194,7 @@ async function writeSignalAlertAndNotify(
     market: AssetMarket;
   }
 ): Promise<{ ok: boolean; error?: string }> {
-  const { userId, ticker, name, signalType, overall, oscillators, movingAverages, chipDesc, state, phase, market } = args;
+  const { ticker, name, signalType, overall, oscillators, movingAverages, chipDesc, state, phase, market } = args;
   const actionLabel = phase === "enter" ? "建仓" : "平仓";
   const note =
     `${actionLabel}信号（${state} → ${phase === "enter" ? "HOLD" : "OUT"}）; ` +
@@ -211,7 +204,6 @@ async function writeSignalAlertAndNotify(
   try {
     const alert = await prisma.signalAlert.create({
       data: {
-        userId,
         ticker,
         tickerName: name || undefined,
         signalType,
@@ -231,7 +223,6 @@ async function writeSignalAlertAndNotify(
       if (price != null) {
         const capital = await getCapitalForMarket(prisma, market);
         await openPosition(prisma, {
-          userId,
           ticker,
           tickerName: name,
           price,
@@ -248,7 +239,6 @@ async function writeSignalAlertAndNotify(
       }
     } else if (phase === "exit") {
       await closePosition(prisma, {
-        userId,
         ticker,
         price,
         alertId: alert.id,
@@ -261,20 +251,7 @@ async function writeSignalAlertAndNotify(
       }
     }
 
-    // 站内通知 + 外部投递（异常内部消化）
-    await createSignalNotification(prisma, {
-      userId,
-      ticker,
-      tickerName: name,
-      signalType,
-      overall,
-      oscillators,
-      movingAverages,
-      chipDesc,
-      state,
-      phase,
-    });
-    console.log(`[signals-runner] ${ticker} ${actionLabel} alert+通知写入, signal=${overall}`);
+    console.log(`[signals-runner] ${ticker} ${actionLabel} alert 写入, signal=${overall}`);
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -288,7 +265,6 @@ async function writeSignalAlertAndNotify(
  */
 export async function processStarredStock(
   prisma: PrismaClient,
-  userId: string,
   ticker: string,
   name: string | null
 ): Promise<ProcessResult> {
@@ -326,7 +302,6 @@ export async function processStarredStock(
       try {
         await writeNeutralAlert(
           prisma,
-          userId,
           ticker,
           name,
           chipDesc
@@ -351,7 +326,7 @@ export async function processStarredStock(
     });
 
     const today = classifySignal(cntv.overall);
-    const state = await getCurrentState(prisma, userId, ticker);
+    const state = await getCurrentState(prisma, ticker);
     const phase = decide(state, today);
 
     console.log(
@@ -362,7 +337,6 @@ export async function processStarredStock(
     if (phase === "enter" || phase === "exit") {
       const signalType: "buy" | "sell" = phase === "enter" ? "buy" : "sell";
       const r = await writeSignalAlertAndNotify(prisma, {
-        userId,
         ticker,
         name,
         signalType,
@@ -432,7 +406,6 @@ export async function processStarredStock(
     try {
       await writeNeutralAlert(
         prisma,
-        userId,
         ticker,
         name,
         `TradingView 拉取失败，今日已检查: ${reason}`
@@ -451,7 +424,7 @@ export async function processStarredStock(
 
   // 4) 应用状态机决策表
   const today = classifySignal(signals.overall);
-  const state = await getCurrentState(prisma, userId, ticker);
+  const state = await getCurrentState(prisma, ticker);
   const phase = decide(state, today);
 
   console.log(
@@ -473,7 +446,6 @@ export async function processStarredStock(
   if (phase === "enter" || phase === "exit") {
     const signalType: "buy" | "sell" = phase === "enter" ? "buy" : "sell";
     const r = await writeSignalAlertAndNotify(prisma, {
-      userId,
       ticker,
       name,
       signalType,
@@ -565,7 +537,7 @@ export async function runSignalsJob({
 
     const results = await Promise.all(
       favorites.map((fav) =>
-        processStarredStock(prisma, fav.userId, fav.ticker, fav.name)
+        processStarredStock(prisma, fav.ticker, fav.name)
       )
     );
 

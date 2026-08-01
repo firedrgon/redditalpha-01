@@ -59,12 +59,11 @@ async function handleCron(request: NextRequest) {
   try {
     // 所有收藏的股票都更新技术信号（不再限定 starred=true）
     const allFavorites = await prisma.favorite.findMany({
-      select: { userId: true, ticker: true, name: true },
+      select: { ticker: true, name: true },
     });
 
     const validFavorites = allFavorites.filter(
-      (f): f is { userId: string; ticker: string; name: string | null } =>
-        f.userId !== null
+      (f): f is { ticker: string; name: string | null } => f.ticker != null
     );
 
     const result = await runSignalsJob({

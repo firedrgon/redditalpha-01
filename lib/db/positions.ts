@@ -61,7 +61,6 @@ export async function fetchSignalPrice(ticker: string): Promise<number | null> {
 }
 
 export interface OpenPositionArgs {
-  userId: string;
   ticker: string;
   tickerName: string | null;
   price: number;
@@ -76,12 +75,11 @@ export interface OpenPositionArgs {
 /** 建仓：创建一个 OPEN 持仓 */
 export async function openPosition(
   prisma: PrismaClient,
-  { userId, ticker, tickerName, price, alertId, assetType, currency, capital }: OpenPositionArgs
+  { ticker, tickerName, price, alertId, assetType, currency, capital }: OpenPositionArgs
 ) {
   const shares = price > 0 ? capital / price : 0;
   return prisma.position.create({
     data: {
-      userId,
       ticker,
       tickerName: tickerName || undefined,
       assetType,
@@ -96,7 +94,6 @@ export async function openPosition(
 }
 
 export interface ClosePositionArgs {
-  userId: string;
   ticker: string;
   /** 平仓价；为 null 时仅关闭持仓、盈亏留空 */
   price: number | null;
@@ -106,10 +103,10 @@ export interface ClosePositionArgs {
 /** 平仓：关闭最新 OPEN 持仓并算 pnl/pnlPct/holdDays */
 export async function closePosition(
   prisma: PrismaClient,
-  { userId, ticker, price, alertId }: ClosePositionArgs
+  { ticker, price, alertId }: ClosePositionArgs
 ) {
   const open = await prisma.position.findFirst({
-    where: { userId, ticker, status: "OPEN" },
+    where: { ticker, status: "OPEN" },
     orderBy: { entryAt: "desc" },
   });
   if (!open) return null;

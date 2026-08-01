@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { signIn, useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 
 type CronRunStatus = "running" | "success" | "error";
@@ -109,7 +108,6 @@ function statusBadge(status: CronRunStatus) {
 }
 
 export default function AdminCronPage() {
-  const { data: session, status } = useSession();
   const [runs, setRuns] = useState<CronRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -138,10 +136,8 @@ export default function AdminCronPage() {
   }, []);
 
   useEffect(() => {
-    if (session?.user && (session.user as { isAdmin?: boolean }).isAdmin) {
-      load();
-    }
-  }, [session, load]);
+    load();
+  }, [load]);
 
   // 相对时间每 30s 刷新一次
   useEffect(() => {
@@ -223,41 +219,6 @@ export default function AdminCronPage() {
 
   const health: "ok" | "error" =
     totals.errors > 0 ? "error" : "ok";
-
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-zinc-400">
-        加载中…
-      </div>
-    );
-  }
-
-  if (!session?.user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-white">请登录</h2>
-          <button
-            onClick={() => signIn()}
-            className="mt-4 rounded-lg border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm font-medium text-orange-400 hover:bg-orange-500/20"
-          >
-            登录
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!(session.user as { isAdmin?: boolean }).isAdmin) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center text-zinc-400">
-          <h2 className="text-xl font-bold text-white">无权限</h2>
-          <p className="mt-2 text-sm">仅管理员可访问此页面</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>

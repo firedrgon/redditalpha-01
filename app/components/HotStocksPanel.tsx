@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession, signIn } from "next-auth/react";
 
 interface HotStock {
   id: string;
@@ -247,7 +246,7 @@ function LoadingSkeleton() {
 interface HotStocksPanelProps {
   /** 布局：grid（首页多列）| list（/hot 单列）。默认 grid */
   variant?: "grid" | "list";
-  /** 复用宿主页已有的收藏系统（首页）；不传则组件自带 next-auth 自包含收藏 */
+  /** 复用宿主页已有的收藏系统（首页）；不传则组件自带公开自包含收藏 */
   isFavorite?: (ticker: string) => boolean;
   toggleFavorite?: (ticker: string, name?: string | null) => void;
 }
@@ -255,14 +254,13 @@ interface HotStocksPanelProps {
 /**
  * A 股热榜面板（自包含：自行 fetch /api/hot-stocks）。
  * - 首页使用时传入 isFavorite / toggleFavorite，收藏状态与首页「收藏」标签实时同步。
- * - /hot 等独立页不传时，组件用 next-auth 自行判定登录并调用 /api/favorites。
+ * - /hot 等独立页不传时，组件自行调用 /api/favorites（公开化后无需登录）。
  */
 export default function HotStocksPanel({
   variant = "grid",
   isFavorite,
   toggleFavorite,
 }: HotStocksPanelProps) {
-  const { status } = useSession();
   const [stocks, setStocks] = useState<HotStock[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -293,9 +291,9 @@ export default function HotStocksPanel({
     }
   }, []);
 
-  // 自包含模式：登录后拉取已收藏集合
+  // 自包含模式：拉取已收藏集合（公开化后无需登录）
   useEffect(() => {
-    if (toggleFavorite || status !== "authenticated") return;
+    if (toggleFavorite) return;
     let cancelled = false;
     fetch("/api/favorites", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -312,7 +310,7 @@ export default function HotStocksPanel({
     return () => {
       cancelled = true;
     };
-  }, [toggleFavorite, status]);
+  }, [toggleFavorite]);
 
   useEffect(() => {
     load();
@@ -348,11 +346,7 @@ export default function HotStocksPanel({
         toggleFavorite(tk, stock.name);
         return;
       }
-      // 自包含模式
-      if (status !== "authenticated") {
-        signIn();
-        return;
-      }
+      // 自包含模式（公开化后无需登录，直接调用收藏接口）
       const willAdd = !localFav.has(upper);
       setLocalFav((prev) => {
         const next = new Set(prev);
@@ -390,7 +384,7 @@ export default function HotStocksPanel({
         });
       }
     },
-    [toggleFavorite, status, localFav]
+    [toggleFavorite, localFav]
   );
 
   return (

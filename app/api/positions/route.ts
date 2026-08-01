@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth-guards";
 import { getPrisma } from "@/lib/db/prisma";
 import { fetchQuotes } from "@/lib/quote";
 
@@ -16,9 +15,6 @@ const EMPTY_SUMMARY = {
 };
 
 export async function GET() {
-  const { user, response } = await requireUser();
-  if (response) return response;
-
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json({ open: [], closed: [], summary: EMPTY_SUMMARY });
@@ -26,11 +22,11 @@ export async function GET() {
 
   const [open, closed] = await Promise.all([
     prisma.position.findMany({
-      where: { userId: user.id, status: "OPEN" },
+      where: { status: "OPEN" },
       orderBy: { entryAt: "desc" },
     }),
     prisma.position.findMany({
-      where: { userId: user.id, status: "CLOSED" },
+      where: { status: "CLOSED" },
       orderBy: { exitAt: "desc" },
       take: 100,
     }),

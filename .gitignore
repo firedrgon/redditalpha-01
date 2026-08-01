@@ -58,3 +58,33 @@ next-env.d.ts
 # WorkBuddy 本地数据（memory / skills / plan，不入仓）
 .workbuddy-ai/
 .workbuddy/
+
+# 临时构建/提交日志与调试产物（不入仓）
+*.log
+g_*.txt
+tsc*.log
+staged.txt
+commit.log
+push.log
+build.log
+gen.log
+git_op*.log
+git_op*.txt
+build_clean.txt
+gen_clean.txt
+test-output.txt
+head.txt
+fullpage_*.png
+screenshot_*.png
+
+# 抓取的参考网页（原始下载，不入仓）
+reference/
+
+# 本地清理中转目录（安全删除落盘处，不入仓）
+.trash/
+
+# 应用生成的报告产物（运行期输出，不入仓）
+reports/
+
+# pnpm/工具临时目录
+_tmp*/

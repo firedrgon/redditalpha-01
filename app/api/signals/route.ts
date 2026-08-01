@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
-import { requireUser } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const { user, response } = await requireUser();
-  if (response || !user) return response;
-
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json({ signals: [], error: "数据库不可用" }, { status: 500 });
@@ -20,7 +16,7 @@ export async function GET(request: NextRequest) {
   const offset = parseInt(searchParams.get("offset") || "0");
 
   try {
-    const where: Record<string, unknown> = { userId: user.id };
+    const where: Record<string, unknown> = {};
     if (ticker) {
       where.ticker = ticker.toUpperCase();
     }
@@ -50,9 +46,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { user, response } = await requireUser();
-  if (response || !user) return response;
-
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json({ error: "数据库不可用" }, { status: 500 });
@@ -67,7 +60,7 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const result = await prisma.signalAlert.deleteMany({
-      where: { id, userId: user.id },
+      where: { id },
     });
 
     return NextResponse.json({ success: true, deleted: result.count });

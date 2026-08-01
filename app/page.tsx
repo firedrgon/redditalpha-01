@@ -3,8 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { signIn, signOut, useSession } from "next-auth/react";
-import NotificationBell from "@/app/components/NotificationBell";
 import HotStocksPanel from "@/app/components/HotStocksPanel";
 import PositionsPanel from "@/app/components/PositionsPanel";
 import Link from "next/link";
@@ -3798,169 +3796,8 @@ function StrategyForm({
   );
 }
 
-function AuthModal({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    try {
-      const normalizedEmail = email.trim().toLowerCase();
-      if (mode === "register") {
-        const res = await fetch("/api/auth/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: normalizedEmail,
-            password,
-            name: name.trim() || undefined,
-          }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setError(typeof json.error === "string" ? json.error : "注册失败");
-          return;
-        }
-      }
-
-      const result = await signIn("credentials", {
-        email: normalizedEmail,
-        password,
-        redirect: false,
-      });
-      if (result?.error) {
-        setError(mode === "register" ? "注册成功但登录失败，请手动登录" : "邮箱或密码错误");
-        return;
-      }
-      onClose();
-    } catch {
-      setError("请求失败，请稍后重试");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute top-3 right-3 rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-          aria-label="关闭"
-        >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-
-        <div className="mb-5">
-          <h3 className="text-xl font-bold text-white">
-            {mode === "login" ? "登录" : "注册"}
-          </h3>
-          <p className="mt-1 text-xs text-zinc-500">
-            {mode === "login"
-              ? "使用邮箱和密码登录你的账号"
-              : "创建账号以保存个人收藏和设置"}
-          </p>
-        </div>
-
-        <div className="mb-4 flex gap-1 border-b border-zinc-800">
-          {([
-            { id: "login" as const, label: "登录" },
-            { id: "register" as const, label: "注册" },
-          ]).map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => {
-                setMode(tab.id);
-                setError(null);
-              }}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                mode === tab.id
-                  ? "text-orange-400 border-orange-400"
-                  : "text-zinc-400 border-transparent hover:text-zinc-200"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === "register" && (
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">昵称（可选）</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
-                placeholder="显示名称"
-                autoComplete="name"
-              />
-            </div>
-          )}
-          <div>
-            <label className="mb-1 block text-xs text-zinc-400">邮箱</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-zinc-400">密码</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
-              placeholder={mode === "register" ? "至少 6 位" : "请输入密码"}
-              autoComplete={mode === "register" ? "new-password" : "current-password"}
-            />
-          </div>
-
-          {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg border border-orange-500/40 bg-orange-500/20 px-4 py-2 text-sm font-medium text-orange-300 transition-all hover:bg-orange-500/30 disabled:opacity-50"
-          >
-            {loading ? "处理中..." : mode === "login" ? "登录" : "注册并登录"}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
 
 export default function Home() {
-  const { data: session, status: sessionStatus } = useSession();
   const [activeSub, setActiveSub] = useState("wallstreetbets");
   const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions">("subreddit");
   const [data, setData] = useState<Record<string, SubredditData>>({});
@@ -3989,7 +3826,6 @@ export default function Home() {
   const [favFilter, setFavFilter] = useState<"all" | "starred" | "pinned">("all");
   // 市场筛选：全部 / 美股 / A股
   const [marketFilter, setMarketFilter] = useState<"all" | "us" | "cn">("all");
-  const [showAuth, setShowAuth] = useState(false);
   const [signalCount, setSignalCount] = useState(0);
   // ticker -> 最新技术信号快照（来自 /api/technical-snapshots）
   const [signalSnapshots, setSignalSnapshots] = useState<
@@ -3999,8 +3835,6 @@ export default function Home() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   // 正在刷新的 ticker（用于 UI 节流，避免同一 ticker 重复请求）
   const refreshingRef = useRef<Set<string>>(new Set());
-  const isAuthenticated = sessionStatus === "authenticated";
-  const isAdmin = !!session?.user?.isAdmin;
 
   // 批量拉取行情（合并进 quotes，不覆盖已有）
   const loadQuotes = useCallback(async (tickers: string[]) => {
@@ -4022,22 +3856,10 @@ export default function Home() {
     }
   }, []);
 
-  const promptSignIn = useCallback(() => {
-    setShowAuth(true);
-  }, []);
-
-  // 初始化：从后端 API 读取收藏
+  // 初始化：从后端 API 读取收藏（公开数据，所有访客共享）
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (sessionStatus === "loading") return;
-      if (sessionStatus !== "authenticated") {
-        if (!cancelled) {
-          setFavorites([]);
-          setSignalCount(0);
-        }
-        return;
-      }
       try {
         const [favRes, sigRes] = await Promise.all([
           fetch("/api/favorites"),
@@ -4065,11 +3887,11 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [sessionStatus]);
+  }, []);
 
   // 批量检查研报是否已生成（收藏列表按钮状态用，含 A 股）
   useEffect(() => {
-    if (sessionStatus !== "authenticated" || favorites.length === 0) {
+    if (favorites.length === 0) {
       setReportsExist({});
       return;
     }
@@ -4093,7 +3915,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [favorites, sessionStatus]);
+  }, [favorites]);
 
   // 加载/刷新技术信号快照：每次收藏变化时批量取一次
   useEffect(() => {
@@ -4200,10 +4022,6 @@ export default function Home() {
 
   const addFavorite = useCallback(
     async (ticker: string, name?: string | null) => {
-      if (!isAuthenticated) {
-        promptSignIn();
-        return;
-      }
       const upper = ticker.trim().toUpperCase();
       if (!upper) return;
       setFavorites((prev) => {
@@ -4223,14 +4041,10 @@ export default function Home() {
         console.error("Failed to add favorite:", err);
       }
     },
-    [isAuthenticated, promptSignIn]
+    []
   );
 
   const removeFavorite = useCallback(async (ticker: string) => {
-    if (!isAuthenticated) {
-      promptSignIn();
-      return;
-    }
     const upper = ticker.trim().toUpperCase();
     // 乐观更新：先从列表移除
     setFavorites((prev) =>
@@ -4269,15 +4083,11 @@ export default function Home() {
         /* ignore */
       }
     }
-  }, [isAuthenticated, promptSignIn]);
+  }, []);
 
   // 置顶 / 取消置顶：先在前端更新状态并重排序，再异步同步到后端
   const togglePinFavorite = useCallback(
     async (ticker: string, pinned: boolean) => {
-      if (!isAuthenticated) {
-        promptSignIn();
-        return;
-      }
       const upper = ticker.trim().toUpperCase();
       setFavorites((prev) => {
         const updated = prev.map((f) =>
@@ -4304,16 +4114,12 @@ export default function Home() {
         );
       }
     },
-    [isAuthenticated, promptSignIn]
+    []
   );
 
   // 重点关注 / 取消关注：前端更新状态，异步同步后端
   const toggleStarFavorite = useCallback(
     async (ticker: string, starred: boolean) => {
-      if (!isAuthenticated) {
-        promptSignIn();
-        return;
-      }
       const upper = ticker.trim().toUpperCase();
       setFavorites((prev) => {
         const updated = prev.map((f) =>
@@ -4339,15 +4145,11 @@ export default function Home() {
         );
       }
     },
-    [isAuthenticated, promptSignIn]
+    []
   );
 
   const toggleFavorite = useCallback(
     async (ticker: string, name?: string | null) => {
-      if (!isAuthenticated) {
-        promptSignIn();
-        return;
-      }
       const upper = ticker.trim().toUpperCase();
       if (!upper) return;
       const willAdd = !favorites.some((f) => f.ticker.toUpperCase() === upper);
@@ -4397,7 +4199,7 @@ export default function Home() {
         }
       }
     },
-    [favorites, isAuthenticated, promptSignIn]
+    [favorites]
   );
 
   const handleToggleFromCard = useCallback(
@@ -4459,10 +4261,6 @@ export default function Home() {
   }, [manualTicker, manualName]);
 
   const handleManualAdd = useCallback(() => {
-    if (!isAuthenticated) {
-      promptSignIn();
-      return;
-    }
     const sym = manualTicker.trim().toUpperCase();
     if (!sym) return;
     addFavorite(sym, manualName.trim() || null);
@@ -4470,7 +4268,7 @@ export default function Home() {
     setManualName("");
     setValidateError(null);
     setValidateHint(null);
-  }, [isAuthenticated, manualTicker, manualName, addFavorite, promptSignIn]);
+  }, [manualTicker, manualName, addFavorite]);
 
   /**
    * 把 /api/tickers 返回的新鲜技术信号并入 signalSnapshots，
@@ -4614,9 +4412,8 @@ export default function Home() {
                   分享到 X
                 </button>
               )}
-              {isAdmin && (
-                <a
-                  href="/admin"
+              <a
+                href="/admin"
                   className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-orange-500/40 hover:text-orange-400"
                   title="定时任务监控"
                 >
@@ -4625,10 +4422,8 @@ export default function Home() {
                   </svg>
                   <span className="hidden sm:inline">监控</span>
                 </a>
-              )}
-              {isAdmin && (
-                <button
-                  onClick={() => setShowStrategies(true)}
+              <button
+                onClick={() => setShowStrategies(true)}
                   className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-orange-500/40 hover:text-orange-400"
                   title="分析策略管理"
                 >
@@ -4637,45 +4432,14 @@ export default function Home() {
                   </svg>
                   <span className="hidden sm:inline">策略</span>
                 </button>
-              )}
-              {isAdmin && (
-                <button
-                  onClick={() => setShowSettings(true)}
+              <button
+                onClick={() => setShowSettings(true)}
                   className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-orange-500/40 hover:text-orange-400"
                   title="设置（LLM / 财务数据源）"
                 >
                   <GearIcon className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">设置</span>
                 </button>
-              )}
-              <NotificationBell />
-              {isAuthenticated ? (
-                <div className="hidden lg:flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300">
-                  <span className="max-w-44 truncate">{session?.user?.email || session?.user?.name || "已登录"}</span>
-                  {isAdmin && (
-                    <span className="rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-orange-300">
-                      管理员
-                    </span>
-                  )}
-                </div>
-              ) : null}
-              {isAuthenticated ? (
-                <button
-                  onClick={() => void signOut()}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:text-white"
-                  title="退出登录"
-                >
-                  退出
-                </button>
-              ) : (
-                <button
-                  onClick={promptSignIn}
-                  className="rounded-lg border border-orange-500/40 bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-300 transition-all hover:bg-orange-500/30"
-                  title="登录或注册"
-                >
-                  登录
-                </button>
-              )}
               <div className="hidden sm:flex items-center gap-2">
                 <span
                   className={`inline-block h-2 w-2 rounded-full ${
@@ -4838,7 +4602,7 @@ export default function Home() {
         ) : view === "hot" ? (
           <HotStocksPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
         ) : view === "positions" ? (
-          <PositionsPanel isAuthenticated={isAuthenticated} />
+          <PositionsPanel />
         ) : (
           <>
             <div className="mb-6 flex items-center justify-between">
@@ -4848,15 +4612,12 @@ export default function Home() {
                   我的收藏
                 </h2>
                 <p className="mt-1 text-sm text-zinc-500">
-                  {isAuthenticated
-                    ? `已收藏 ${favorites.length} 个标的 · 数据保存在你的账号下`
-                    : "登录后，可保存和查看你的个人收藏"}
+                  {`已收藏 ${favorites.length} 个标的 · 数据对所有访客共享`}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {isAuthenticated && (
-                  <a
-                    href="/signals"
+                <a
+                  href="/signals"
                     className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
                       signalCount > 0
                         ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-400"
@@ -4873,8 +4634,7 @@ export default function Home() {
                       </span>
                     )}
                   </a>
-                )}
-                {isAuthenticated && favorites.length > 0 && (
+                {favorites.length > 0 && (
                   <div className="flex gap-1.5">
                     {(["all", "starred", "pinned"] as const).map((f) => {
                       const labels = { all: "全部", starred: "重点关注", pinned: "置顶" };
@@ -4902,25 +4662,7 @@ export default function Home() {
                 )}
               </div>
             </div>
-            {!isAuthenticated ? (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 text-center">
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-orange-500/15">
-                  <StarIcon filled className="h-8 w-8 text-orange-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-white">登录后查看你的专属收藏</h3>
-                <p className="mx-auto mt-2 max-w-xl text-sm text-zinc-400">
-                  收藏列表按账号隔离。登录后，你只能看到并管理自己的股票收藏；旧的全局收藏会自动迁移到首个管理员账号。
-                </p>
-                <button
-                  type="button"
-                  onClick={promptSignIn}
-                  className="mt-5 rounded-lg border border-orange-500/40 bg-orange-500/20 px-4 py-2 text-sm font-medium text-orange-300 transition-all hover:bg-orange-500/30"
-                >
-                  登录 / 注册
-                </button>
-              </div>
-            ) : (
-              <>
+            <>
                 {/* 市场筛选：全部 / 美股 / A股 */}
                 {favorites.length > 0 && (
                   <div className="mb-4 flex gap-1.5">
@@ -5052,7 +4794,6 @@ export default function Home() {
                   收藏数据：按账号隔离存储 · 策略 / 分析缓存：服务端数据库
                 </div>
               </>
-            )}
           </>
         )}
       </main>
@@ -5067,9 +4808,6 @@ export default function Home() {
           }}
           onClose={() => setAnalyzingItem(null)}
         />
-      )}
-      {showAuth && (
-        <AuthModal onClose={() => setShowAuth(false)} />
       )}
       {showSettings && (
         <SettingsModal onClose={() => setShowSettings(false)} />

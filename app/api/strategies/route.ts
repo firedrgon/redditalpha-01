@@ -20,7 +20,6 @@ import {
   METRIC_FIELD_INFO,
   OPERATORS,
 } from "@/lib/strategies";
-import { requireAdmin } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 
@@ -56,9 +55,6 @@ function buildResponse(store: {
 
 /** GET /api/strategies — 列出分类 + 策略 + 元数据 */
 export async function GET() {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const store = await readStrategies();
   return NextResponse.json(buildResponse(store));
 }
@@ -98,9 +94,6 @@ interface ActionBody {
 type PostBody = StrategyCreateBody | CategoryCreateBody | ActionBody;
 
 export async function POST(request: NextRequest) {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const body = (await request.json().catch(() => ({}))) as PostBody;
 
   if (!body || typeof body !== "object") {
@@ -255,9 +248,6 @@ interface CategoryPatchBody {
 }
 
 export async function PATCH(request: NextRequest) {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const body = (await request.json().catch(() => null)) as
     | StrategyPatchBody
     | CategoryPatchBody
@@ -331,9 +321,6 @@ async function handlePatchCategory(body: CategoryPatchBody) {
 // ============================================================
 
 export async function DELETE(request: NextRequest) {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const resource = searchParams.get("resource"); // "strategy" | "category"

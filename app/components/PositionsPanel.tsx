@@ -69,11 +69,7 @@ const pnlClass = (n: number | null | undefined) =>
 const fmtDate = (s: string | null) =>
   s ? new Date(s).toLocaleDateString("zh-CN") : "—";
 
-export default function PositionsPanel({
-  isAuthenticated,
-}: {
-  isAuthenticated: boolean;
-}) {
+export default function PositionsPanel() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<PositionRow[]>([]);
   const [closed, setClosed] = useState<PositionRow[]>([]);
@@ -104,22 +100,10 @@ export default function PositionsPanel({
   }, [summary]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setLoading(false);
-      return;
-    }
     load();
     const t = setInterval(load, 60_000); // 每分钟刷新现价/未实现盈亏
     return () => clearInterval(t);
-  }, [isAuthenticated, load]);
-
-  if (!isAuthenticated) {
-    return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-8 text-center text-zinc-400">
-        登录后即可查看你的模拟持仓与收益统计。
-      </div>
-    );
-  }
+  }, [load]);
 
   const cards = [
     { label: "总投入", value: fmtMoney(summary.invested), cls: "text-zinc-100" },

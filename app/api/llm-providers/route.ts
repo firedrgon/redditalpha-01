@@ -4,11 +4,9 @@ import {
   setProviderKey,
   setProviderEnabled,
   setActiveProvider,
-  setProviderModel,
 } from "@/lib/llm-config";
 import { LLM_PROVIDERS } from "@/lib/llm-providers";
 import { refreshProviderStatuses, testProvider } from "@/lib/llm";
-import { requireAdmin } from "@/lib/auth-guards";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -18,12 +16,8 @@ export const revalidate = 0;
 
 /** GET /api/llm-providers：列出所有 provider 及状态，按 激活→可用→不可用 排序 */
 export async function GET() {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   const config = await readConfig();
-  // 过滤掉标记为 hidden 的 provider（如海外部署下不可用的国产模型），不在 UI 列表展示
-  const list = LLM_PROVIDERS.filter((p) => !p.hidden).map((p) => {
+  const list = LLM_PROVIDERS.map((p) => {
     const status = config.providers[p.id] ?? {
       id: p.id,
       apiKey: "",
@@ -37,26 +31,16 @@ export async function GET() {
       id: p.id,
       name: p.name,
       description: p.description,
-      // 用户自定义模型（如豆包 Endpoint ID）优先；否则用静态默认 model
-      model: status.model ?? p.model,
-      customModel: p.customModel ?? false,
+      model: p.model,
       protocol: p.protocol,
       free: p.free,
       needsKey: p.needsKey,
       signupUrl: p.signupUrl,
       docsUrl: p.docsUrl,
       freeQuota: p.freeQuota,
-      apiKeyMasked: (() => {
-        const keys = (status.apiKey || "")
-          .split(/[\s,;]+/)
-          .map((k: string) => k.trim())
-          .filter(Boolean);
-        if (keys.length === 0) return "";
-        if (keys.length === 1) {
-          return `${keys[0].slice(0, 4)}****${keys[0].slice(-4)}`;
-        }
-        return `${keys.length} 个 Key`;
-      })(),
+      apiKeyMasked: status.apiKey
+        ? `${status.apiKey.slice(0, 4)}****${status.apiKey.slice(-4)}`
+        : "",
       hasKey: status.apiKey !== "",
       keySource: status.keySource, // "env" | "local" | "none"
       envVarName: `LLM_API_KEY_${p.id.toUpperCase().replace(/-/g, "_")}`,
@@ -85,18 +69,14 @@ export async function GET() {
 }
 
 interface PatchBody {
-  action: "setKey" | "setEnabled" | "setActive" | "setModel";
+  action: "setKey" | "setEnabled" | "setActive";
   providerId?: string;
   apiKey?: string;
   enabled?: boolean;
-  model?: string;
 }
 
 /** PATCH /api/llm-providers：更新单个 provider 的 Key/启用状态/活跃 */
 export async function PATCH(request: NextRequest) {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   let body: PatchBody;
   try {
     body = (await request.json()) as PatchBody;
@@ -104,7 +84,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "无效的 JSON 请求体" }, { status: 400 });
   }
 
-  const { action, providerId, apiKey, enabled, model } = body;
+  const { action, providerId, apiKey, enabled } = body;
   if (!providerId && action !== "setActive") {
     return NextResponse.json({ error: "缺少 providerId" }, { status: 400 });
   }
@@ -121,10 +101,6 @@ export async function PATCH(request: NextRequest) {
         if (typeof enabled !== "boolean")
           throw new Error("enabled 必须为 boolean");
         config = await setProviderEnabled(providerId, enabled);
-        break;
-      case "setModel":
-        if (!providerId) throw new Error("缺少 providerId");
-        config = await setProviderModel(providerId, model ?? "");
         break;
       case "setActive":
         config = await setActiveProvider(providerId ?? null);
@@ -148,9 +124,6 @@ interface PostBody {
 
 /** POST /api/llm-providers：测试 provider 可用性，结果写回本地配置文件 */
 export async function POST(request: NextRequest) {
-  const { response } = await requireAdmin();
-  if (response) return response;
-
   let body: PostBody = {};
   try {
     body = (await request.json()) as PostBody;

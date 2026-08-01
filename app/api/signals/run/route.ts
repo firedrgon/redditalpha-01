@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
-import { requireUser } from "@/lib/auth-guards";
 import { runSignalsJob } from "@/lib/cron/signals-runner";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
 
@@ -10,17 +9,18 @@ export const dynamic = "force-dynamic";
 /** 手动触发的冷却时间（毫秒）。60 秒防 spam */
 const COOLDOWN_MS = 60_000;
 
+/** 公开化后手动触发使用固定 jobName（不再按用户区分） */
+const MANUAL_JOB = "signals:manual:public";
+
 export async function POST(request: NextRequest) {
   void request; // 当前未使用 request body，预留扩展
-  const { user, response } = await requireUser();
-  if (response || !user) return response;
 
   const prisma = getPrisma();
   if (!prisma) {
     return NextResponse.json({ error: "数据库不可用" }, { status: 500 });
   }
 
-  const jobName = `signals:manual:${user.id}`;
+  const jobName = MANUAL_JOB;
 
   // Cooldown 检查：用 CronRun 找该 jobName 最近的 endedAt
   const lastRun = await prisma.cronRun.findFirst({
@@ -43,15 +43,13 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 找当前用户所有收藏（不再限定 starred=true）
+  // 找所有收藏（公开化后不再按用户区分）
   const allFavorites = await prisma.favorite.findMany({
-    where: { userId: user.id },
-    select: { userId: true, ticker: true, name: true },
+    select: { ticker: true, name: true },
   });
 
   const validFavorites = allFavorites.filter(
-    (f): f is { userId: string; ticker: string; name: string | null } =>
-      f.userId !== null
+    (f): f is { ticker: string; name: string | null } => !!f.ticker
   );
 
   if (validFavorites.length === 0) {

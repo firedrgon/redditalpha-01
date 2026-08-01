@@ -8,34 +8,34 @@ datasource db {
 }
 
 model AnalysisCache {
-  id                 String    @id @default(cuid())
-  ticker             String    @unique
-  name               String?
-  metrics            String
-  overallVerdict     String
-  overallSummary     String
-  currentPrice       Float?
-  targetMeanPrice    Float?
-  targetHighPrice    Float?
-  targetLowPrice     Float?
-  targetMedianPrice  Float?
-  targetUpside       Float?
-  numberOfAnalysts   Int?
+  id            String   @id @default(cuid())
+  ticker        String   @unique
+  name          String?
+  metrics       String   // JSON 字符串：MetricResult[]
+  overallVerdict String   // pass / fail / unknown
+  overallSummary String
+  currentPrice      Float?
+  targetMeanPrice   Float?
+  targetHighPrice   Float?
+  targetLowPrice    Float?
+  targetMedianPrice Float?
+  targetUpside      Float?
+  numberOfAnalysts  Int?
   recommendationMean Float?
-  llmNarrative       String?
-  llmProvider        String?
-  llmError           String?
-  strategyIdsUsed    String
-  dataSource         String?
-  warnings           String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  industry           String?
-  industryRank       String?
-  sector             String?
-  fetchedAt          DateTime?
-  news               String?
-  technicalSignals   String?
+  llmNarrative String?
+  llmProvider  String?
+  llmError     String?
+  strategyIdsUsed String // JSON 字符串：string[]
+  dataSource   String?
+  warnings     String?  // JSON 字符串：string[]
+  industryRank String?  // JSON 字符串：行业百分位排名
+  industry     String?
+  sector       String?
+  news         String?  // JSON 字符串：新闻列表
+  technicalSignals String? // JSON 字符串：TradingView 技术信号
+  fetchedAt    DateTime? // 实际数据抓取时间
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model StrategyCategory {
@@ -45,9 +45,9 @@ model StrategyCategory {
   order       Int
   isDefault   Boolean    @default(false)
   color       String?
+  strategies  Strategy[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  strategies  Strategy[]
 }
 
 model Strategy {
@@ -55,144 +55,83 @@ model Strategy {
   name        String
   description String
   categoryId  String
+  category    StrategyCategory @relation(fields: [categoryId], references: [id])
   metricField String
   operator    String
   threshold   Float
-  format      String
-  enabled     Boolean          @default(true)
-  isDefault   Boolean          @default(false)
+  format      String  // percent / number / ratio
+  enabled     Boolean @default(true)
+  isDefault   Boolean @default(false)
   order       Int
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  category    StrategyCategory @relation(fields: [categoryId], references: [id])
-}
-
-model User {
-  id            String         @id @default(cuid())
-  name          String?
-  email         String?        @unique
-  passwordHash  String?
-  emailVerified DateTime?
-  image         String?
-  isAdmin       Boolean        @default(false)
-  /// 通知偏好：是否通过邮件推送信号提醒
-  emailNotify   Boolean        @default(false)
-  /// 通知偏好：是否通过 Web Push 推送信号提醒
-  webpushNotify Boolean        @default(false)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  accounts      Account[]
-  favorites     Favorite[]
-  sessions      Session[]
-  signalAlerts  SignalAlert[]
-  notifications Notification[]
-  pushSubscriptions PushSubscription[]
-}
-
-model Account {
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String?
-  access_token      String?
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String?
-  session_state     String?
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@id([provider, providerAccountId])
-}
-
-model Session {
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@id([identifier, token])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Favorite {
-  id        String    @id @default(cuid())
-  ticker    String
+  id        String   @id @default(cuid())
+  ticker    String   @unique
   name      String?
   note      String?
-  tags      String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  pinned    Boolean   @default(false)
-  pinnedAt  DateTime?
-  starred   Boolean   @default(false)
-  userId    String?
-  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, ticker])
-  @@index([userId])
+  tags      String?  // JSON 字符串：string[]
+  pinned    Boolean  @default(false) // 是否置顶
+  pinnedAt  DateTime? // 置顶时间，用于置顶项之间的排序
+  starred   Boolean  @default(false) // 是否重点关注
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AppSetting {
   key       String   @id
-  value     String
+  value     String   // JSON 字符串
   updatedAt DateTime @updatedAt
 }
 
 model LlmModelCache {
-  id         String   @id @default(cuid())
-  platform   String
-  providerId String
-  modelSlug  String
-  modelName  String
-  sortOrder  Int
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String   @id @default(cuid())
+  platform      String   // "openrouter" | "groq" | "gemini"
+  providerId    String   // 对应 LLM_PROVIDERS 的 id，如 "openrouter-1"
+  modelSlug     String   // 模型标识符，如 "nvidia/nemotron-3-ultra-550b-a55b:free"
+  modelName     String   // 人类可读名称，如 "Nemotron 3 Ultra 550B"
+  sortOrder     Int      // 排序顺序
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([platform, providerId])
   @@index([platform])
 }
 
 model FinanceSnapshot {
-  id                     String   @id @default(cuid())
-  ticker                 String   @unique
-  snapshotDate           DateTime @default(now())
-  price                  Float?
-  marketCap              Float?
-  trailingPE             Float?
-  forwardPE              Float?
-  pegRatio               Float?
-  priceToBook            Float?
-  roe                    Float?
-  returnOnEquity5yAvg    Float?
-  revenueGrowthYoY       Float?
+  id              String   @id @default(cuid())
+  ticker          String   @unique
+  snapshotDate    DateTime @default(now())
+  price           Float?
+  marketCap       Float?
+  trailingPE      Float?
+  forwardPE       Float?
+  pegRatio        Float?
+  priceToBook     Float?
+  roe             Float?
+  returnOnEquity5yAvg Float?
+  revenueGrowthYoY    Float?
   quarterlyRevenueGrowth Float?
-  grossMargin            Float?
-  profitMargin           Float?
-  quickRatio             Float?
-  currentRatio           Float?
-  debtToEquity           Float?
-  industry               String?
-  sector                 String?
-  industryPE             Float?
-  targetMeanPrice        Float?
-  targetUpside           Float?
-  recommendationMean     Float?
-  dataSource             String?
-  rawJson                String?
+  grossMargin     Float?
+  profitMargin    Float?
+  quickRatio      Float?
+  currentRatio    Float?
+  debtToEquity    Float?
+  industry        String?
+  sector          String?
+  industryPE      Float?
+  targetMeanPrice Float?
+  targetUpside    Float?
+  recommendationMean Float?
+  dataSource      String?
+  rawJson         String?  // 完整 FinancialMetrics 的 JSON 备份
 }
 
+/// 信号告警（公开化后不再按用户隔离，全站共享同一份数据）。
 model SignalAlert {
   id              String   @id @default(cuid())
-  userId          String
   ticker          String
   tickerName      String?
   signalType      String   @db.VarChar(20)
@@ -203,10 +142,8 @@ model SignalAlert {
   note            String?
   createdAt       DateTime @default(now())
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, ticker])
-  @@index([userId, createdAt])
+  @@index([ticker])
+  @@index([createdAt])
 }
 
 /// 每个 ticker 最新一次的技术信号快照（高频读，单 ticker 唯一）。
@@ -273,42 +210,6 @@ model CronRun {
   @@index([jobName, startedAt])
 }
 
-/// 站内通知（信号提醒）。由 signals-runner 在产生 buy/sell alert 时写入。
-/// 前端通知中心读取本表渲染铃铛角标与通知列表。
-model Notification {
-  id         String   @id @default(cuid())
-  userId     String
-  /// 通知类型：signal_buy | signal_sell
-  type       String   @db.VarChar(20)
-  ticker     String
-  tickerName String?
-  title      String
-  body       String?
-  /// 点击通知跳转的站内链接
-  link       String?
-  read       Boolean  @default(false)
-  createdAt  DateTime @default(now())
-
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, read])
-  @@index([userId, createdAt])
-}
-
-/// Web Push 订阅（每个浏览器/设备一条）。VAPID 推送时按 userId 取出全部订阅逐一发送。
-model PushSubscription {
-  id        String   @id @default(cuid())
-  userId    String
-  endpoint  String   @unique
-  /// JSON: { p256dh, auth }
-  keys      String
-  createdAt DateTime @default(now())
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
 /// 美股 AI 研报缓存（us-stock-analysis 集成）。按 ticker 唯一，重跑会 upsert 覆盖。
 /// report 为 Markdown 正文；dataJson 为抓取到的结构化数据（JSON 字符串），供报告页摘要卡复用。
 model StockReport {
@@ -325,9 +226,9 @@ model StockReport {
 
 /// 模拟持仓（信号自动建仓/平仓）。每笔买入信号开一个 OPEN 持仓，
 /// 对应卖出信号关闭最新 OPEN 持仓并计算盈亏。纯模拟，不涉及真实交易。
+/// 公开化后不再按用户隔离（全站共享同一资金池）。
 model Position {
   id           String   @id @default(cuid())
-  userId       String
   ticker       String
   tickerName   String?
   /// 资产市场：CN | US（区分本金币种，A 股 ¥ / 美股 $）
@@ -355,6 +256,6 @@ model Position {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@index([userId, status])
-  @@index([userId, ticker])
+  @@index([status])
+  @@index([ticker])
 }
