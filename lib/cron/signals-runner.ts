@@ -106,14 +106,25 @@ export interface StarredFavorite {
 /**
  * 推断当前持仓状态
  *
- * 规则：取该 (userId, ticker) 最近一条 signalType ∈ {buy, sell} 的 alert；
- *       buy → HOLD，sell → OUT；都没有则默认 OUT。
+ * 真实持仓优先于提醒历史：
+ * 1. 若 position 表里仍有 OPEN 持仓，直接视为 HOLD
+ * 2. 否则回退到最近一条 buy/sell alert 推断
+ * 3. 两者都没有则默认 OUT
+ *
+ * 这样可以兜住历史数据不完整的情况，避免“实际仍持仓，但因缺少 buy alert
+ * 被误判为 OUT，导致后续 SELL 信号被跳过”。
  */
 export async function getCurrentState(
   prisma: PrismaClient,
   userId: string,
   ticker: string
 ): Promise<PositionState> {
+  const openPosition = await prisma.position.findFirst({
+    where: { userId, ticker, status: "OPEN" },
+    select: { id: true },
+  });
+  if (openPosition) return "HOLD";
+
   const last = await prisma.signalAlert.findFirst({
     where: {
       userId,
