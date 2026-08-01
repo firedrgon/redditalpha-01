@@ -4477,7 +4477,7 @@ export default function Home() {
 
       <nav className="border-b border-zinc-800 bg-zinc-950">
         <div className="mx-auto max-w-screen-2xl px-4">
-          <div className="flex gap-1 overflow-x-auto py-3 scrollbar-hide">
+          <div className="flex gap-1 py-3">
             {/* 收藏 Tab 放在最前面 */}
             <button
               onClick={() => setView("favorites")}
