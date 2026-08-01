@@ -36,9 +36,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const user = await prisma.user.findUnique({ where: { email } });
         // 没有密码字段的用户（例如仅第三方登录）不允许用密码登录
-        if (!user || !user.password) return null;
+        if (!user || !user.passwordHash) return null;
 
-        const ok = await bcrypt.compare(password, user.password);
+        const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return null;
 
         return {

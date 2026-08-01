@@ -276,7 +276,7 @@ model User {
   emailVerified DateTime?
   image         String?
   /// 邮箱+密码注册的 bcrypt 哈希；为空表示未设置密码（如仅第三方登录）
-  password      String?
+  passwordHash String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
