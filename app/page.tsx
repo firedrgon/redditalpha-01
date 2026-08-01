@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import HotStocksPanel from "@/app/components/HotStocksPanel";
 import PositionsPanel from "@/app/components/PositionsPanel";
+import GlobalSignalBell from "@/app/components/GlobalSignalBell";
 import Link from "next/link";
 
 const SUBREDDITS = [
@@ -4399,6 +4400,7 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-3 text-sm">
+              <GlobalSignalBell />
               {view === "subreddit" && (
                 <button
                   onClick={handleShare}
