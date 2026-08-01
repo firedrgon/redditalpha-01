@@ -1,31 +1,65 @@
 import NextAuth from "next-auth";
-import Resend from "next-auth/providers/resend";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import Credentials from "next-auth/providers/credentials";
 import { getPrisma } from "@/lib/db/prisma";
-
-const prisma = getPrisma();
-const adapter = prisma ? PrismaAdapter(prisma) : undefined;
+import bcrypt from "bcryptjs";
 
 /**
- * 邮箱魔法链接登录（Resend）。
- * - 登录方式：用户在 /login 输入邮箱 → Resend 发送含一次性登录链接的邮件。
- * - 需要环境变量：RESEND_API_KEY（Resend API Key）、EMAIL_FROM（发件人，缺省用 Resend 测试发件域）。
+ * 邮箱 + 密码注册/登录（Credentials Provider + JWT 会话）。
+ * - 注册：用户在 /login/signup 填写邮箱+密码，服务端 /api/auth/register 用 bcrypt 哈希后写入 User.password。
+ * - 登录：用户在 /login 填写邮箱+密码，NextAuth 调用 authorize() 校验 bcrypt 哈希。
+ * - 不再依赖邮件（无 Resend / 魔法链接）。
+ * - session 用 jwt 策略（Credentials Provider 要求 jwt，不能用 database 策略）。
  * - AUTH_SECRET 必须配置（生产环境），构建期用占位符避免 next build 报错。
- * - trustHost: true 在 Vercel 等托管环境必需（信任 Host 头生成回调地址）。
+ * - trustHost: true 在 Vercel 等托管环境必需。
  */
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter,
   trustHost: true,
   secret: process.env.AUTH_SECRET || "development-placeholder-secret-not-for-prod",
-  session: { strategy: "database" },
+  session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
-    verifyRequest: "/login?sent=1",
   },
   providers: [
-    Resend({
-      apiKey: process.env.RESEND_API_KEY,
-      from: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+    Credentials({
+      name: "邮箱密码",
+      credentials: {
+        email: { label: "邮箱", type: "email" },
+        password: { label: "密码", type: "password" },
+      },
+      async authorize(credentials) {
+        const email = (credentials?.email as string | undefined)?.trim().toLowerCase();
+        const password = credentials?.password as string | undefined;
+        if (!email || !password) return null;
+
+        const prisma = getPrisma();
+        if (!prisma) return null;
+
+        const user = await prisma.user.findUnique({ where: { email } });
+        // 没有密码字段的用户（例如仅第三方登录）不允许用密码登录
+        if (!user || !user.password) return null;
+
+        const ok = await bcrypt.compare(password, user.password);
+        if (!ok) return null;
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.image,
+        };
+      },
     }),
   ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) token.id = (user as { id?: string }).id;
+      return token;
+    },
+    async session({ session, token }) {
+      if (token.id && session.user) {
+        (session.user as { id?: string }).id = token.id as string;
+      }
+      return session;
+    },
+  },
 });
