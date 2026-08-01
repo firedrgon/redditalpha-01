@@ -35,6 +35,19 @@ export async function POST(request: NextRequest) {
   try {
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
+      // 历史账号（早期无密码创建，如 Resend 魔法链接登录）没有密码字段，
+      // 允许在注册页设置密码并接管该账号，避免「既不能注册设密、又不能密码登录」的死锁。
+      if (!existing.password) {
+        const hash = await bcrypt.hash(password, 10);
+        await prisma.user.update({
+          where: { email },
+          data: { password: hash, emailVerified: new Date() },
+        });
+        return NextResponse.json(
+          { ok: true, takenOver: true, user: { id: existing.id, email } },
+          { status: 200 }
+        );
+      }
       return NextResponse.json({ error: "该邮箱已注册，请直接登录" }, { status: 409 });
     }
 
