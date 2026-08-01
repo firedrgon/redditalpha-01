@@ -69,7 +69,9 @@ model Strategy {
 
 model Favorite {
   id        String   @id @default(cuid())
-  ticker    String   @unique
+  userId    String? // 登录用户私有收藏；null = 匿名全局收藏（公开化兼容）
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker    String
   name      String?
   note      String?
   tags      String?  // JSON 字符串：string[]
@@ -78,6 +80,8 @@ model Favorite {
   starred   Boolean  @default(false) // 是否重点关注
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([userId, ticker])
 }
 
 model AppSetting {
@@ -226,9 +230,11 @@ model StockReport {
 
 /// 模拟持仓（信号自动建仓/平仓）。每笔买入信号开一个 OPEN 持仓，
 /// 对应卖出信号关闭最新 OPEN 持仓并计算盈亏。纯模拟，不涉及真实交易。
-/// 公开化后不再按用户隔离（全站共享同一资金池）。
+/// userId 为 null 时属于全站共享的公开模拟资金池；登录用户会各自拥有一份（cron 按收藏 fan-out）。
 model Position {
   id           String   @id @default(cuid())
+  userId       String? // 登录用户的私有持仓；null = 全站公开资金池
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticker       String
   tickerName   String?
   /// 资产市场：CN | US（区分本金币种，A 股 ¥ / 美股 $）
@@ -256,6 +262,78 @@ model Position {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@index([userId])
   @@index([status])
   @@index([ticker])
+}
+
+/// ===== 认证 / 通知（NextAuth v5 + Prisma Adapter + 站内通知中心） =====
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  favorites     Favorite[]
+  positions     Position[]
+  notifications Notification[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// 站内通知。cron 产生信号时，对收藏该 ticker 的登录用户 fan-out 生成。
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   @db.VarChar(20) // "signal" | "system"
+  title     String
+  body      String?
+  url       String?  // 点击跳转，如 /signals?ticker=AAPL
+  ticker    String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import GlobalSignalBell from "./GlobalSignalBell";
+import AuthMenu from "./AuthMenu";
 
 const NAV = [
   { href: "/", label: "首页" },
@@ -67,7 +67,7 @@ export default function SiteHeader({ right }: { right?: ReactNode }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <GlobalSignalBell />
+          <AuthMenu />
           {right}
         </div>
       </div>

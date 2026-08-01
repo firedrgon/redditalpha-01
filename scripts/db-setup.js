@@ -44,6 +44,14 @@ function main() {
   } catch (err) {
     console.warn("⚠️  Database schema push failed (continuing build anyway):", err.message);
   }
+
+  // 公开化遗留的 userId=NULL 行迁移为匿名哨兵 __anon__（幂等，非致命）。
+  console.log("🔄 Migrating legacy NULL userId rows to anon pool...");
+  try {
+    execSync("node scripts/anon-migration.js", { stdio: "inherit" });
+  } catch (err) {
+    console.warn("⚠️  anon migration failed (non-fatal, continuing):", err.message);
+  }
 }
 
 main();

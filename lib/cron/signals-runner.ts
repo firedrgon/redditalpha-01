@@ -48,10 +48,12 @@ import {
   openPosition,
   closePosition,
   fetchSignalPrice,
+  getFavoriteUserIds,
   getCapitalForMarket,
   currencyOf,
   type AssetMarket,
 } from "@/lib/db/positions";
+import { ANON_USER_ID } from "@/lib/auth";
 import {
   startCronRun,
   finishCronRun,
@@ -222,15 +224,19 @@ async function writeSignalAlertAndNotify(
     if (phase === "enter") {
       if (price != null) {
         const capital = await getCapitalForMarket(prisma, market);
-        await openPosition(prisma, {
-          ticker,
-          tickerName: name,
-          price,
-          alertId: alert.id,
-          assetType: market,
-          currency: currencyOf(market),
-          capital,
-        });
+        await openPosition(
+          prisma,
+          {
+            ticker,
+            tickerName: name,
+            price,
+            alertId: alert.id,
+            assetType: market,
+            currency: currencyOf(market),
+            capital,
+          },
+          ANON_USER_ID
+        );
         // 回填 alert 价格，便于核对
         await prisma.signalAlert.update({
           where: { id: alert.id },
@@ -238,17 +244,78 @@ async function writeSignalAlertAndNotify(
         });
       }
     } else if (phase === "exit") {
-      await closePosition(prisma, {
-        ticker,
-        price,
-        alertId: alert.id,
-      });
+      await closePosition(
+        prisma,
+        {
+          ticker,
+          price,
+          alertId: alert.id,
+        },
+        ANON_USER_ID
+      );
       if (price != null) {
         await prisma.signalAlert.update({
           where: { id: alert.id },
           data: { price },
         });
       }
+    }
+
+    // Fan-out：给收藏该 ticker 的登录用户各生成一条站内通知 + 各自的模拟持仓。
+    // 站内通知是用户私有的（Notification.userId）；模拟持仓也按用户隔离（Position.userId）。
+    // 匿名全局收藏不生成通知（无用户主体），其公开资金池持仓已在上面以 userId=__anon__ 创建。
+    try {
+      const userIds = await getFavoriteUserIds(prisma, ticker);
+      if (userIds.length > 0) {
+        const titleText = `${phase === "enter" ? "买入" : "卖出"}信号 · ${ticker}`;
+        const notifyUrl = `/signals?ticker=${encodeURIComponent(ticker)}`;
+        for (const uid of userIds) {
+          try {
+            await prisma.notification.create({
+              data: {
+                userId: uid,
+                type: "signal",
+                title: titleText,
+                body: note,
+                url: notifyUrl,
+                ticker,
+                read: false,
+              },
+            });
+            if (phase === "enter") {
+              if (price != null) {
+                const capital = await getCapitalForMarket(prisma, market);
+                await openPosition(
+                  prisma,
+                  {
+                    ticker,
+                    tickerName: name,
+                    price,
+                    alertId: alert.id,
+                    assetType: market,
+                    currency: currencyOf(market),
+                    capital,
+                  },
+                  uid
+                );
+              }
+            } else {
+              await closePosition(
+                prisma,
+                { ticker, price, alertId: alert.id },
+                uid
+              );
+            }
+          } catch (fanErr) {
+            console.error(
+              `[signals-runner] fan-out 单用户失败 user=${uid} ticker=${ticker}:`,
+              fanErr
+            );
+          }
+        }
+      }
+    } catch (fanErr) {
+      console.error(`[signals-runner] fan-out 查询失败 ticker=${ticker}:`, fanErr);
     }
 
     console.log(`[signals-runner] ${ticker} ${actionLabel} alert 写入, signal=${overall}`);

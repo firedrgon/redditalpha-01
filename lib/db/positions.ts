@@ -12,6 +12,7 @@
  */
 import type { PrismaClient } from "@prisma/client";
 import { fetchQuote, type Quote } from "@/lib/quote";
+import { ANON_USER_ID } from "@/lib/auth";
 
 /** 每笔交易默认虚拟本金（分币种） */
 export const DEFAULT_CAPITAL_US = 10000; // 美股，USD
@@ -72,14 +73,16 @@ export interface OpenPositionArgs {
   capital: number;
 }
 
-/** 建仓：创建一个 OPEN 持仓 */
+/** 建仓：创建一个 OPEN 持仓。userId 为匿名哨兵(__anon__) 时属于全站公开资金池。 */
 export async function openPosition(
   prisma: PrismaClient,
-  { ticker, tickerName, price, alertId, assetType, currency, capital }: OpenPositionArgs
+  { ticker, tickerName, price, alertId, assetType, currency, capital }: OpenPositionArgs,
+  userId: string = ANON_USER_ID
 ) {
   const shares = price > 0 ? capital / price : 0;
   return prisma.position.create({
     data: {
+      userId,
       ticker,
       tickerName: tickerName || undefined,
       assetType,
@@ -93,6 +96,22 @@ export async function openPosition(
   });
 }
 
+/**
+ * 取收藏了某 ticker 的登录用户 id 列表（去重，排除匿名）。
+ * 供 signals-runner 在新信号产生时 fan-out 建仓 / 通知。
+ */
+export async function getFavoriteUserIds(
+  prisma: PrismaClient,
+  ticker: string
+): Promise<string[]> {
+  const rows = await prisma.favorite.findMany({
+    where: { ticker: ticker.toUpperCase(), userId: { not: ANON_USER_ID } },
+    select: { userId: true },
+    distinct: ["userId"],
+  });
+  return rows.map((r) => r.userId as string).filter(Boolean);
+}
+
 export interface ClosePositionArgs {
   ticker: string;
   /** 平仓价；为 null 时仅关闭持仓、盈亏留空 */
@@ -100,13 +119,14 @@ export interface ClosePositionArgs {
   alertId: string;
 }
 
-/** 平仓：关闭最新 OPEN 持仓并算 pnl/pnlPct/holdDays */
+/** 平仓：关闭某用户（userId 为匿名哨兵(__anon__) 时即公开资金池）最新 OPEN 持仓并计算盈亏 */
 export async function closePosition(
   prisma: PrismaClient,
-  { ticker, price, alertId }: ClosePositionArgs
+  { ticker, price, alertId }: ClosePositionArgs,
+  userId: string = ANON_USER_ID
 ) {
   const open = await prisma.position.findFirst({
-    where: { ticker, status: "OPEN" },
+    where: { ticker, userId, status: "OPEN" },
     orderBy: { entryAt: "desc" },
   });
   if (!open) return null;

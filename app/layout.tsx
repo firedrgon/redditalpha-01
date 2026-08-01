@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { SessionProvider } from "next-auth/react";
 import SiteFooter from "./components/SiteFooter";
 
 const geistSans = Geist({
@@ -49,7 +50,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-zinc-950" suppressHydrationWarning>
-        {children}
+        <SessionProvider>{children}</SessionProvider>
         <SiteFooter />
       </body>
     </html>

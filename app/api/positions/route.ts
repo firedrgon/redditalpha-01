@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
+import { getCurrentUser, ANON_USER_ID } from "@/lib/auth";
 import { fetchQuotes } from "@/lib/quote";
 
 export const dynamic = "force-dynamic";
@@ -20,13 +21,17 @@ export async function GET() {
     return NextResponse.json({ open: [], closed: [], summary: EMPTY_SUMMARY });
   }
 
+  // 登录用户只看自己的持仓；匿名回退到全站公开资金池（userId=null）
+  const user = await getCurrentUser();
+  const uid = user?.id ?? ANON_USER_ID;
+
   const [open, closed] = await Promise.all([
     prisma.position.findMany({
-      where: { status: "OPEN" },
+      where: { status: "OPEN", userId: uid },
       orderBy: { entryAt: "desc" },
     }),
     prisma.position.findMany({
-      where: { status: "CLOSED" },
+      where: { status: "CLOSED", userId: uid },
       orderBy: { exitAt: "desc" },
       take: 100,
     }),
