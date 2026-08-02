@@ -1925,6 +1925,39 @@ function extractFinancialData(html: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * 从 stockanalysis.com 的 statistics 页面 HTML 表格中提取指定指标。
+ *
+ * 行结构：`{Label}<!----></span>...</td>...<td ... title="3.102">3.10</td>`
+ * title 属性带完整精度，优先使用；值为 "n/a" 时返回 null（表示数据源确无该指标）。
+ */
+function extractStatValue(html: string, label: string): number | null {
+  const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    `${esc}<!---->[\\s\\S]{0,300}?<td[^>]*title="([^"]*)"`,
+    "i"
+  );
+  const m = html.match(re);
+  if (!m) return null;
+
+  let raw = m[1].trim();
+  if (!raw || raw.toLowerCase() === "n/a" || raw === "-") return null;
+
+  // 处理百分号与数量级后缀（B/M/T/K）
+  let mult = 1;
+  const isPct = raw.endsWith("%");
+  if (isPct) raw = raw.slice(0, -1);
+  const suffix = raw.slice(-1).toUpperCase();
+  if (["T", "B", "M", "K"].includes(suffix)) {
+    mult = { T: 1e12, B: 1e9, M: 1e6, K: 1e3 }[suffix] as number;
+    raw = raw.slice(0, -1);
+  }
+
+  const n = Number(raw.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return null;
+  return isPct ? n / 100 : n * mult;
+}
+
 /** 安全取数组指定位置的数值 */
 function arrNum(arr: unknown, idx: number): number | null {
   if (!Array.isArray(arr)) return null;
@@ -1987,10 +2020,17 @@ async function fetchStockAnalysisMetrics(
 
   const warnings: string[] = [];
 
-  const [incomeHtml, ratiosHtml, overviewHtml] = await Promise.all([
-    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/`),
+  // 注意：/financials/ 在 2026 年改版后返回的是精简版 "Financials Overview"
+  // 页面（financialData:void 0，无任何指标数组），必须请求
+  // /financials/income-statement/ 才能拿到完整利润表数据。
+  // statistics 页面用于补充 ratios 页面缺失的 PEG / Forward PE（HTML 表格，非 JSON）。
+  const [incomeHtml, ratiosHtml, overviewHtml, statsHtml] = await Promise.all([
+    fetchSAPage(
+      `https://stockanalysis.com/stocks/${lower}/financials/income-statement/`
+    ),
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/financials/ratios/`),
     fetchSAPage(`https://stockanalysis.com/stocks/${lower}/`),
+    fetchSAPage(`https://stockanalysis.com/stocks/${lower}/statistics/`),
   ]);
 
   if (!incomeHtml && !ratiosHtml) {
@@ -2016,12 +2056,37 @@ async function fetchStockAnalysisMetrics(
       const grossMargin = data.grossMargin as unknown;
       const profitMargin = data.profitMargin as unknown;
 
-      // revenueGrowthYoY：优先用最近完整财年 [1]，没有则用 TTM [0]
-      const yoy = arrNum(revenueGrowth, 1) ?? arrNum(revenueGrowth, 0);
-      if (yoy != null) {
-        result.revenueGrowthYoY = yoy;
+      // 数组为降序：[TTM?, FY-latest, FY-1, ...]。判断首列是否 TTM 行。
+      const dk0 = Array.isArray(datekey) ? String(datekey[0] ?? "") : "";
+      const hasTTMRow = dk0.toUpperCase() === "TTM";
+      const fyStart = hasTTMRow ? 1 : 0; // 最近一个完整财年的下标
+
+      // revenueGrowthYoY：
+      // 改版后 income-statement 页面已不再提供 revenueGrowth 字段，
+      // 优先读取（兼容字段恢复的情况），否则由 revenue 数组自算最近完整财年同比。
+      const yoyFromField =
+        arrNum(revenueGrowth, fyStart) ?? arrNum(revenueGrowth, 0);
+      if (yoyFromField != null) {
+        result.revenueGrowthYoY = yoyFromField;
+      } else {
+        const fyLatest = arrNum(revenue, fyStart);
+        const fyPrev = arrNum(revenue, fyStart + 1);
+        if (fyLatest != null && fyPrev != null && fyPrev !== 0) {
+          result.revenueGrowthYoY = fyLatest / fyPrev - 1;
+        }
       }
-      result.quarterlyRevenueGrowth = arrNum(revenueGrowth, 0);
+
+      // quarterlyRevenueGrowth：TTM 相对最近完整财年的增速
+      const qFromField = arrNum(revenueGrowth, 0);
+      if (qFromField != null && hasTTMRow) {
+        result.quarterlyRevenueGrowth = qFromField;
+      } else if (hasTTMRow) {
+        const ttmRev = arrNum(revenue, 0);
+        const fyLatest = arrNum(revenue, fyStart);
+        if (ttmRev != null && fyLatest != null && fyLatest !== 0) {
+          result.quarterlyRevenueGrowth = ttmRev / fyLatest - 1;
+        }
+      }
 
       // 历史营收（stockanalysis.com 数据是降序：TTM, FY2025, FY2024...
       // 用 datekey 过滤 TTM 行（datekey="TTM"），只保留完整财年
@@ -2043,14 +2108,19 @@ async function fetchStockAnalysisMetrics(
           .map(({ year, revenue }) => ({ year, revenue }))
           .sort((a, b) => a.year - b.year);
         result.revenueHistory = history;
-        result.totalRevenue = arrNum(revenue, 1) ?? arrNum(revenue, 0);
+        result.totalRevenue = arrNum(revenue, fyStart) ?? arrNum(revenue, 0);
       }
 
-      // 利润率（小数形式）
-      const gm = arrNum(grossMargin, 1) ?? arrNum(grossMargin, 0);
+      // 利润率（小数形式）：取最近完整财年，兜底取首列
+      const gm = arrNum(grossMargin, fyStart) ?? arrNum(grossMargin, 0);
       if (gm != null) result.grossMargin = gm;
-      const pm = arrNum(profitMargin, 1) ?? arrNum(profitMargin, 0);
+      const pm = arrNum(profitMargin, fyStart) ?? arrNum(profitMargin, 0);
       if (pm != null) result.profitMargin = pm;
+
+      // 报表币种（NVO 等非美国公司以本币计价，如 DKK）。
+      // details 对象与 financialData 平级，用轻量正则提取即可。
+      const curMatch = incomeHtml.match(/currency:"([A-Z]{3})"/);
+      if (curMatch) result.currency = curMatch[1];
     } else {
       warnings.push("stockanalysis.com Income Statement 数据解析失败。");
     }
@@ -2134,6 +2204,35 @@ async function fetchStockAnalysisMetrics(
       result.dataSource = "yahoo"; // 复用现有枚举值，避免修改接口
     } else {
       warnings.push("stockanalysis.com Ratios 数据解析失败。");
+    }
+  }
+
+  // ============================================================
+  // Statistics 页面：补充 ratios 页面缺失的 PEG / Forward PE
+  //
+  // ratios 页面的 financialData 只包含"有历史序列"的指标。对于
+  // NVO 这类外国 ADR，stockanalysis.com 不提供长期盈利增长预期，
+  // pegRatio / peForward 数组整个缺席。statistics 页面是 HTML 表格，
+  // 会明确给出当前值或 n/a，可作为可靠补充与"确无数据"的判定依据。
+  // ============================================================
+  if (statsHtml) {
+    if (result.pegRatio == null) {
+      const peg = extractStatValue(statsHtml, "PEG Ratio");
+      if (peg != null) {
+        result.pegRatio = peg;
+      } else {
+        warnings.push(
+          "stockanalysis.com 未提供该股 PEG（外国 ADR 等标的通常缺少长期盈利增长预期）。"
+        );
+      }
+    }
+    if (result.forwardPE == null) {
+      const fpe = extractStatValue(statsHtml, "Forward PE");
+      if (fpe != null) result.forwardPE = fpe;
+    }
+    if (result.trailingPE == null) {
+      const pe = extractStatValue(statsHtml, "PE Ratio");
+      if (pe != null) result.trailingPE = pe;
     }
   }
 

@@ -198,6 +198,16 @@ function computeOne(
                 reasoning: "该公司处于亏损状态，PE 不适用，PEG 无法计算。",
               };
             }
+            // PE 有值但 PEG 缺失：数据源未提供长期盈利增长预期，
+            // 常见于外国 ADR（如 NVO）。这不是抓取失败，需与"数据缺失"区分。
+            const growthHint =
+              metrics.revenueGrowthYoY != null
+                ? `，营收年增长 ${(metrics.revenueGrowthYoY * 100).toFixed(2)}%`
+                : "";
+            return {
+              verdict: "unknown" as Verdict,
+              reasoning: `数据源未提供该股 PEG（PEG 依赖分析师长期盈利增长预期，外国 ADR 等标的常缺失）。当前 PE ${pe.toFixed(2)}${growthHint}，可据此自行权衡估值与成长的匹配度。`,
+            };
           }
           return {
             verdict: "unknown" as Verdict,
