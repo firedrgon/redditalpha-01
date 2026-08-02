@@ -1160,16 +1160,19 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
 
   // 研报使用用户在 ⚙ 设置中选择的活跃模型（不再强制 Gemini：Gemini 免费额度
   // 容易被 429 打满导致研报直接失败）。长输出 + 60s 函数上限的超时风险由
-  // PROVIDER_TIMEOUT_MS(50s) 与 maxTokens(5000) 控制，超时返回清晰报错而非静默网络错误。
-  // 5000 让报告聚焦核心（财务表/同业对比/催化剂等），同时缩短生成时长以适配慢模型（如 qwen3.7-max）的 50s 子超时；resolveMaxTokens 仍按模型上下文窗口自动钳制，避免 413。
-  // 注意：Gemini 3.x 默认开启 thinking，thinking token 会占用 maxOutputTokens 预算导致正文被截断；
-  // llm.ts 已对 Gemini 传 thinkingLevel:"minimal" 关闭思考，确保 5000 预算基本全给正文。
+  // PROVIDER_TIMEOUT_MS(50s) 与 maxTokens(2000) 控制，超时返回清晰报错而非静默网络错误。
+  // 原 5000 在免费共享算力 ~20-35 tok/s 下需 143~250s，必超 50s 子超时；
+  // 降到 2000 后，DeepSeek-V4-Flash 等轻量快模型（~50+ tok/s）可在 ~40s 内完成。
+  // resolveMaxTokens 仍按模型上下文窗口自动钳制，避免 413。
+  // 注意：Gemini 3.x 与百炼 Qwen/DeepSeek 均可能默认开启 thinking，thinking token
+  // 占用输出预算且成倍拖慢生成；llm.ts 已分别对 Gemini 传 thinkingLevel:"minimal"、
+  // 对百炼传 enable_thinking:false 关闭思考，确保 2000 预算全给正文。
   const res = await chatCompletion(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 5000 }
+    { temperature: 0.3, maxTokens: 2000 }
   );
 
   // 落库（失败不应阻断返回，仅记录）

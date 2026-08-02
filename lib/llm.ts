@@ -624,6 +624,19 @@ async function callOpenAICompatible(
   const defaultMaxTokens = isReasoningModel ? 4096 : 3072;
   const maxTokens = resolveMaxTokens(provider, messages, options.maxTokens ?? defaultMaxTokens);
 
+  const body: Record<string, unknown> = {
+    model: provider.model,
+    messages,
+    temperature: options.temperature ?? 0.3,
+    max_tokens: maxTokens,
+  };
+  // 百炼（Qwen / 第三方 DeepSeek）OpenAI 兼容端点：关闭思考模式。
+  // thinking token 占用输出预算且成倍增加生成时间，免费共享算力下极易触发 50s 子超时。
+  // 百炼网关对不识别该参数的模型会自动忽略，故对所有 Qwen 系列 provider 统一传入。
+  if (QWEN_PROVIDER_IDS.includes(provider.id as (typeof QWEN_PROVIDER_IDS)[number])) {
+    body.enable_thinking = false;
+  }
+
   const res = await fetch(provider.endpoint, {
     method: "POST",
     headers: {
@@ -632,12 +645,7 @@ async function callOpenAICompatible(
       "HTTP-Referer": "https://reddit-alpha.local",
       "X-Title": "Reddit Alpha",
     },
-    body: JSON.stringify({
-      model: provider.model,
-      messages,
-      temperature: options.temperature ?? 0.3,
-      max_tokens: maxTokens,
-    }),
+    body: JSON.stringify(body),
     signal: options.signal,
   });
 
