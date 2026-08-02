@@ -37,6 +37,7 @@ export interface FinancialMetrics {
   trailingPE: number | null;
   forwardPE: number | null;
   pegRatio: number | null;
+  pegRatioEstimated?: boolean; // true 表示 PEG 由 PE÷盈利增速估算（数据源未直接提供，如外国 ADR）
   industry?: string | null;
   boardCode?: string | null; // 东方财富行业板块代码（A 股同业对比定位成分股用）
   industryPE?: number | null; // 行业 PE（近似值）
@@ -2019,6 +2020,8 @@ async function fetchStockAnalysisMetrics(
   }
 
   const warnings: string[] = [];
+  // 盈利增速（TTM/最新财年 vs 上一完整财年），用于数据源缺失 PEG 时做估算
+  let earningsGrowthYoY: number | null = null;
 
   // 注意：/financials/ 在 2026 年改版后返回的是精简版 "Financials Overview"
   // 页面（financialData:void 0，无任何指标数组），必须请求
@@ -2116,6 +2119,19 @@ async function fetchStockAnalysisMetrics(
       if (gm != null) result.grossMargin = gm;
       const pm = arrNum(profitMargin, fyStart) ?? arrNum(profitMargin, 0);
       if (pm != null) result.profitMargin = pm;
+
+      // 盈利增速（用于 PEG 估算）：优先 EPS（PEG 分母本就是每股收益增速），
+      // 退而求其次用净利润。口径为"最新可得财年(TTM 或最新 FY) vs 上一完整财年"，
+      // 反映当前运行速率而非某一静态年度，避免像 NVO 这种"过渡年"被严重低估。
+      const epsArr =
+        (data.epsDiluted as unknown) ??
+        (data.epsBasic as unknown) ??
+        (data.netIncome as unknown);
+      const egLatest = arrNum(epsArr, 0); // TTM 或最新 FY
+      const egPrev = arrNum(epsArr, 1); // 上一完整财年
+      if (egLatest != null && egPrev != null && egPrev !== 0) {
+        earningsGrowthYoY = egLatest / egPrev - 1;
+      }
 
       // 报表币种（NVO 等非美国公司以本币计价，如 DKK）。
       // details 对象与 financialData 平级，用轻量正则提取即可。
@@ -2233,6 +2249,27 @@ async function fetchStockAnalysisMetrics(
     if (result.trailingPE == null) {
       const pe = extractStatValue(statsHtml, "PE Ratio");
       if (pe != null) result.trailingPE = pe;
+    }
+  }
+
+  // ============================================================
+  // PEG 估算兜底：数据源未直接提供 PEG 时（典型：NVO/TSM/SAP 等外国 ADR，
+  // statistics 页明确标 n/a），若已有 PE 与盈利增速，则用 PEG ≈ PE ÷ 盈利增速%
+  // 估算一个值，避免分析页对这类股票完全空白。估算值会打 pegRatioEstimated 标记。
+  // ============================================================
+  if (
+    result.pegRatio == null &&
+    result.trailingPE != null &&
+    earningsGrowthYoY != null &&
+    earningsGrowthYoY > 0
+  ) {
+    const est = result.trailingPE / (earningsGrowthYoY * 100);
+    if (Number.isFinite(est) && est > 0) {
+      result.pegRatio = est;
+      result.pegRatioEstimated = true;
+      warnings.push(
+        `数据源未提供 PEG，已按 PE(${result.trailingPE.toFixed(2)}) ÷ 盈利增速(${(earningsGrowthYoY * 100).toFixed(2)}%) 估算 ≈ ${est.toFixed(2)}。`
+      );
     }
   }
 
@@ -3574,6 +3611,7 @@ async function fetchFinancialMetricsInternal(
         trailingPE: m.trailingPE ?? null,
         forwardPE: m.forwardPE ?? null,
         pegRatio: m.pegRatio ?? null,
+        pegRatioEstimated: m.pegRatioEstimated ?? false,
         industry: m.industry ?? null,
         industryPE: m.industryPE ?? null,
         currentPrice: m.currentPrice ?? null,

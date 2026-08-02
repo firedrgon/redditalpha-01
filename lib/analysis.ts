@@ -169,7 +169,7 @@ function computeOne(
 ): MetricResult {
   const value = getFieldValue(metrics, strategy.metricField);
 
-  const { verdict, reasoning } =
+  let { verdict, reasoning } =
     value == null
       ? (() => {
           // peVsIndustry 为 null 时，区分"亏损公司 PE 不适用"和"数据缺失"
@@ -230,6 +230,15 @@ function computeOne(
           };
         })();
 
+  // PEG 为估算值时，在研判理由中注明，避免与数据源直接提供的值混淆
+  if (
+    strategy.metricField === "pegRatio" &&
+    metrics.pegRatioEstimated &&
+    reasoning
+  ) {
+    reasoning += "（PEG 为估算值：以 PE ÷ 盈利增速推算，数据源未直接提供。）";
+  }
+
   // 对 peVsIndustry 给出更友好的展示
   let displayValue = fmtValue(value, strategy.format);
   if (strategy.metricField === "peVsIndustry") {
@@ -285,6 +294,13 @@ function computeOne(
       displayValue = `TTM ${(ttm * 100).toFixed(2)}%`;
     } else if (fy != null) {
       displayValue = `上财年 ${(fy * 100).toFixed(2)}%`;
+    }
+  } else if (strategy.metricField === "pegRatio") {
+    // PEG：估算值加"估算"标注，与数据源直接提供的值区分
+    if (value != null) {
+      displayValue = metrics.pegRatioEstimated
+        ? `${value.toFixed(2)}（估算）`
+        : value.toFixed(2);
     }
   } else if (strategy.metricField === "targetUpside") {
     const currentPrice = metrics.currentPrice;
