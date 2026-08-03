@@ -6,7 +6,9 @@ name: Signals Cron (backup trigger)
 #   GitHub Actions 作为独立、可观测的备用触发通道，确保卖出信号能按时平仓。
 #
 # 幂等性：signals 的状态机基于当前持仓状态决策（OUT+BUY→建仓 / HOLD+SELL→平仓），
-#   重复触发不会重复建仓或重复平仓，因此与 Vercel Cron 并存是安全的。
+#   重复触发不会重复建仓或重复平仓，因此与 Vercel Cron 并存是安全的；
+#   同一天多次扫描（盘前+盘后）也不会产生重复 alert，只是把"恰好错过的信号"
+#   （例如盘前拉取失败、或盘间剧烈波动导致信号反转）在盘后再次校验。
 #
 # 需要在仓库 Settings → Secrets and variables → Actions 配置两个 secret：
 #   PROD_URL     生产站点地址，例如 https://your-app.vercel.app（结尾不要带 /）
@@ -14,9 +16,14 @@ name: Signals Cron (backup trigger)
 
 on:
   schedule:
-    # UTC 21:00（工作日）= 北京时间次日 05:00，美股收盘后
-    # 夏令时收盘 20:00 UTC → 收盘后 1 小时；冬令时收盘 21:00 UTC → 刚收盘
+    # 盘后：UTC 21:00（工作日）= 北京时间次日 05:00
+    #   美股夏令时收盘 20:00 UTC → 收盘后 1h；冬令时收盘 21:00 UTC → 刚收盘
+    #   A 股收盘 15:00 CST = 07:00 UTC → 本次扫描已拿到 A 股当日收盘后信号
     - cron: "0 21 * * 1-5"
+    # 盘前：UTC 01:00（工作日）= 北京时间 09:00
+    #   A 股 09:30 开盘前半小时，可提前发现隔夜持仓的 SELL 信号；
+    #   美股刚收盘数小时（US 下午 21:00 - 01:00 UTC 之间），信号仍为当日收盘数据
+    - cron: "0 1 * * 1-5"
   workflow_dispatch: # 支持在 Actions 页面手动点击立即触发（用于验证）
 
 jobs:
