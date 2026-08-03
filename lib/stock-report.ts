@@ -1159,20 +1159,21 @@ export async function generateStockReport(ticker: string): Promise<StockReport> 
   const { system, user } = buildReportPrompt(data);
 
   // 研报使用用户在 ⚙ 设置中选择的活跃模型（不再强制 Gemini：Gemini 免费额度
-  // 容易被 429 打满导致研报直接失败）。超时风险由 PROVIDER_TIMEOUT_MS(55s) + 流式调用控制：
+  // 容易被 429 打满导致研报直接失败）。超时风险由 PROVIDER_TIMEOUT_MS(50s) + 流式调用控制：
   // llm.ts 已改为流式（stream:true / streamGenerateContent），只要 chunk 持续流出就不会
-  // 被中间超时掐断；即使总时长触达 55s，也会返回已生成的部分内容而非全丢。
-  // maxTokens 5000 让报告覆盖完整框架（财务表/同业对比/催化剂等）；resolveMaxTokens
-  // 仍按模型上下文窗口自动钳制避免 413。
-  // 注意：Gemini 3.x 与百炼 Qwen/DeepSeek 均可能默认开启 thinking，thinking token
-  // 占用输出预算且成倍拖慢生成；llm.ts 已分别对 Gemini 传 thinkingLevel:"minimal"、
-  // 对百炼传 enable_thinking:false 关闭思考，确保 5000 预算全给正文。
+  // 被中间超时掐断；50s 兜底 abort 时返回已生成的部分内容（而非全丢），给 Vercel 60s
+  // 函数上限留 10s 落库与返回。
+  // maxTokens 3000 是 Vercel Hobby 60s 限制下的折中：百炼免费共享算力 ~30-50 tok/s，
+  // 50s 内可生成 1500-2500 tokens；3000 预算让模型尽量覆盖完整框架，超时则返回部分内容。
+  // 如需完整 5000+ tokens 研报，建议升级 Vercel Pro（maxDuration 300s）或切换更快的模型。
+  // 注意：llm.ts 已分别对 Gemini 传 thinkingLevel:"minimal"、对百炼传 enable_thinking:false
+  // 关闭思考，确保 maxTokens 预算全给正文。
   const res = await chatCompletion(
     [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-    { temperature: 0.3, maxTokens: 5000 }
+    { temperature: 0.3, maxTokens: 3000 }
   );
 
   // 落库（失败不应阻断返回，仅记录）

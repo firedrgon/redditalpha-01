@@ -93,9 +93,9 @@ function isQuotaExhausted(msg: string): boolean {
  *
  * 流式模式下此超时为"总兜底"：只要 chunk 持续流出就不会被掐断，
  * 仅当总时长触达时才 abort（此时 callProvider 会返回已生成的部分内容）。
- * 取 55s 给函数留出 ~5s 余量落库与返回。
+ * 取 50s 给函数留出 ~10s 余量落库与返回 JSON。
  */
-const PROVIDER_TIMEOUT_MS = 55_000;
+const PROVIDER_TIMEOUT_MS = 50_000;
 
 /**
  * 中国大陆 API 的 provider（部署在海外节点如 Vercel 默认区域时可能网络不可达/超时）。
