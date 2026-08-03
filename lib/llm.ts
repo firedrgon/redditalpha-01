@@ -91,10 +91,11 @@ function isQuotaExhausted(msg: string): boolean {
  * 也是 Hobby 计划硬上限）。否则 Vercel 会先杀掉整个函数，我们的子超时
  * 根本来不及触发，前端只会收到"连接被掐断"的网络错误而非正常 502。
  *
- * 这里取 50s，给函数留出 ~10s 余量；某 provider 单次生成超过 50s 即 abort，
- * 调用方 catch 后返回清晰的报错信息（而非静默超时）。
+ * 流式模式下此超时为"总兜底"：只要 chunk 持续流出就不会被掐断，
+ * 仅当总时长触达时才 abort（此时 callProvider 会返回已生成的部分内容）。
+ * 取 55s 给函数留出 ~5s 余量落库与返回。
  */
-const PROVIDER_TIMEOUT_MS = 50_000;
+const PROVIDER_TIMEOUT_MS = 55_000;
 
 /**
  * 中国大陆 API 的 provider（部署在海外节点如 Vercel 默认区域时可能网络不可达/超时）。
@@ -586,6 +587,57 @@ async function tryFallbackChain(
   return null;
 }
 
+/**
+ * 判断错误是否为 fetch 被 abort（用于流式读取中断时区分 abort vs 真实错误）。
+ * Node.js/Edge Runtime 里 abort 可能抛 DOMException(name=AbortError) 或 Error("aborted")。
+ */
+function isAbortError(err: unknown): boolean {
+  if (typeof DOMException !== "undefined" && err instanceof DOMException) {
+    return err.name === "AbortError";
+  }
+  if (err instanceof Error) {
+    return err.name === "AbortError" || /aborted/i.test(err.message);
+  }
+  return false;
+}
+
+/**
+ * 从 ReadableStream 读取 SSE 事件，逐个 yield data 字段的 JSON 字符串。
+ *
+ * SSE 格式：事件以空行(\n\n)分隔，每行 data: <json>。
+ * 遇到 [DONE] 或流结束时关闭。signal abort 时立即停止读取（不抛错）。
+ */
+async function* readSSEStream(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal
+): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      if (signal?.aborted) return;
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) >= 0) {
+        const event = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of event.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data:")) {
+            const data = trimmed.slice(5).trim();
+            if (data && data !== "[DONE]") yield data;
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** 单 provider 调用：根据协议分发 */
 async function callProvider(
   provider: LLMProvider,
@@ -629,9 +681,12 @@ async function callOpenAICompatible(
     messages,
     temperature: options.temperature ?? 0.3,
     max_tokens: maxTokens,
+    // 流式输出：避免非流式下长时间无数据流动被中间超时掐断。
+    // 流式只要有 chunk 持续流出，fetch 连接就是活跃的；且 abort 时能返回已生成的部分内容。
+    stream: true,
   };
   // 百炼（Qwen / 第三方 DeepSeek）OpenAI 兼容端点：关闭思考模式。
-  // thinking token 占用输出预算且成倍增加生成时间，免费共享算力下极易触发 50s 子超时。
+  // thinking token 占用输出预算且成倍增加生成时间，免费共享算力下极易触发超时。
   // 百炼网关对不识别该参数的模型会自动忽略，故对所有 Qwen 系列 provider 统一传入。
   if (QWEN_PROVIDER_IDS.includes(provider.id as (typeof QWEN_PROVIDER_IDS)[number])) {
     body.enable_thinking = false;
@@ -654,12 +709,44 @@ async function callOpenAICompatible(
     throw new Error(`${provider.name} HTTP ${res.status}: ${detail.slice(0, 200)}`);
   }
 
-  const data = await res.json();
-  const choice = data?.choices?.[0];
-  let text = choice?.message?.content;
+  // 兼容降级：某些环境可能不支持流式，res.body 为空时走非流式 JSON
+  if (!res.body) {
+    const data = await res.json();
+    const choice = data?.choices?.[0];
+    let text = choice?.message?.content;
+    if (isReasoningModel && !text) {
+      text = choice?.message?.reasoning_content || choice?.message?.reasoning;
+    }
+    if (!text) throw new Error(`${provider.name} 返回内容为空`);
+    return text;
+  }
 
-  if (isReasoningModel && !text) {
-    text = choice?.message?.reasoning_content || choice?.message?.reasoning;
+  // 流式读取：拼接所有 delta.content
+  let text = "";
+  try {
+    for await (const dataStr of readSSEStream(res.body, options.signal)) {
+      try {
+        const chunk = JSON.parse(dataStr);
+        const delta = chunk?.choices?.[0]?.delta;
+        if (delta?.content) {
+          text += delta.content;
+        } else if (isReasoningModel && (delta?.reasoning_content || delta?.reasoning)) {
+          // 推理模型：若没有 content（纯思考阶段），拼接 reasoning_content
+          text += delta.reasoning_content || delta.reasoning;
+        }
+      } catch {
+        // 忽略单行 JSON 解析错误（部分行可能不完整）
+      }
+    }
+  } catch (err) {
+    // abort 且已累积部分内容 → 返回部分内容（非流式下只能全丢）
+    if (text && (options.signal?.aborted || isAbortError(err))) {
+      console.warn(
+        `[llm] ${provider.name} 流式被中断，返回已生成的 ${text.length} 字符部分内容`
+      );
+      return text;
+    }
+    throw err;
   }
 
   if (!text) throw new Error(`${provider.name} 返回内容为空`);
@@ -673,7 +760,8 @@ async function callGemini(
   messages: LLMMessage[],
   options: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
 ): Promise<string> {
-  const url = `${provider.endpoint}/${provider.model}:generateContent?key=${apiKey}`;
+  // 流式端点：streamGenerateContent + alt=sse 返回标准 SSE 格式
+  const url = `${provider.endpoint}/${provider.model}:streamGenerateContent?alt=sse&key=${apiKey}`;
   const systemMsg = messages.find((m) => m.role === "system");
   const contents = messages
     .filter((m) => m.role !== "system")
@@ -709,26 +797,58 @@ async function callGemini(
     throw new Error(`${provider.name} HTTP ${res.status}: ${detail.slice(0, 200)}`);
   }
 
-  const data = await res.json();
-  // Gemini 2.5 等推理模型会先输出思考过程（parts 中带 thought:true），
-  // 最终答案在后续 parts 中，需遍历拼接并跳过思考部分。
-  const parts = data?.candidates?.[0]?.content?.parts;
+  // 兼容降级：某些环境可能不支持流式，res.body 为空时走非流式 JSON
+  if (!res.body) {
+    const data = await res.json();
+    const parts = data?.candidates?.[0]?.content?.parts;
+    let text = "";
+    if (Array.isArray(parts)) {
+      for (const part of parts) {
+        if (part.thought === true) continue;
+        if (typeof part.text === "string") text += part.text;
+      }
+    }
+    if (!text) {
+      const finishReason = data?.candidates?.[0]?.finishReason;
+      if (finishReason === "MAX_TOKENS") {
+        throw new Error(
+          `${provider.name} 返回内容为空（token 上限不足，推理模型需要更大 maxTokens）`
+        );
+      }
+      throw new Error(`${provider.name} 返回内容为空`);
+    }
+    return text;
+  }
+
+  // 流式读取：拼接所有 parts.text（跳过 thought:true 的思考部分）
   let text = "";
-  if (Array.isArray(parts)) {
-    for (const part of parts) {
-      if (part.thought === true) continue;
-      if (typeof part.text === "string") text += part.text;
+  try {
+    for await (const dataStr of readSSEStream(res.body, options.signal)) {
+      try {
+        const chunk = JSON.parse(dataStr);
+        const parts = chunk?.candidates?.[0]?.content?.parts;
+        if (Array.isArray(parts)) {
+          for (const part of parts) {
+            if (part.thought === true) continue;
+            if (typeof part.text === "string") text += part.text;
+          }
+        }
+      } catch {
+        // 忽略单行 JSON 解析错误
+      }
     }
-  }
-  if (!text) {
-    const finishReason = data?.candidates?.[0]?.finishReason;
-    if (finishReason === "MAX_TOKENS") {
-      throw new Error(
-        `${provider.name} 返回内容为空（token 上限不足，推理模型需要更大 maxTokens）`
+  } catch (err) {
+    // abort 且已累积部分内容 → 返回部分内容
+    if (text && (options.signal?.aborted || isAbortError(err))) {
+      console.warn(
+        `[llm] ${provider.name} 流式被中断，返回已生成的 ${text.length} 字符部分内容`
       );
+      return text;
     }
-    throw new Error(`${provider.name} 返回内容为空`);
+    throw err;
   }
+
+  if (!text) throw new Error(`${provider.name} 返回内容为空`);
   return text;
 }
 
