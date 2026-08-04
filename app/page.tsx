@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import HotStocksPanel from "@/app/components/HotStocksPanel";
 import PositionsPanel from "@/app/components/PositionsPanel";
+import EtfTrendPanel, { type EtfTab } from "@/app/components/EtfTrendPanel";
 import AuthMenu from "@/app/components/AuthMenu";
 import Link from "next/link";
 
@@ -3804,7 +3805,8 @@ export default function Home() {
   const subMenuRef = useRef<HTMLDivElement>(null);
   const [etfMenuOpen, setEtfMenuOpen] = useState(false);
   const etfMenuRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions">("subreddit");
+  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions" | "etf">("subreddit");
+  const [etfTab, setEtfTab] = useState<EtfTab>("pullback");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
@@ -3873,6 +3875,16 @@ export default function Home() {
     }
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  // 支持从其它页面（SiteHeader 的 ETF 链接）深链进入：/?view=etf&tab=...
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("view") === "etf") {
+      setView("etf");
+      const t = p.get("tab");
+      setEtfTab(t === "newPool" ? "newPool" : "pullback");
+    }
   }, []);
 
   // 初始化：从后端 API 读取收藏（公开数据，所有访客共享）
@@ -4531,7 +4543,11 @@ export default function Home() {
             <div className="relative" ref={etfMenuRef}>
               <button
                 onClick={() => setEtfMenuOpen((o) => !o)}
-                className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent"
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all border ${
+                  view === "etf"
+                    ? "border-orange-500/50 bg-orange-500/10 text-orange-400"
+                    : "border-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                }`}
                 title="ETF 主升浪池"
               >
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
@@ -4551,20 +4567,32 @@ export default function Home() {
               </button>
               {etfMenuOpen && (
                 <div className="absolute left-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl">
-                  <a
-                    href="/etf-trend?tab=pullback"
-                    className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-orange-400"
+                  <button
+                    onClick={() => {
+                      setView("etf");
+                      setEtfTab("pullback");
+                      setEtfMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition hover:bg-zinc-800 hover:text-orange-400 ${
+                      view === "etf" && etfTab === "pullback" ? "text-orange-400" : "text-zinc-300"
+                    }`}
                   >
                     <span>趋势回踩</span>
                     <span className="text-[10px] text-zinc-600">回踩主升趋势</span>
-                  </a>
-                  <a
-                    href="/etf-trend?tab=newPool"
-                    className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-orange-400"
+                  </button>
+                  <button
+                    onClick={() => {
+                      setView("etf");
+                      setEtfTab("newPool");
+                      setEtfMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition hover:bg-zinc-800 hover:text-orange-400 ${
+                      view === "etf" && etfTab === "newPool" ? "text-orange-400" : "text-zinc-300"
+                    }`}
                   >
                     <span>新入池</span>
                     <span className="text-[10px] text-zinc-600">新进入主升浪</span>
-                  </a>
+                  </button>
                 </div>
               )}
             </div>
@@ -4703,6 +4731,8 @@ export default function Home() {
           <HotStocksPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
         ) : view === "positions" ? (
           <PositionsPanel />
+        ) : view === "etf" ? (
+          <EtfTrendPanel tab={etfTab} onTabChange={setEtfTab} />
         ) : (
           <>
             <div className="mb-6 flex items-center justify-between">

@@ -21,11 +21,11 @@ const NAV: NavItem[] = [
   { href: "/hot", label: "热榜" },
   { href: "/stock-report", label: "研报" },
   {
-    href: "/etf-trend",
+    href: "/?view=etf",
     label: "ETF主升浪",
     children: [
-      { href: "/etf-trend?tab=pullback", label: "趋势回踩" },
-      { href: "/etf-trend?tab=newPool", label: "新入池" },
+      { href: "/?view=etf&tab=pullback", label: "趋势回踩" },
+      { href: "/?view=etf&tab=newPool", label: "新入池" },
     ],
   },
   { href: "/signals", label: "信号提醒" },
@@ -88,8 +88,9 @@ function DropdownItem({ item }: { item: NavItem }) {
       {open && item.children && (
         <div className="absolute left-0 top-full z-50 mt-1 min-w-[8rem] rounded-lg border border-zinc-800 bg-zinc-900/95 p-1 shadow-xl backdrop-blur-md">
           {item.children.map((c) => {
-            const childActive =
-              isActive(pathname, c.href) && pathname === "/etf-trend";
+            // ETF 子项指向首页 view（带 query），SiteHeader 无法精确判断 query，
+            // 故仅在首页时高亮父级；子项不单独高亮（首页有自己的导航高亮）。
+            const childActive = false;
             return (
               <Link
                 key={c.href}
