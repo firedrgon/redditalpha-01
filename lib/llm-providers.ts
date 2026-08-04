@@ -69,12 +69,6 @@ export const GROQ_PROVIDER_IDS = [
   "groq-2",
 ] as const;
 
-/** 智谱系列 provider 共享同一 API Key（LLM_API_KEY_ZHIPU / ZHIPU_API_KEY） */
-export const ZHIPU_PROVIDER_IDS = [
-  "zhipu-1",
-  "zhipu-2",
-] as const;
-
 /**
  * 通义千问 / 阿里云百炼系列 provider 共享同一 API Key（LLM_API_KEY_QWEN / DASHSCOPE_API_KEY）。
  *
@@ -98,8 +92,6 @@ if (/cn-[a-z]+/i.test(QWEN_BASE_URL) || (QWEN_BASE_URL.includes("aliyuncs.com") 
 
 export const QWEN_PROVIDER_IDS = [
   "qwen-1",
-  "qwen-2",
-  "qwen-3",
   "qwen-4",
 ] as const;
 
@@ -209,38 +201,6 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     freeQuota: "免费层：30 req/min，每天 14400 req（Groq 系列共享配额）",
   },
   {
-    id: "zhipu-1",
-    contextWindow: 128_000,
-    name: "智谱 GLM-4-Flash",
-    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    model: "glm-4-flash",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://open.bigmodel.cn/usercenter/apikeys",
-    docsUrl: "https://open.bigmodel.cn/dev/howuse/introduction",
-    description:
-      "国产智谱 GLM-4-Flash：永久免费、中文强、128K 上下文，适合中文股票分析主力替补。与其他智谱配置共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：Flash 系列永久免费；注册送 2000 万 token（永久有效），QPS≈2",
-    hidden: true,
-  },
-  {
-    id: "zhipu-2",
-    contextWindow: 128_000,
-    name: "智谱 GLM-4.7-Flash",
-    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    model: "glm-4.7-flash",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://open.bigmodel.cn/usercenter/apikeys",
-    docsUrl: "https://open.bigmodel.cn/dev/howuse/introduction",
-    description:
-      "智谱最新 GLM-4.7-Flash：免费、质量优于 GLM-4-Flash，128K 上下文，适合深度中文分析。与其他智谱配置共用 Key",
-    protocol: "openai",
-    freeQuota: "免费层：GLM-4.7-Flash 永久免费；注册送 2000 万 token（永久有效）",
-    hidden: true,
-  },
-  {
     id: "qwen-1",
     contextWindow: 128_000,
     name: "阿里云百炼 · Qwen3.6-Flash",
@@ -253,38 +213,6 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
       "百炼国际站 Qwen3.6-Flash：快、便宜，免费额度用尽会自动切换下一个模型再兜底其他家族。与其他通义配置共用 Key",
-    protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
-  },
-  {
-    id: "qwen-2",
-    contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Plus",
-    endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-plus",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://www.alibabacloud.com/product/model-studio",
-    docsUrl:
-      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
-    description:
-      "百炼国际站 Qwen3.7-Plus：均衡型，质量优于 Flash，免费额度与其他 Qwen 模型相互独立。与其他通义配置共用 Key",
-    protocol: "openai",
-    freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
-  },
-  {
-    id: "qwen-3",
-    contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.7-Max",
-    endpoint: QWEN_BASE_URL,
-    model: "qwen3.7-max",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://www.alibabacloud.com/product/model-studio",
-    docsUrl:
-      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
-    description:
-      "百炼国际站 Qwen3.7-Max（最新稳定版）：旗舰质量，适合深度研报，免费额度独立。与其他通义配置共用 Key",
     protocol: "openai",
     freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
   },

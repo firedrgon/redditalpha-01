@@ -101,11 +101,9 @@ const PROVIDER_TIMEOUT_MS = 50_000;
  * 中国大陆 API 的 provider（部署在海外节点如 Vercel 默认区域时可能网络不可达/超时）。
  * 注意：通义千问/百炼已改用国际站端点（dashscope-intl，新加坡），海外可直连，
  * 故 qwen-* 不再列入此名单（其超时不再是 GFW 阻断，无需中国特色报错）。
+ * 智谱、豆包、Kimi 已移除，此名单现为空，保留结构以备未来添加国产 provider。
  */
-const CN_PROVIDER_IDS = [
-  "zhipu-1",
-  "zhipu-2",
-];
+const CN_PROVIDER_IDS: string[] = [];
 
 /**
  * 解析原始 API Key 字符串为 key 池。
@@ -271,9 +269,9 @@ function isChinaHost(endpoint: string): boolean {
   if (/(^|\.)cn-[a-z]+[\.\-]/.test(h)) return true; // cn-beijing / cn-hangzhou 等区域
   if (h.includes("aliyuncs.com") || h.includes("aliyun.com")) return true; // dashscope.aliyuncs.com 默认北京
   if (h.includes("dashscope")) return true;
-  if (h.includes("volces.com")) return true; // 火山方舟（豆包）
+  if (h.includes("volces.com")) return true; // 火山方舟
   if (h.includes("bigmodel.cn")) return true; // 智谱
-  if (h.includes("moonshot.cn")) return true; // Kimi
+  if (h.includes("moonshot.cn")) return true; // Moonshot
   return false;
 }
 

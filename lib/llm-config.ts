@@ -18,7 +18,6 @@ import {
   OPENROUTER_PROVIDER_IDS,
   GEMINI_PROVIDER_IDS,
   GROQ_PROVIDER_IDS,
-  ZHIPU_PROVIDER_IDS,
   QWEN_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
   type LLMProvider,
@@ -90,7 +89,6 @@ function readEnvKeys(): Record<string, string> {
     ["GROQ_API_KEY", "groq-1"],
     ["GEMINI_API_KEY", "gemini-1"],
     ["GOOGLE_API_KEY", "gemini-1"],
-    ["ZHIPU_API_KEY", "zhipu-1"],
     ["DASHSCOPE_API_KEY", "qwen-1"],
   ];
   for (const [alias, providerId] of aliases) {
@@ -135,16 +133,6 @@ function readEnvKeys(): Record<string, string> {
     process.env.LLM_API_KEY_DEEPSEEK?.trim() ||
     process.env.DEEPSEEK_API_KEY?.trim();
   if (deepseekKey && !out["deepseek-1"]) out["deepseek-1"] = deepseekKey;
-  // 智谱系列共用同一 Key
-  // 统一环境变量 LLM_API_KEY_ZHIPU，兼容 ZHIPU_API_KEY
-  const zhipuKey =
-    process.env.LLM_API_KEY_ZHIPU?.trim() ||
-    process.env.ZHIPU_API_KEY?.trim();
-  if (zhipuKey) {
-    for (const id of ZHIPU_PROVIDER_IDS) {
-      if (!out[id]) out[id] = zhipuKey;
-    }
-  }
   // 通义千问系列共用同一 Key
   // 统一环境变量 LLM_API_KEY_QWEN，兼容 DASHSCOPE_API_KEY
   const qwenKey =
@@ -218,29 +206,6 @@ function applySharedGroqKeys(config: LLMConfig): void {
   }
   if (!sharedKey) return;
   for (const id of GROQ_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s && !s.apiKey?.trim()) {
-      s.apiKey = sharedKey;
-      if (sharedSource === "env") s.keySource = "env";
-      else if (sharedSource === "local") s.keySource = "local";
-    }
-  }
-}
-
-/** 智谱系列共用同一 Key（LLM_API_KEY_ZHIPU / ZHIPU_API_KEY，UI 保存到任一 provider 即可） */
-function applySharedZhipuKeys(config: LLMConfig): void {
-  let sharedKey = "";
-  let sharedSource: ProviderStatus["keySource"] | null = null;
-  for (const id of ZHIPU_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s?.apiKey?.trim()) {
-      sharedKey = s.apiKey.trim();
-      sharedSource = s.keySource;
-      break;
-    }
-  }
-  if (!sharedKey) return;
-  for (const id of ZHIPU_PROVIDER_IDS) {
     const s = config.providers[id];
     if (s && !s.apiKey?.trim()) {
       s.apiKey = sharedKey;
@@ -474,7 +439,6 @@ export async function readConfig(): Promise<LLMConfig> {
   applySharedOpenRouterKeys(config);
   applySharedGeminiKeys(config);
   applySharedGroqKeys(config);
-  applySharedZhipuKeys(config);
   applySharedQwenKeys(config);
   applyEnvKeys(config, isFreshConfig);
 
