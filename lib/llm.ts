@@ -105,8 +105,6 @@ const PROVIDER_TIMEOUT_MS = 50_000;
 const CN_PROVIDER_IDS = [
   "zhipu-1",
   "zhipu-2",
-  "kimi-1",
-  "doubao-1",
 ];
 
 /**

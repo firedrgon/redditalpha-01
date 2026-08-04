@@ -20,8 +20,6 @@ import {
   GROQ_PROVIDER_IDS,
   ZHIPU_PROVIDER_IDS,
   QWEN_PROVIDER_IDS,
-  KIMI_PROVIDER_IDS,
-  DOUBAO_PROVIDER_IDS,
   PREFERRED_ACTIVE_ORDER,
   type LLMProvider,
 } from "./llm-providers";
@@ -94,8 +92,6 @@ function readEnvKeys(): Record<string, string> {
     ["GOOGLE_API_KEY", "gemini-1"],
     ["ZHIPU_API_KEY", "zhipu-1"],
     ["DASHSCOPE_API_KEY", "qwen-1"],
-    ["MOONSHOT_API_KEY", "kimi-1"],
-    ["DOUBAO_API_KEY", "doubao-1"],
   ];
   for (const [alias, providerId] of aliases) {
     const v = process.env[alias];
@@ -157,26 +153,6 @@ function readEnvKeys(): Record<string, string> {
   if (qwenKey) {
     for (const id of QWEN_PROVIDER_IDS) {
       if (!out[id]) out[id] = qwenKey;
-    }
-  }
-  // Kimi（月之暗面）系列共用同一 Key
-  // 统一环境变量 LLM_API_KEY_KIMI，兼容 MOONSHOT_API_KEY
-  const kimiKey =
-    process.env.LLM_API_KEY_KIMI?.trim() ||
-    process.env.MOONSHOT_API_KEY?.trim();
-  if (kimiKey) {
-    for (const id of KIMI_PROVIDER_IDS) {
-      if (!out[id]) out[id] = kimiKey;
-    }
-  }
-  // 豆包（火山引擎方舟）系列共用同一 Key
-  // 统一环境变量 LLM_API_KEY_DOUBAO，兼容 DOUBAO_API_KEY
-  const doubaoKey =
-    process.env.LLM_API_KEY_DOUBAO?.trim() ||
-    process.env.DOUBAO_API_KEY?.trim();
-  if (doubaoKey) {
-    for (const id of DOUBAO_PROVIDER_IDS) {
-      if (!out[id]) out[id] = doubaoKey;
     }
   }
   return out;
@@ -288,52 +264,6 @@ function applySharedQwenKeys(config: LLMConfig): void {
   }
   if (!sharedKey) return;
   for (const id of QWEN_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s && !s.apiKey?.trim()) {
-      s.apiKey = sharedKey;
-      if (sharedSource === "env") s.keySource = "env";
-      else if (sharedSource === "local") s.keySource = "local";
-    }
-  }
-}
-
-/** Kimi（月之暗面）系列共用同一 Key（LLM_API_KEY_KIMI / MOONSHOT_API_KEY，UI 保存到任一 provider 即可） */
-function applySharedKimiKeys(config: LLMConfig): void {
-  let sharedKey = "";
-  let sharedSource: ProviderStatus["keySource"] | null = null;
-  for (const id of KIMI_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s?.apiKey?.trim()) {
-      sharedKey = s.apiKey.trim();
-      sharedSource = s.keySource;
-      break;
-    }
-  }
-  if (!sharedKey) return;
-  for (const id of KIMI_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s && !s.apiKey?.trim()) {
-      s.apiKey = sharedKey;
-      if (sharedSource === "env") s.keySource = "env";
-      else if (sharedSource === "local") s.keySource = "local";
-    }
-  }
-}
-
-/** 豆包（火山引擎方舟）系列共用同一 Key（LLM_API_KEY_DOUBAO / DOUBAO_API_KEY，UI 保存到任一 provider 即可） */
-function applySharedDoubaoKeys(config: LLMConfig): void {
-  let sharedKey = "";
-  let sharedSource: ProviderStatus["keySource"] | null = null;
-  for (const id of DOUBAO_PROVIDER_IDS) {
-    const s = config.providers[id];
-    if (s?.apiKey?.trim()) {
-      sharedKey = s.apiKey.trim();
-      sharedSource = s.keySource;
-      break;
-    }
-  }
-  if (!sharedKey) return;
-  for (const id of DOUBAO_PROVIDER_IDS) {
     const s = config.providers[id];
     if (s && !s.apiKey?.trim()) {
       s.apiKey = sharedKey;
@@ -546,8 +476,6 @@ export async function readConfig(): Promise<LLMConfig> {
   applySharedGroqKeys(config);
   applySharedZhipuKeys(config);
   applySharedQwenKeys(config);
-  applySharedKimiKeys(config);
-  applySharedDoubaoKeys(config);
   applyEnvKeys(config, isFreshConfig);
 
   // 校正活跃模型：用户锁定的是"具体模型 slug"而非槽位。

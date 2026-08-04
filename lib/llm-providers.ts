@@ -22,7 +22,7 @@ export interface LLMProvider {
   freeQuota: string;
   /**
    * 是否需要用户在 UI 自定义模型标识。
-   * 例如火山引擎豆包：API 的 model 必须是用户自己创建的推理接入点 Endpoint ID（ep- 开头），
+   * 例如某些 provider：API 的 model 必须是用户自己创建的推理接入点 Endpoint ID（ep- 开头），
    * 而非固定的模型名，因此需在设置页暴露「模型/接入点 ID」编辑框让用户填写。
    */
   customModel?: boolean;
@@ -44,7 +44,7 @@ export interface LLMProvider {
   maxOutputTokens?: number;
   /**
    * 是否在设置页的模型列表中隐藏。
-   * 用于收起在海外部署下不可用/不稳定的国产模型（智谱、通义、Kimi、豆包）。
+   * 用于收起在海外部署下不可用/不稳定的国产模型（智谱）。
    * 隐藏后仍保留配置与调用能力，仅不展示在 UI 列表；置 false 即可恢复显示。
    */
   hidden?: boolean;
@@ -102,12 +102,6 @@ export const QWEN_PROVIDER_IDS = [
   "qwen-3",
   "qwen-4",
 ] as const;
-
-/** Kimi（月之暗面）系列 provider 共享同一 API Key（LLM_API_KEY_KIMI / MOONSHOT_API_KEY） */
-export const KIMI_PROVIDER_IDS = ["kimi-1"] as const;
-
-/** 豆包（火山引擎方舟）系列 provider 共享同一 API Key（LLM_API_KEY_DOUBAO / DOUBAO_API_KEY） */
-export const DOUBAO_PROVIDER_IDS = ["doubao-1"] as const;
 
 /**
  * 自动选择活跃 provider 时的优先级（配额 + 质量综合优先）。
@@ -309,39 +303,6 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "百炼国际站第三方模型 DeepSeek-V4-Flash：与 Qwen 共用国际站 Key 与端点，免费额度独立，适合做 Qwen 额度用尽后的同家族兜底",
     protocol: "openai",
     freeQuota: "百炼国际站免费额度（与 Qwen 同家族，共用 LLM_API_KEY_QWEN）",
-  },
-  {
-    id: "kimi-1",
-    contextWindow: 128_000,
-    name: "Kimi · Moonshot v1-128K",
-    endpoint: "https://api.moonshot.cn/v1/chat/completions",
-    model: "moonshot-v1-128k",
-    free: true,
-    needsKey: true,
-    signupUrl: "https://platform.moonshot.cn",
-    docsUrl: "https://platform.moonshot.cn/docs/api/overview",
-    description:
-      "月之暗面 Kimi：长文本强项（128K）、中文好、兼容 OpenAI。新用户送 ¥15 免费额度。与其他 Kimi 配置共用 Key",
-    protocol: "openai",
-    freeQuota: "免费额度：新用户送 ¥15 试用额度（rate-limited free tier）；moonshot-v1-128k 按量 ¥60/MTok",
-    hidden: true,
-  },
-  {
-    id: "doubao-1",
-    contextWindow: 32_000,
-    name: "豆包 · 火山引擎方舟",
-    endpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-    model: "doubao-pro-32k",
-    free: true,
-    needsKey: true,
-    customModel: true,
-    signupUrl: "https://console.volcengine.com/ark",
-    docsUrl: "https://www.volcengine.com/docs/82379",
-    description:
-      "字节豆包大模型，中文强、便宜。⚠️ 需先在火山方舟创建推理接入点，再把下方「模型/接入点 ID」改为你的 Endpoint ID（ep- 开头）。与其他豆包配置共用 Key",
-    protocol: "openai",
-    freeQuota: "免费额度：注册送体验额度；doubao-pro-32k 按量计费，doubao-lite 更便宜",
-    hidden: true,
   },
 ];
 
