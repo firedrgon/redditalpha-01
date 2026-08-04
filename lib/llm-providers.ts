@@ -93,6 +93,7 @@ if (/cn-[a-z]+/i.test(QWEN_BASE_URL) || (QWEN_BASE_URL.includes("aliyuncs.com") 
 export const QWEN_PROVIDER_IDS = [
   "qwen-1",
   "qwen-4",
+  "qwen-5",
 ] as const;
 
 /**
@@ -203,16 +204,16 @@ export const LLM_PROVIDERS: LLMProvider[] = [
   {
     id: "qwen-1",
     contextWindow: 128_000,
-    name: "阿里云百炼 · Qwen3.6-Flash",
+    name: "阿里云百炼 · Qwen3.7-Flash",
     endpoint: QWEN_BASE_URL,
-    model: "qwen3.6-flash",
+    model: "qwen3.7-flash",
     free: true,
     needsKey: true,
     signupUrl: "https://www.alibabacloud.com/product/model-studio",
     docsUrl:
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
-      "百炼国际站 Qwen3.6-Flash：快、便宜，免费额度用尽会自动切换下一个模型再兜底其他家族。与其他通义配置共用 Key",
+      "百炼国际站 Qwen3.7-Flash：快、便宜，免费额度用尽会自动切换下一个模型再兜底其他家族。与其他通义配置共用 Key",
     protocol: "openai",
     freeQuota: "百炼国际站免费额度（各模型独立，耗尽即自动切换下一个模型）",
   },
@@ -229,6 +230,22 @@ export const LLM_PROVIDERS: LLMProvider[] = [
       "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     description:
       "百炼国际站第三方模型 DeepSeek-V4-Flash：与 Qwen 共用国际站 Key 与端点，免费额度独立，适合做 Qwen 额度用尽后的同家族兜底",
+    protocol: "openai",
+    freeQuota: "百炼国际站免费额度（与 Qwen 同家族，共用 LLM_API_KEY_QWEN）",
+  },
+  {
+    id: "qwen-5",
+    contextWindow: 128_000,
+    name: "阿里云百炼 · GLM-5.2 (第三方)",
+    endpoint: QWEN_BASE_URL,
+    model: "glm-5.2",
+    free: true,
+    needsKey: true,
+    signupUrl: "https://www.alibabacloud.com/product/model-studio",
+    docsUrl:
+      "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    description:
+      "百炼国际站第三方模型 GLM-5.2：与 Qwen 共用国际站 Key 与端点，免费额度独立，适合做 Qwen 额度用尽后的同家族兜底",
     protocol: "openai",
     freeQuota: "百炼国际站免费额度（与 Qwen 同家族，共用 LLM_API_KEY_QWEN）",
   },
