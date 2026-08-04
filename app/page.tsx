@@ -3802,6 +3802,8 @@ export default function Home() {
   const [activeSub, setActiveSub] = useState("wallstreetbets");
   const [subMenuOpen, setSubMenuOpen] = useState(false);
   const subMenuRef = useRef<HTMLDivElement>(null);
+  const [etfMenuOpen, setEtfMenuOpen] = useState(false);
+  const etfMenuRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions">("subreddit");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
@@ -3859,11 +3861,14 @@ export default function Home() {
     }
   }, []);
 
-  // 板块下拉菜单：点击外部关闭
+  // 板块 / ETF 下拉菜单：点击外部关闭
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (subMenuRef.current && !subMenuRef.current.contains(e.target as Node)) {
         setSubMenuOpen(false);
+      }
+      if (etfMenuRef.current && !etfMenuRef.current.contains(e.target as Node)) {
+        setEtfMenuOpen(false);
       }
     }
     document.addEventListener("mousedown", onClick);
@@ -4522,6 +4527,47 @@ export default function Home() {
               </svg>
               持仓
             </button>
+            {/* ETF 主升浪下拉菜单 */}
+            <div className="relative" ref={etfMenuRef}>
+              <button
+                onClick={() => setEtfMenuOpen((o) => !o)}
+                className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent"
+                title="ETF 主升浪池"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
+                </svg>
+                ETF主升浪
+                <svg
+                  viewBox="0 0 24 24"
+                  className={`h-3.5 w-3.5 transition-transform ${etfMenuOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {etfMenuOpen && (
+                <div className="absolute left-0 z-50 mt-2 w-44 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+                  <a
+                    href="/etf-trend?tab=pullback"
+                    className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-orange-400"
+                  >
+                    <span>趋势回踩</span>
+                    <span className="text-[10px] text-zinc-600">回踩主升趋势</span>
+                  </a>
+                  <a
+                    href="/etf-trend?tab=newPool"
+                    className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-orange-400"
+                  >
+                    <span>新入池</span>
+                    <span className="text-[10px] text-zinc-600">新进入主升浪</span>
+                  </a>
+                </div>
+              )}
+            </div>
             <div className="mx-1 self-center text-zinc-700">|</div>
             <div className="relative" ref={subMenuRef}>
               <button

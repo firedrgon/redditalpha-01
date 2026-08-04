@@ -18,7 +18,8 @@ interface EtfTrendResult {
   pullback: EtfTrendItem[];
   newPool: EtfTrendItem[];
   total: number;
-  elapsedMs: number;
+  /** 数据日期 YYYY-MM-DD */
+  date: string;
   fetchedAt: string;
   error?: string;
 }
@@ -142,13 +143,29 @@ export default function EtfTrendPage() {
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    setError(null);
+    try {
+      // POST：抓取并落库（与盘前 cron 行为一致）
+      const postRes = await fetch("/api/etf-trend", { method: "POST" });
+      if (!postRes.ok) {
+        const errText = await postRes.text().catch(() => "");
+        throw new Error(`刷新失败 HTTP ${postRes.status}: ${errText.slice(0, 200)}`);
+      }
+      // 刷新后重新读取已去重数据
+      await load();
+    } catch (err) {
+      console.error("[etf-trend] 刷新失败:", err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const list = tab === "pullback" ? data?.pullback ?? [] : data?.newPool ?? [];
   const fetchedTime = data?.fetchedAt
-    ? new Date(data.fetchedAt).toLocaleTimeString("zh-CN", {
+    ? new Date(data.fetchedAt).toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
       })
@@ -179,9 +196,12 @@ export default function EtfTrendPage() {
               ETF 主升浪
             </h1>
             <p className="mt-1 text-sm text-zinc-400">
-              同花顺 ETF 主升浪池 · 按趋势信号分类
+              同花顺 ETF 主升浪池 · 按趋势信号分类 · 同类仅展示一只
+              {data?.date && (
+                <span className="ml-1 text-zinc-500">（{data.date}）</span>
+              )}
               {fetchedTime && (
-                <span className="ml-1 text-zinc-500">（更新于 {fetchedTime}）</span>
+                <span className="ml-1 text-zinc-500">更新于 {fetchedTime}</span>
               )}
             </p>
           </div>

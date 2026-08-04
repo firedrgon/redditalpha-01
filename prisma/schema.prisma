@@ -197,6 +197,35 @@ model HotStock {
   @@index([code])
 }
 
+/// ETF 主升浪池每日快照（同花顺数据源，盘前抓取一次）。
+/// 一只 ETF 可同时属于多个分类（pullback=趋势回踩 / newPool=新入池），故唯一键含 category。
+/// dedupKey 为归一化后的指数/概念名，读取时按 dedupKey 分组、每组仅展示一只。
+model EtfTrend {
+  id           String   @id @default(cuid())
+  /// 北京时间日期 YYYY-MM-DD
+  date         String
+  /// 6 位交易代码
+  code         String
+  name         String
+  /// 带市场前缀的标的代码，如 "36:159725"
+  prefixedCode String
+  /// SH(沪) / SZ(深)
+  board        String?
+  /// 是否 T+0
+  t0           Boolean  @default(false)
+  /// 分类标签文案，如 "回踩" / "新入池"
+  tag          String
+  /// 分类：pullback(趋势回踩) / newPool(新入池)
+  category     String
+  /// 同类去重分组键（归一化后的指数/概念名）
+  dedupKey     String
+  fetchedAt    DateTime @default(now())
+
+  @@unique([date, code, category])
+  @@index([date])
+  @@index([date, category])
+}
+
 /// 定时任务执行历史。供 /admin 或运维排查"cron 到底跑没跑、跑了多少、失败多少"。
 model CronRun {
   id          String    @id @default(cuid())

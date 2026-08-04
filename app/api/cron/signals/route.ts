@@ -3,6 +3,7 @@ import { getPrisma } from "@/lib/db/prisma";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
 import { runSignalsJob, collectScanTargets } from "@/lib/cron/signals-runner";
 import { runHotStocksJob } from "@/lib/cron/hot-stocks-runner";
+import { runEtfTrendJob } from "@/lib/cron/etf-trend-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,6 +77,18 @@ async function handleCron(request: NextRequest) {
       console.error("[cron/signals] 热榜刷新失败(已忽略):", e);
     }
 
+    // 顺带抓取 ETF 主升浪池（best-effort，盘前每日一次，按日期 upsert）
+    let etfTrend: { success: boolean; count: number; total: number } | null = null;
+    try {
+      const etf = await runEtfTrendJob();
+      etfTrend = { success: etf.success, count: etf.count, total: etf.total };
+      console.log(
+        `[cron/signals] ETF主升浪刷新: success=${etf.success} count=${etf.count} total=${etf.total}`
+      );
+    } catch (e) {
+      console.error("[cron/signals] ETF主升浪刷新失败(已忽略):", e);
+    }
+
     return NextResponse.json({
       success: true,
       runId: result.runId,
@@ -85,6 +98,7 @@ async function handleCron(request: NextRequest) {
       errorCount: result.errorCount,
       errors: result.errors,
       hotStocks,
+      etfTrend,
       message: result.total === 0 ? "没有收藏的股票" : undefined,
     });
   } catch (err) {
