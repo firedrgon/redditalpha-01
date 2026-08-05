@@ -366,7 +366,9 @@ export async function fetchEtfTrendData(): Promise<EtfTrendFetchResult | null> {
 // ============================================================
 
 /**
- * 将抓取结果写入 DB（按 date+code+category upsert）。返回实际写入条数。
+ * 将抓取结果写入 DB：先清空全表历史数据，再插入本次快照。
+ * 每日盘前只需保留最新一天的数据，故采用「清空 + 批量插入」而非 upsert，
+ * 避免已退出主升浪池的 ETF 旧记录残留。用事务保证原子性。
  * DB 不可用时返回 0（不抛错，调用方继续）。
  */
 export async function storeEtfTrendData(
@@ -378,18 +380,18 @@ export async function storeEtfTrendData(
     return 0;
   }
 
-  let written = 0;
-  for (const it of result.items) {
-    try {
-      await prisma.etfTrend.upsert({
-        where: {
-          date_code_category: {
-            date: result.date,
-            code: it.code,
-            category: it.category,
-          },
-        },
-        create: {
+  if (result.items.length === 0) {
+    console.warn("[etf-trend] 抓取结果为空，跳过清空+存储（避免误清空）");
+    return 0;
+  }
+
+  try {
+    const written = await prisma.$transaction(async (tx) => {
+      // 1. 清空历史数据
+      await tx.etfTrend.deleteMany({});
+      // 2. 批量插入本次快照
+      await tx.etfTrend.createMany({
+        data: result.items.map((it) => ({
           date: result.date,
           code: it.code,
           name: it.name,
@@ -399,28 +401,22 @@ export async function storeEtfTrendData(
           tag: it.tag,
           category: it.category,
           dedupKey: it.dedupKey,
-        },
-        update: {
-          name: it.name,
-          prefixedCode: it.prefixedCode,
-          board: it.board,
-          t0: it.t0,
-          tag: it.tag,
-          dedupKey: it.dedupKey,
-        },
+        })),
+        skipDuplicates: true,
       });
-      written++;
-    } catch (err) {
-      console.error(
-        `[etf-trend] 写 ${it.code}/${it.category} 失败:`,
-        err instanceof Error ? err.message : err
-      );
-    }
+      return result.items.length;
+    });
+    console.log(
+      `[etf-trend] 已清空旧数据并存储 ${written} 条 (${result.date})`
+    );
+    return written;
+  } catch (err) {
+    console.error(
+      `[etf-trend] 存储失败:`,
+      err instanceof Error ? err.message : err
+    );
+    return 0;
   }
-  console.log(
-    `[etf-trend] 已存储 ${written}/${result.items.length} 条 (${result.date})`
-  );
-  return written;
 }
 
 // ============================================================
