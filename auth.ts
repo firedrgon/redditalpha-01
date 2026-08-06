@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { getPrisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
+import { authConfig } from "./auth.config";
 
 /**
  * 邮箱 + 密码注册/登录（Credentials Provider + JWT 会话）。
@@ -11,14 +12,11 @@ import bcrypt from "bcryptjs";
  * - session 用 jwt 策略（Credentials Provider 要求 jwt，不能用 database 策略）。
  * - AUTH_SECRET 必须配置（生产环境），构建期用占位符避免 next build 报错。
  * - trustHost: true 在 Vercel 等托管环境必需。
+ * - 全站登录保护由 auth.config.ts 的 authorized 回调 + middleware.ts 实现。
+ * - 本文件运行在 Node.js 运行时（authorize 用到 Prisma），不可用于 Edge middleware。
  */
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  trustHost: true,
-  secret: process.env.AUTH_SECRET || "development-placeholder-secret-not-for-prod",
-  session: { strategy: "jwt" },
-  pages: {
-    signIn: "/login",
-  },
+  ...authConfig,
   providers: [
     Credentials({
       name: "邮箱密码",
@@ -51,6 +49,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
+    ...authConfig.callbacks,
     async jwt({ token, user }) {
       if (user) token.id = (user as { id?: string }).id;
       return token;
