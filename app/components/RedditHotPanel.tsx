@@ -11,6 +11,12 @@ interface RedditStock {
   mentions24hAgo: number | null;
   upvotes: number;
   rank24hAgo: number | null;
+  signalOverall: string | null;
+  signalOscillators: string | null;
+  signalMovingAvg: string | null;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
 }
 
 interface RedditHotResponse {
@@ -42,6 +48,45 @@ function mentionChangePct(mentions: number, mentions24hAgo: number | null): stri
   const pct = Math.round(((mentions - mentions24hAgo) / mentions24hAgo) * 100);
   if (pct === 0) return null;
   return pct > 0 ? `+${pct}%` : `${pct}%`;
+}
+
+/** 技术信号中文文案（与 TradingView 5 级一致） */
+const SIGNAL_TEXT: Record<string, string> = {
+  strong_buy: "强烈买入",
+  buy: "买入",
+  neutral: "中立",
+  sell: "卖出",
+  strong_sell: "强烈卖出",
+};
+
+/** 综合信号配色：买入类红、卖出类绿、中立灰（与全站约定一致） */
+function signalClass(s: string | null): string {
+  switch (s) {
+    case "strong_buy":
+      return "bg-red-500/20 text-red-300 border-red-500/40";
+    case "buy":
+      return "bg-red-500/10 text-red-400 border-red-500/30";
+    case "sell":
+      return "bg-green-500/10 text-green-400 border-green-500/30";
+    case "strong_sell":
+      return "bg-green-500/20 text-green-300 border-green-500/40";
+    default:
+      return "bg-zinc-700/40 text-zinc-400 border-zinc-700";
+  }
+}
+
+/** 涨跌幅配色：涨红跌绿（与全站约定一致） */
+function changeColor(pct: number | null): string {
+  if (pct == null) return "text-zinc-400";
+  if (pct > 0) return "text-red-400";
+  if (pct < 0) return "text-green-400";
+  return "text-zinc-400";
+}
+
+/** 价格格式化：美股 2 位小数 */
+function formatPrice(p: number | null): string {
+  if (p == null) return "-";
+  return p.toFixed(2);
 }
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -126,9 +171,9 @@ function RedditStockCard({
             </div>
           )}
 
-          {/* 提及数变化 */}
-          {mc && (
-            <div className="mt-1">
+          {/* 提及数变化 + 技术信号 */}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {mc && (
               <span
                 className={`text-[10px] font-medium ${
                   mc.startsWith("+") ? "text-red-400" : "text-green-400"
@@ -136,8 +181,16 @@ function RedditStockCard({
               >
                 {mc} 提及
               </span>
-            </div>
-          )}
+            )}
+            {stock.signalOverall && (
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${signalClass(stock.signalOverall)}`}
+                title={`综合:${SIGNAL_TEXT[stock.signalOverall] ?? stock.signalOverall} · 振荡:${SIGNAL_TEXT[stock.signalOscillators ?? ""] ?? stock.signalOscillators ?? "-"} · 均线:${SIGNAL_TEXT[stock.signalMovingAvg ?? ""] ?? stock.signalMovingAvg ?? "-"}`}
+              >
+                {SIGNAL_TEXT[stock.signalOverall] ?? stock.signalOverall}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -158,7 +211,15 @@ function RedditStockCard({
           </button>
 
           <div className="text-right">
-            <div className="text-base font-bold text-orange-400">
+            <div className={`text-base font-bold ${changeColor(stock.changePercent)}`}>
+              {stock.changePercent == null
+                ? "-"
+                : `${stock.changePercent > 0 ? "+" : ""}${stock.changePercent.toFixed(2)}%`}
+            </div>
+            <div className="mt-0.5 text-[10px] text-zinc-500">
+              ${formatPrice(stock.price)}
+            </div>
+            <div className="mt-1 text-[11px] font-medium text-orange-400">
               {formatCount(stock.mentions)}
             </div>
             <div className="mt-0.5 text-[10px] text-zinc-500">

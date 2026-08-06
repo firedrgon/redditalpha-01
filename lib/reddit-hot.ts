@@ -11,6 +11,8 @@
 
 import { getPrisma } from "@/lib/db/prisma";
 import { beijingDate } from "@/lib/hot-stocks";
+import { fetchTradingViewTechnicalsBatch, type TechnicalSignals } from "@/lib/technical";
+import { fetchQuotes, type Quote } from "@/lib/quote";
 
 const APEWISDOM_API = "https://apewisdom.io/api/v1.0/filter/all-stocks/page/1";
 
@@ -23,6 +25,14 @@ export interface RedditHotItem {
   mentions24hAgo: number | null;
   upvotes: number;
   rank24hAgo: number | null;
+  /// TradingView 美股技术信号（5 级）
+  signalOverall: string | null;
+  signalOscillators: string | null;
+  signalMovingAvg: string | null;
+  /// 当前价格 + 涨跌（USD）
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
 }
 
 export interface RedditHotFetchResult {
@@ -147,6 +157,12 @@ export async function fetchRedditHotStocks(): Promise<RedditHotFetchResult | nul
       mentions24hAgo: r.mentions_24h_ago,
       upvotes: r.upvotes,
       rank24hAgo: r.rank_24h_ago,
+      signalOverall: null,
+      signalOscillators: null,
+      signalMovingAvg: null,
+      price: null,
+      change: null,
+      changePercent: null,
     }));
 
     const date = beijingDate();
@@ -161,6 +177,52 @@ export async function fetchRedditHotStocks(): Promise<RedditHotFetchResult | nul
     );
     return null;
   }
+}
+
+/**
+ * 为 Reddit 热榜股票补充技术信号（TradingView 美股）与当前价格 + 涨跌。
+ * - 技术信号：一次 scanner 批量请求拿全部（NASDAQ/NYSE 双 prefix 尝试）
+ * - 价格 + 涨跌：fetchQuotes 并行拉取（Finnhub/FMP/Yahoo/腾讯 兜底链）
+ * 任一只失败仅置 null，不影响其他。失败整体忽略，仅存基础数据。
+ *
+ * @param items fetchRedditHotStocks 返回的原始列表（会被就地补充字段）
+ * @param limit 补充范围（取排名前 limit 条，默认 100 = 全部）
+ * @returns 同一数组（已补充字段）
+ */
+export async function enrichRedditHotStocks(
+  items: RedditHotItem[],
+  limit = 100
+): Promise<RedditHotItem[]> {
+  const top = items.slice(0, limit);
+  const tickers = top.map((it) => it.ticker);
+
+  // 1) 批量技术信号：一次 TradingView scanner 请求拿全部
+  const sigMap: Map<string, TechnicalSignals> = await fetchTradingViewTechnicalsBatch(
+    tickers,
+    15000
+  ).catch(() => new Map<string, TechnicalSignals>());
+  for (const it of top) {
+    const sig = sigMap.get(it.ticker.toUpperCase());
+    it.signalOverall = sig?.overall ?? null;
+    it.signalOscillators = sig?.oscillators ?? null;
+    it.signalMovingAvg = sig?.movingAverages ?? null;
+  }
+
+  // 2) 批量价格 + 涨跌
+  const quoteMap: Record<string, Quote> = await fetchQuotes(tickers).catch(
+    () => ({}) as Record<string, Quote>
+  );
+  for (const it of top) {
+    const q = quoteMap[it.ticker.toUpperCase()];
+    it.price = q?.price ?? null;
+    it.change = q?.change ?? null;
+    it.changePercent = q?.changePercent ?? null;
+  }
+
+  console.log(
+    `[reddit-hot] enrich 完成: 信号 ${sigMap.size}/${tickers.length}，价格 ${Object.keys(quoteMap).length}/${tickers.length}`
+  );
+  return items;
 }
 
 /**
@@ -195,6 +257,12 @@ export async function storeRedditHotStocks(
           mentions24hAgo: it.mentions24hAgo,
           upvotes: it.upvotes,
           rank24hAgo: it.rank24hAgo,
+          signalOverall: it.signalOverall,
+          signalOscillators: it.signalOscillators,
+          signalMovingAvg: it.signalMovingAvg,
+          price: it.price,
+          change: it.change,
+          changePercent: it.changePercent,
         })),
         skipDuplicates: true,
       });
@@ -259,6 +327,12 @@ export async function getRedditHotStocks(
       mentions24hAgo: r.mentions24hAgo,
       upvotes: r.upvotes,
       rank24hAgo: r.rank24hAgo,
+      signalOverall: r.signalOverall,
+      signalOscillators: r.signalOscillators,
+      signalMovingAvg: r.signalMovingAvg,
+      price: r.price,
+      change: r.change,
+      changePercent: r.changePercent,
     })),
   };
 }

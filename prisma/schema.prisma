@@ -247,6 +247,16 @@ model RedditHotStock {
   upvotes         Int
   /// 24 小时前排名
   rank24hAgo      Int?
+  /// TradingView 美股技术信号（5 级）：strong_buy/buy/neutral/sell/strong_sell
+  signalOverall     String?
+  signalOscillators String?
+  signalMovingAvg   String?
+  /// 当前价格（USD）
+  price           Float?
+  /// 涨跌额（USD）
+  change          Float?
+  /// 涨跌幅（%）
+  changePercent   Float?
   fetchedAt       DateTime @default(now())
 
   @@unique([date, ticker])

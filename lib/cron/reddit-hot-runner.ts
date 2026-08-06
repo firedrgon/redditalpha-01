@@ -7,7 +7,7 @@
 
 import { getPrisma } from "@/lib/db/prisma";
 import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
-import { fetchRedditHotStocks, storeRedditHotStocks } from "@/lib/reddit-hot";
+import { fetchRedditHotStocks, storeRedditHotStocks, enrichRedditHotStocks } from "@/lib/reddit-hot";
 
 const JOB_NAME = "reddit-hot-stocks";
 
@@ -44,6 +44,13 @@ export async function runRedditHotJob(
         errorMessage: "抓取 Reddit 热榜失败（ApeWisdom 接口异常或超时）",
       });
       return { runId, success: false, count: 0, error: "fetch failed" };
+    }
+
+    // 调度触发时一并补充技术信号 + 当前价格/涨跌（Top 100，与前端展示量一致）
+    try {
+      result.items = await enrichRedditHotStocks(result.items, 100);
+    } catch (e) {
+      console.warn(`[reddit-hot-runner] enrich 失败(已忽略，仅存基础热榜):`, e);
     }
 
     const count = await storeRedditHotStocks(result);
