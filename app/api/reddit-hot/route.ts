@@ -3,6 +3,7 @@ import {
   fetchRedditHotStocks,
   storeRedditHotStocks,
   getRedditHotStocks,
+  enrichRedditHotStocks,
 } from "@/lib/reddit-hot";
 
 export const runtime = "nodejs";
@@ -37,6 +38,12 @@ export async function POST() {
     const result = await fetchRedditHotStocks();
     if (!result) {
       return NextResponse.json({ error: "抓取 Reddit 热榜失败" }, { status: 502 });
+    }
+    // 补充技术信号 + 当前价格/涨跌（best-effort，失败仅存基础热榜）
+    try {
+      result.items = await enrichRedditHotStocks(result.items, 100);
+    } catch (e) {
+      console.warn("[reddit-hot] POST enrich 失败(已忽略):", e);
     }
     const count = await storeRedditHotStocks(result);
     return NextResponse.json({ success: true, date: result.date, count });
