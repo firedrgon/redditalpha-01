@@ -6,6 +6,7 @@ interface RedditStock {
   rank: number;
   ticker: string;
   name: string;
+  nameCn: string | null;
   mentions: number;
   mentions24hAgo: number | null;
   upvotes: number;
@@ -116,9 +117,14 @@ function RedditStockCard({
             <span className={`text-xs font-medium ${rc.cls}`}>{rc.text}</span>
           </div>
 
-          <div className="mt-0.5 truncate text-sm text-zinc-400" title={stock.name}>
-            {stock.name}
+          <div className="mt-0.5 truncate text-sm text-zinc-300" title={stock.nameCn ?? stock.name}>
+            {stock.nameCn ?? stock.name}
           </div>
+          {stock.nameCn && (
+            <div className="truncate text-[11px] text-zinc-500" title={stock.name}>
+              {stock.name}
+            </div>
+          )}
 
           {/* 提及数变化 */}
           {mc && (
@@ -272,8 +278,9 @@ export default function RedditHotPanel({
     async (stock: RedditStock) => {
       const tk = stock.ticker;
       const upper = tk.toUpperCase();
+      const displayName = stock.nameCn ?? stock.name;
       if (toggleFavorite) {
-        toggleFavorite(tk, stock.name);
+        toggleFavorite(tk, displayName);
         return;
       }
       const willAdd = !localFav.has(upper);
@@ -289,7 +296,7 @@ export default function RedditHotPanel({
           await fetch("/api/favorites", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ticker: tk, name: stock.name }),
+            body: JSON.stringify({ ticker: tk, name: displayName }),
           });
         } else {
           await fetch(`/api/favorites?ticker=${encodeURIComponent(tk)}`, {

@@ -237,6 +237,8 @@ model RedditHotStock {
   /// 美股代码，如 MU / SPY / NVDA
   ticker          String
   name            String
+  /// 中文名（东方财富数据源），如 美光科技 / 标普500ETF
+  nameCn          String?
   /// 当前 Reddit 提及次数
   mentions        Int
   /// 24 小时前提及数
