@@ -226,6 +226,32 @@ model EtfTrend {
   @@index([date, category])
 }
 
+/// Reddit 热门股票每日快照（ApeWisdom 数据源，盘前抓取一次，Top 100）。
+/// 按 date+ticker 唯一，存储前清空旧数据，仅保留最新一天。
+model RedditHotStock {
+  id              String   @id @default(cuid())
+  /// 北京时间日期 YYYY-MM-DD
+  date            String
+  /// 排名（按 Reddit 提及数）
+  rank            Int
+  /// 美股代码，如 MU / SPY / NVDA
+  ticker          String
+  name            String
+  /// 当前 Reddit 提及次数
+  mentions        Int
+  /// 24 小时前提及数
+  mentions24hAgo  Int?
+  /// Reddit 总点赞数
+  upvotes         Int
+  /// 24 小时前排名
+  rank24hAgo      Int?
+  fetchedAt       DateTime @default(now())
+
+  @@unique([date, ticker])
+  @@index([date])
+  @@index([ticker])
+}
+
 /// 定时任务执行历史。供 /admin 或运维排查"cron 到底跑没跑、跑了多少、失败多少"。
 model CronRun {
   id          String    @id @default(cuid())

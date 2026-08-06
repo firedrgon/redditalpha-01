@@ -4,6 +4,7 @@ import { startCronRun, finishCronRun } from "@/lib/db/cron-run";
 import { runSignalsJob, collectScanTargets } from "@/lib/cron/signals-runner";
 import { runHotStocksJob } from "@/lib/cron/hot-stocks-runner";
 import { runEtfTrendJob } from "@/lib/cron/etf-trend-runner";
+import { runRedditHotJob } from "@/lib/cron/reddit-hot-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,6 +90,18 @@ async function handleCron(request: NextRequest) {
       console.error("[cron/signals] ETF主升浪刷新失败(已忽略):", e);
     }
 
+    // 顺带抓取 Reddit 热榜（ApeWisdom all-stocks Top 100，best-effort）
+    let redditHot: { success: boolean; count: number } | null = null;
+    try {
+      const rh = await runRedditHotJob();
+      redditHot = { success: rh.success, count: rh.count };
+      console.log(
+        `[cron/signals] Reddit热榜刷新: success=${rh.success} count=${rh.count}`
+      );
+    } catch (e) {
+      console.error("[cron/signals] Reddit热榜刷新失败(已忽略):", e);
+    }
+
     return NextResponse.json({
       success: true,
       runId: result.runId,
@@ -99,6 +112,7 @@ async function handleCron(request: NextRequest) {
       errors: result.errors,
       hotStocks,
       etfTrend,
+      redditHot,
       message: result.total === 0 ? "没有收藏的股票" : undefined,
     });
   } catch (err) {

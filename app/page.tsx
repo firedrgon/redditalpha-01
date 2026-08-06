@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } fro
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import HotStocksPanel from "@/app/components/HotStocksPanel";
+import RedditHotPanel from "@/app/components/RedditHotPanel";
 import PositionsPanel from "@/app/components/PositionsPanel";
 import EtfTrendPanel, { type EtfTab } from "@/app/components/EtfTrendPanel";
 import AuthMenu from "@/app/components/AuthMenu";
@@ -3805,7 +3806,7 @@ export default function Home() {
   const subMenuRef = useRef<HTMLDivElement>(null);
   const [etfMenuOpen, setEtfMenuOpen] = useState(false);
   const etfMenuRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "positions" | "etf">("subreddit");
+  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "reddit" | "positions" | "etf">("subreddit");
   const [etfTab, setEtfTab] = useState<EtfTab>("pullback");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
@@ -4527,6 +4528,19 @@ export default function Home() {
               热榜
             </button>
             <button
+              onClick={() => setView("reddit")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all flex items-center gap-1.5 ${
+                view === "reddit"
+                  ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-transparent"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+                <path d="M12 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 01-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.498.388-.38.922-.619 1.513-.619a2.15 2.15 0 012.146 2.147 2.15 2.15 0 01-1.313 1.978c.04.249.062.504.062.765 0 2.936-3.426 5.32-7.653 5.32s-7.653-2.384-7.653-5.32c0-.262.022-.516.062-.765A2.15 2.15 0 014.21 12.4a2.15 2.15 0 012.147-2.147c.591 0 1.125.239 1.513.619 1.205-.876 2.879-1.438 4.724-1.498l.897-4.205a.5.5 0 01.567-.388l2.913.614c.388-.5.986-.825 1.659-.825zM9.425 14.515a1.25 1.25 0 102.5 0 1.25 1.25 0 00-2.5 0zm5.15 0a1.25 1.25 0 102.5 0 1.25 1.25 0 00-2.5 0z" />
+              </svg>
+              Reddit热榜
+            </button>
+            <button
               onClick={() => setView("positions")}
               className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-all flex items-center gap-1.5 ${
                 view === "positions"
@@ -4729,6 +4743,8 @@ export default function Home() {
           </>
         ) : view === "hot" ? (
           <HotStocksPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
+        ) : view === "reddit" ? (
+          <RedditHotPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
         ) : view === "positions" ? (
           <PositionsPanel />
         ) : view === "etf" ? (
