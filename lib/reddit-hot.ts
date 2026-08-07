@@ -13,6 +13,7 @@ import { getPrisma } from "@/lib/db/prisma";
 import { beijingDate } from "@/lib/hot-stocks";
 import { fetchTradingViewTechnicalsBatch, type TechnicalSignals } from "@/lib/technical";
 import { fetchQuotes, type Quote } from "@/lib/quote";
+import { fetchAnalystTargetsBatch, type AnalystTarget } from "@/lib/analyst-target";
 
 const APEWISDOM_API = "https://apewisdom.io/api/v1.0/filter/all-stocks/page/1";
 
@@ -33,6 +34,13 @@ export interface RedditHotItem {
   price: number | null;
   change: number | null;
   changePercent: number | null;
+  /// 分析师共识目标均价（USD），来源 stockanalysis.com forecast
+  targetPrice: number | null;
+  /// 目标价区间（USD）
+  targetHigh: number | null;
+  targetLow: number | null;
+  /// 覆盖分析师数量
+  analystCount: number | null;
 }
 
 export interface RedditHotFetchResult {
@@ -163,6 +171,10 @@ export async function fetchRedditHotStocks(): Promise<RedditHotFetchResult | nul
       price: null,
       change: null,
       changePercent: null,
+      targetPrice: null,
+      targetHigh: null,
+      targetLow: null,
+      analystCount: null,
     }));
 
     const date = beijingDate();
@@ -219,8 +231,20 @@ export async function enrichRedditHotStocks(
     it.changePercent = q?.changePercent ?? null;
   }
 
+  // 3) 分析师目标价（stockanalysis forecast，分块并发 best-effort）
+  const targetMap: Map<string, AnalystTarget> = await fetchAnalystTargetsBatch(
+    tickers
+  ).catch(() => new Map<string, AnalystTarget>());
+  for (const it of top) {
+    const t = targetMap.get(it.ticker.toUpperCase());
+    it.targetPrice = t?.targetMean ?? null;
+    it.targetHigh = t?.targetHigh ?? null;
+    it.targetLow = t?.targetLow ?? null;
+    it.analystCount = t?.analystCount ?? null;
+  }
+
   console.log(
-    `[reddit-hot] enrich 完成: 信号 ${sigMap.size}/${tickers.length}，价格 ${Object.keys(quoteMap).length}/${tickers.length}`
+    `[reddit-hot] enrich 完成: 信号 ${sigMap.size}/${tickers.length}，价格 ${Object.keys(quoteMap).length}/${tickers.length}，目标价 ${targetMap.size}/${tickers.length}`
   );
   return items;
 }
@@ -263,6 +287,10 @@ export async function storeRedditHotStocks(
           price: it.price,
           change: it.change,
           changePercent: it.changePercent,
+          targetPrice: it.targetPrice,
+          targetHigh: it.targetHigh,
+          targetLow: it.targetLow,
+          analystCount: it.analystCount,
         })),
         skipDuplicates: true,
       });
@@ -333,6 +361,10 @@ export async function getRedditHotStocks(
       price: r.price,
       change: r.change,
       changePercent: r.changePercent,
+      targetPrice: r.targetPrice,
+      targetHigh: r.targetHigh,
+      targetLow: r.targetLow,
+      analystCount: r.analystCount,
     })),
   };
 }

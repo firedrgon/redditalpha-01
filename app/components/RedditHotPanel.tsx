@@ -18,6 +18,13 @@ interface RedditStock {
   price: number | null;
   change: number | null;
   changePercent: number | null;
+  /** 分析师共识目标均价（USD） */
+  targetPrice: number | null;
+  /** 目标价区间（USD） */
+  targetHigh: number | null;
+  targetLow: number | null;
+  /** 覆盖分析师数量 */
+  analystCount: number | null;
 }
 
 interface RedditHotResponse {
@@ -123,6 +130,11 @@ function RedditStockCard({
   const mc = mentionChangePct(stock.mentions, stock.mentions24hAgo);
   const redditUrl = `https://www.reddit.com/search?q=${encodeURIComponent(stock.ticker)}&sort=relevance&t=week`;
   const xueqiuUrl = toXueqiuWebUrl(stock.ticker);
+  // 目标价相对现价的上涨空间（%）：涨红跌绿（与全站约定一致）
+  const upsidePct =
+    stock.targetPrice != null && stock.price != null && stock.price > 0
+      ? (stock.targetPrice / stock.price - 1) * 100
+      : null;
 
   return (
     <div className="group/card relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900/80">
@@ -216,6 +228,30 @@ function RedditStockCard({
               </span>
             )}
           </div>
+
+          {/* 分析师目标价 + 上涨空间 + 覆盖分析师数 */}
+          {stock.targetPrice != null && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+              <span className="text-zinc-500">目标价</span>
+              <span className="font-medium text-cyan-400">
+                ${stock.targetPrice.toFixed(2)}
+              </span>
+              {upsidePct != null && (
+                <span
+                  className={`font-medium ${
+                    upsidePct >= 0 ? "text-red-400" : "text-green-400"
+                  }`}
+                  title="相对现价上涨空间"
+                >
+                  {upsidePct >= 0 ? "+" : ""}
+                  {upsidePct.toFixed(1)}%
+                </span>
+              )}
+              {stock.analystCount != null && (
+                <span className="text-zinc-500">· {stock.analystCount}位分析师</span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">

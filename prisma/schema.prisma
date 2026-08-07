@@ -257,6 +257,14 @@ model RedditHotStock {
   change          Float?
   /// 涨跌幅（%）
   changePercent   Float?
+  /// 分析师共识目标均价（USD），来源 stockanalysis.com forecast
+  targetPrice     Float?
+  /// 目标价区间上限（USD）
+  targetHigh      Float?
+  /// 目标价区间下限（USD）
+  targetLow       Float?
+  /// 覆盖分析师数量
+  analystCount    Int?
   fetchedAt       DateTime @default(now())
 
   @@unique([date, ticker])
