@@ -119,6 +119,23 @@ export function toXueqiuSymbol(ticker: string): string {
 }
 
 /**
+ * 雪球个股网页 URL。
+ * 美股：https://xueqiu.com/S/AAPL
+ * A 股：https://xueqiu.com/S/SH600519
+ * 其他（港股等）：兜底为 https://xueqiu.com/S/{ticker}
+ *
+ * 注意：网页路径使用裸代码或 SH/SZ 前缀代码，与 toXueqiuSymbol（API symbol）一致。
+ * US_AAPL 这种内部格式在网页上并不存在（会 404），必须用裸代码 AAPL。
+ */
+export function toXueqiuWebUrl(ticker: string): string {
+  const m = detectMarket(ticker);
+  if (m === "CN") {
+    return `https://xueqiu.com/S/${toXueqiuSymbol(ticker)}`;
+  }
+  return `https://xueqiu.com/S/${ticker.trim().toUpperCase()}`;
+}
+
+/**
  * 转换为 Yahoo Finance 使用的 symbol 格式。
  * A 股：600519.SH → 600519.SS（上交所用 .SS，深交所用 .SZ）
  * 非A股：原样返回

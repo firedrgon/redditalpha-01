@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { toXueqiuWebUrl } from "@/lib/market";
 
 interface RedditStock {
   rank: number;
@@ -121,6 +122,7 @@ function RedditStockCard({
   const rc = rankChange(stock.rank, stock.rank24hAgo);
   const mc = mentionChangePct(stock.mentions, stock.mentions24hAgo);
   const redditUrl = `https://www.reddit.com/search?q=${encodeURIComponent(stock.ticker)}&sort=relevance&t=week`;
+  const xueqiuUrl = toXueqiuWebUrl(stock.ticker);
 
   return (
     <div className="group/card relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900/80">
@@ -160,6 +162,29 @@ function RedditStockCard({
               </svg>
             </a>
             <span className={`text-xs font-medium ${rc.cls}`}>{rc.text}</span>
+            <a
+              href={xueqiuUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="在雪球查看"
+              aria-label="在雪球查看"
+              className="inline-flex items-center gap-0.5 rounded border border-zinc-700 px-1 py-0.5 text-[10px] font-medium text-zinc-400 transition-colors hover:border-cyan-500/40 hover:text-cyan-400"
+            >
+              雪球
+              <svg
+                viewBox="0 0 24 24"
+                className="h-2.5 w-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5v13h13v-8.5M15 3h6v6M21 3l-9 9"
+                />
+              </svg>
+            </a>
           </div>
 
           <div className="mt-0.5 truncate text-sm text-zinc-300" title={stock.nameCn ?? stock.name}>
