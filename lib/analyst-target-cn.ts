@@ -1,24 +1,28 @@
 /**
- * A 股分析师目标价 + 实时现价（东方财富，免 key）
+ * A 股分析师目标价 + 实时现价（免 key）
  *
- * 目标价数据源（已实测）：
- *   GET https://reportapi.eastmoney.com/report/list
- *       ?code=600519&qType=0&pageSize=50&pageNo=1
- *       &beginTime=2025-08-08&endTime=2026-08-08&industryCode=*&industry=*&p=1&pageNum=1
- *   返回 { hits, data: [ { orgCode, orgSName, publishDate, indvAimPriceT, indvAimPriceL, ... } ] }
- *   - indvAimPriceT: 研报给出的目标价（上限），字符串，常为空
- *   - indvAimPriceL: 目标价下限，字符串，常与 T 相同
+ * ── 目标价主源：百度财经开放接口（已实测，覆盖率碾压研报聚合）────────────
+ *   GET https://finance.baidu.com/opendata?openapi=1&dspName=iphone&tn=tangram
+ *       &client=app&query={code}&code={code}&word={code}&resource_id=5429
+ *       &ma_ver=4&finClientType=pc
+ *   响应结构深且索引不固定 → 递归搜 `organRating`：
+ *     { organNum, avgPrice, maxPrice, minPrice, curPrice,
+ *       body:[{organ,date,rating,price}] }
+ *   这是券商机构一致预期口径，实测 600519=119家 / 000001=126家 / 601318=83家。
+ *   注意：单次响应约 600KB（整页数据包），批量时需控制并发。
+ *   同源的 HTML 页面 finance.baidu.com/stock/ab-{code} 在服务器环境会 403，
+ *   但本 opendata 接口不受影响（lib/finance.ts 已长期在用）。
  *
- * 注意：A 股券商研报**大多不给显式目标价**（实测覆盖率约 10%~35%，
- * 越是热门股覆盖越好）。因此目标价缺失是常态，调用方需按 null 处理。
+ * ── 目标价降级源：东方财富研报聚合 ──────────────────────────────────
+ *   GET https://reportapi.eastmoney.com/report/list?code=600519&qType=0...
+ *   取近 365 天研报中 indvAimPriceT/L 有值的，按机构（orgCode）去重保留最新
+ *   一篇后求均价/上下沿。A 股券商研报大多不给显式目标价，实测覆盖率仅
+ *   10%~35%（000001 平安银行为 0），故仅作百度失败时的兜底。
  *
- * 聚合口径：
- *   近 365 天研报 → 取有目标价的 → 按机构（orgCode）去重保留最新一篇
- *   → 均价 / 最高 / 最低 / 机构家数
- *
- * 现价数据源（已实测）：
- *   GET https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f2,f12&secids=1.600519,0.002156
- *   secid 前缀：1=沪市，0=深市
+ * ── 现价数据源（已实测）───────────────────────────────────────────
+ *   GET https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f2,f12
+ *       &secids=1.600519,0.002156      （secid 前缀：1=沪市，0=深市）
+ *   百度 organRating.curPrice 亦可作兜底。
  */
 
 const UA =
@@ -33,6 +37,10 @@ export interface CNAnalystTarget {
   targetLow: number | null;
   /** 给出目标价的机构家数 */
   analystCount: number | null;
+  /** 数据源标识，便于排查 */
+  source?: "baidu" | "eastmoney" | null;
+  /** 数据源附带的现价（元），仅百度提供，可作现价兜底 */
+  currentPrice?: number | null;
 }
 
 const EMPTY: CNAnalystTarget = {
@@ -40,6 +48,8 @@ const EMPTY: CNAnalystTarget = {
   targetHigh: null,
   targetLow: null,
   analystCount: null,
+  source: null,
+  currentPrice: null,
 };
 
 interface EmReportRow {
@@ -60,12 +70,81 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** 递归搜索嵌套对象中指定 key 的值（返回第一个命中） */
+function findNestedKey(obj: unknown, key: string): unknown {
+  if (!obj || typeof obj !== "object") return undefined;
+  const rec = obj as Record<string, unknown>;
+  if (key in rec) return rec[key];
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findNestedKey(item, key);
+      if (found !== undefined) return found;
+    }
+  } else {
+    for (const v of Object.values(rec)) {
+      const found = findNestedKey(v, key);
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
+}
+
 /**
- * 抓取单只 A 股的分析师目标价共识。
+ * 【主源】百度财经开放接口获取机构一致目标价。
+ * 覆盖率远高于研报聚合，且附带现价。失败返回全 null。
+ *
+ * 本函数是项目内百度目标价的**唯一实现**，lib/finance.ts 的
+ * fetchBaiduFinanceAnalystRating 是它的薄适配层，勿再另写一份。
+ *
+ * @param clean 6 位纯数字股票代码
+ */
+export async function fetchBaiduAnalystTarget(
+  clean: string
+): Promise<CNAnalystTarget> {
+  const url =
+    `https://finance.baidu.com/opendata?openapi=1&dspName=iphone&tn=tangram` +
+    `&client=app&query=${clean}&code=${clean}&word=${clean}` +
+    `&resource_id=5429&ma_ver=4&finClientType=pc`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return { ...EMPTY };
+
+    const json = await res.json();
+    const organRating = findNestedKey(json, "organRating");
+    if (!organRating || typeof organRating !== "object") return { ...EMPTY };
+
+    const or = organRating as Record<string, unknown>;
+    const targetPrice = toNum(or.avgPrice);
+    const targetHigh = toNum(or.maxPrice);
+    const targetLow = toNum(or.minPrice);
+    if (targetPrice == null && targetHigh == null && targetLow == null) {
+      return { ...EMPTY };
+    }
+
+    return {
+      targetPrice,
+      targetHigh,
+      targetLow,
+      analystCount: toNum(or.organNum),
+      source: "baidu",
+      currentPrice: toNum(or.curPrice),
+    };
+  } catch {
+    return { ...EMPTY };
+  }
+}
+
+/**
+ * 抓取单只 A 股的分析师目标价共识：百度财经优先，失败降级东方财富研报聚合。
  * 任何失败（网络/结构异常/无目标价）均返回全 null，不抛错。
  *
  * @param code 6 位股票代码，如 "600519"
- * @param lookbackDays 研报回溯天数，默认 365
+ * @param lookbackDays 东财降级路径的研报回溯天数，默认 365
  */
 export async function fetchCNAnalystTarget(
   code: string,
@@ -74,6 +153,20 @@ export async function fetchCNAnalystTarget(
   const clean = String(code).replace(/\D/g, "");
   if (clean.length !== 6) return { ...EMPTY };
 
+  const baidu = await fetchBaiduAnalystTarget(clean);
+  if (baidu.targetPrice != null) return baidu;
+
+  return fetchEastmoneyAnalystTarget(clean, lookbackDays);
+}
+
+/**
+ * 【降级源】东方财富研报聚合目标价。
+ * A 股券商研报大多不给显式目标价，覆盖率有限，仅作百度失败兜底。
+ */
+async function fetchEastmoneyAnalystTarget(
+  clean: string,
+  lookbackDays = 365
+): Promise<CNAnalystTarget> {
   const end = new Date();
   const begin = new Date(end.getTime() - lookbackDays * 86400000);
   const url =
@@ -115,6 +208,8 @@ export async function fetchCNAnalystTarget(
       targetHigh: Math.max(...vals),
       targetLow: Math.min(...vals),
       analystCount: vals.length,
+      source: "eastmoney",
+      currentPrice: null,
     };
   } catch {
     return { ...EMPTY };
@@ -122,12 +217,13 @@ export async function fetchCNAnalystTarget(
 }
 
 /**
- * 批量抓取分析师目标价（限制并发，避免打爆东方财富）。
+ * 批量抓取分析师目标价（限制并发）。
+ * 百度单次响应约 600KB，并发不宜过高，默认 5。
  * @returns Map<6位代码, CNAnalystTarget>，仅包含成功且有目标价的项
  */
 export async function fetchCNAnalystTargetsBatch(
   codes: string[],
-  concurrency = 6
+  concurrency = 5
 ): Promise<Map<string, CNAnalystTarget>> {
   const out = new Map<string, CNAnalystTarget>();
   const list = [...new Set(codes.map((c) => String(c).replace(/\D/g, "")))].filter(
@@ -148,7 +244,15 @@ export async function fetchCNAnalystTargetsBatch(
   );
   await Promise.all(workers);
 
-  console.log(`[analyst-target-cn] 目标价 ${out.size}/${list.length} 只有券商给出`);
+  let baiduN = 0;
+  let emN = 0;
+  for (const t of out.values()) {
+    if (t.source === "baidu") baiduN++;
+    else if (t.source === "eastmoney") emN++;
+  }
+  console.log(
+    `[analyst-target-cn] 目标价 ${out.size}/${list.length}（百度 ${baiduN} / 东财兜底 ${emN}）`
+  );
   return out;
 }
 

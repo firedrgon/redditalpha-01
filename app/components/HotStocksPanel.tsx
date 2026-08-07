@@ -243,7 +243,7 @@ function HotStockCard({
                       : "border-green-500/30 bg-green-500/10 text-green-400"
                 }`}
                 title={[
-                  `分析师目标价（近一年券商研报，按机构去重取最新）`,
+                  `分析师目标价（机构一致预期）`,
                   `均价 ¥${stock.targetPrice.toFixed(2)}`,
                   stock.targetLow != null && stock.targetHigh != null
                     ? `区间 ¥${stock.targetLow.toFixed(2)} ~ ¥${stock.targetHigh.toFixed(2)}`

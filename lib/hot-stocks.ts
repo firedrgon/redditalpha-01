@@ -29,6 +29,7 @@ import type { TechnicalSignals } from "@/lib/technical";
 import {
   fetchCNAnalystTargetsBatch,
   fetchCNPricesBatch,
+  type CNAnalystTarget,
 } from "@/lib/analyst-target-cn";
 
 const UA =
@@ -56,13 +57,13 @@ export interface HotStockItem {
   chipKeyword?: string | null;
   /** 现价（元，东方财富实时行情，enrich 时填充） */
   price?: number | null;
-  /** 机构一致目标价（元，近一年券商研报按机构去重后的均价） */
+  /** 机构一致目标价（元，百度财经机构一致预期；降级时为东财研报聚合均价） */
   targetPrice?: number | null;
   /** 目标价上沿（元） */
   targetHigh?: number | null;
   /** 目标价下沿（元） */
   targetLow?: number | null;
-  /** 给出目标价的机构家数 */
+  /** 覆盖机构家数 */
   analystCount?: number | null;
 }
 
@@ -216,11 +217,13 @@ export async function enrichHotStocks(
   );
   await Promise.all(workers);
 
-  // 3) 分析师目标价（东方财富研报聚合）+ 现价（东方财富行情）
-  //    A 股券商大多不给显式目标价，缺失是常态 → 保持 null，前端不展示
+  // 3) 分析师目标价（百度财经机构一致预期，失败降级东财研报聚合）
+  //    + 现价（东方财富行情，缺失时用百度 organRating.curPrice 兜底）
   const codes = targets.map((it) => it.code);
   const [targetMap, priceMap] = await Promise.all([
-    fetchCNAnalystTargetsBatch(codes).catch(() => new Map()),
+    fetchCNAnalystTargetsBatch(codes).catch(
+      () => new Map<string, CNAnalystTarget>()
+    ),
     fetchCNPricesBatch(codes).catch(() => new Map<string, number>()),
   ]);
   for (const it of targets) {
@@ -229,7 +232,7 @@ export async function enrichHotStocks(
     it.targetHigh = t?.targetHigh ?? null;
     it.targetLow = t?.targetLow ?? null;
     it.analystCount = t?.analystCount ?? null;
-    it.price = priceMap.get(it.code) ?? null;
+    it.price = priceMap.get(it.code) ?? t?.currentPrice ?? null;
   }
 
   return items;

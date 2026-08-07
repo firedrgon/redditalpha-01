@@ -26,6 +26,7 @@ import {
 } from "./finance-config";
 import { detectMarket, normalizeCNTicker, toYahooSymbol } from "./market";
 import { fetchCNFinancialMetrics } from "./finance-cn";
+import { fetchBaiduAnalystTarget } from "./analyst-target-cn";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -1774,10 +1775,9 @@ async function fetchStockAnalysisTargets(
 /**
  * 从百度财经开放接口获取 A 股分析师机构评级与目标价（免费无需 Key）
  *
- * 响应结构较深且索引不固定，用递归搜索定位 organRating 字段。
- * organRating 包含：organNum（分析师数量）、avgPrice（目标均价）、
- * maxPrice（最高目标价）、minPrice（最低目标价）、curPrice（当前价）、
- * body 数组（每条含 organ/date/rating/price）
+ * 薄适配层：实际抓取与解析统一由 lib/analyst-target-cn.ts 的
+ * fetchBaiduAnalystTarget 负责（该模块零依赖，不会造成循环引用），
+ * 这里只做字段命名转换以兼容本文件既有调用点。
  */
 async function fetchBaiduFinanceAnalystRating(
   ticker: string
@@ -1792,59 +1792,18 @@ async function fetchBaiduFinanceAnalystRating(
   const code = ticker.replace(/\.(SS|SZ|SH)$/i, "").trim();
   if (!/^\d{6}$/.test(code)) return null;
 
-  const url = `https://finance.baidu.com/opendata?openapi=1&dspName=iphone&tn=tangram&client=app&query=${code}&code=${code}&word=${code}&resource_id=5429&ma_ver=4&finClientType=pc`;
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-
-    // 递归搜索 organRating 字段（响应结构深且索引不固定）
-    const organRating = findNestedKey(data, "organRating");
-    if (!organRating || typeof organRating !== "object") return null;
-
-    const or = organRating as Record<string, unknown>;
-    const parseNum = (v: unknown): number | null => {
-      if (v == null) return null;
-      const n = parseFloat(String(v));
-      return isNaN(n) ? null : n;
-    };
-
-    const targetAverage = parseNum(or.avgPrice);
-    const targetHigh = parseNum(or.maxPrice);
-    const targetLow = parseNum(or.minPrice);
-    const numberOfAnalysts = parseNum(or.organNum);
-    const currentPrice = parseNum(or.curPrice);
-
-    if (targetAverage == null && targetHigh == null && targetLow == null) {
-      return null;
-    }
-
-    return { targetAverage, targetHigh, targetLow, numberOfAnalysts, currentPrice };
-  } catch {
+  const t = await fetchBaiduAnalystTarget(code);
+  if (t.targetPrice == null && t.targetHigh == null && t.targetLow == null) {
     return null;
   }
-}
 
-/** 递归搜索嵌套对象中指定 key 的值（返回第一个命中） */
-function findNestedKey(obj: unknown, key: string): unknown {
-  if (!obj || typeof obj !== "object") return undefined;
-  if (key in (obj as Record<string, unknown>)) return (obj as Record<string, unknown>)[key];
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findNestedKey(item, key);
-      if (found !== undefined) return found;
-    }
-  } else {
-    for (const v of Object.values(obj as Record<string, unknown>)) {
-      const found = findNestedKey(v, key);
-      if (found !== undefined) return found;
-    }
-  }
-  return undefined;
+  return {
+    targetAverage: t.targetPrice,
+    targetHigh: t.targetHigh,
+    targetLow: t.targetLow,
+    numberOfAnalysts: t.analystCount,
+    currentPrice: t.currentPrice ?? null,
+  };
 }
 
 /**
