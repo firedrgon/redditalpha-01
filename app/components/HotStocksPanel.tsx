@@ -18,6 +18,11 @@ interface HotStock {
   signalMovingAvg: string | null;
   chipKeyword: string | null;
   chipSituation: string | null;
+  price: number | null;
+  targetPrice: number | null;
+  targetHigh: number | null;
+  targetLow: number | null;
+  analystCount: number | null;
 }
 
 interface HotStocksResponse {
@@ -87,6 +92,17 @@ function eastmoneyStockUrl(board: string | null, code: string): string {
   return `https://quote.eastmoney.com/${prefix}${code}.html`;
 }
 
+/** 百度股市通个股页：A 股统一走 ab- 前缀（实测 301 跳转到 finance.baidu.com 同页） */
+function baiduStockUrl(code: string): string {
+  return `https://gushitong.baidu.com/stock/ab-${code}`;
+}
+
+/** 目标价相对现价的上涨空间（%），任一缺失返回 null */
+function upsidePct(price: number | null, target: number | null): number | null {
+  if (price == null || target == null || price <= 0) return null;
+  return ((target - price) / price) * 100;
+}
+
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
   return (
     <svg
@@ -119,6 +135,7 @@ function HotStockCard({
   const tags = stock.conceptTags
     ? stock.conceptTags.split(",").filter(Boolean)
     : [];
+  const upside = upsidePct(stock.price, stock.targetPrice);
 
   return (
     <div className="group/card relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900/80">
@@ -158,6 +175,28 @@ function HotStockCard({
               </svg>
             </a>
             <span className="font-mono text-xs text-zinc-500">{stock.code}</span>
+            <a
+              href={baiduStockUrl(stock.code)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="在百度股市通查看"
+              className="inline-flex items-center gap-0.5 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 transition-colors hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-400"
+            >
+              百度股市通
+              <svg
+                viewBox="0 0 24 24"
+                className="h-2.5 w-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5v13h13v-8.5M15 3h6v6M21 3l-9 9"
+                />
+              </svg>
+            </a>
             {stock.popularityTag && (
               <span className="inline-flex items-center rounded border border-orange-500/30 bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-400">
                 {stock.popularityTag}
@@ -192,6 +231,39 @@ function HotStockCard({
                 title={stock.chipSituation ?? stock.chipKeyword}
               >
                 筹:{stock.chipKeyword}
+              </span>
+            )}
+            {stock.targetPrice != null && (
+              <span
+                className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                  upside == null
+                    ? "border-zinc-700 bg-zinc-700/40 text-zinc-300"
+                    : upside > 0
+                      ? "border-red-500/30 bg-red-500/10 text-red-400"
+                      : "border-green-500/30 bg-green-500/10 text-green-400"
+                }`}
+                title={[
+                  `分析师目标价（近一年券商研报，按机构去重取最新）`,
+                  `均价 ¥${stock.targetPrice.toFixed(2)}`,
+                  stock.targetLow != null && stock.targetHigh != null
+                    ? `区间 ¥${stock.targetLow.toFixed(2)} ~ ¥${stock.targetHigh.toFixed(2)}`
+                    : "",
+                  stock.analystCount != null ? `${stock.analystCount} 家机构` : "",
+                  stock.price != null ? `现价 ¥${stock.price.toFixed(2)}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              >
+                目标 ¥{stock.targetPrice.toFixed(2)}
+                {upside != null && (
+                  <span className="font-semibold">
+                    {upside > 0 ? "+" : ""}
+                    {upside.toFixed(1)}%
+                  </span>
+                )}
+                {stock.analystCount != null && (
+                  <span className="text-zinc-500">{stock.analystCount}家</span>
+                )}
               </span>
             )}
           </div>

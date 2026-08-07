@@ -190,6 +190,16 @@ model HotStock {
   chipSituation String?
   /// 同花顺筹码状态关键词（如 高度密集/分散），用于前端快速展示
   chipKeyword   String?
+  /// 现价（元，东方财富实时行情）
+  price         Float?
+  /// 机构一致目标价（元，近一年券商研报按机构去重后的均价）
+  targetPrice   Float?
+  /// 目标价上沿（元）
+  targetHigh    Float?
+  /// 目标价下沿（元）
+  targetLow     Float?
+  /// 给出目标价的机构家数
+  analystCount  Int?
   fetchedAt     DateTime @default(now())
 
   @@unique([date, code])
