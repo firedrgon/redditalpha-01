@@ -339,6 +339,24 @@ interface ProvidersResponse {
   updatedAt: number;
 }
 
+/**
+ * 自动预热活跃模型（模块级 fire-and-forget，供主组件与弹窗子组件共用）。
+ * 免费共享算力模型（百炼/qwen 等）实例在空闲后首次生成需 30-50s 冷启动，
+ * 远超 analyze 路由的 LLM 预算，导致「首点分析即超时」。
+ * 复用与「测试模型连通性」完全相同的 testProvider 路径发一次极小生成，
+ * 让模型实例提前热起来——前端在弹窗打开时触发，等用户点「生成 AI 分析」已是热实例。
+ * 故意不 await：不阻塞 UI；服务端作为独立请求跑完，失败也不影响主流程。
+ */
+function warmUpActiveModel() {
+  fetch("/api/llm-providers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ warmActive: true }),
+  }).catch(() => {
+    /* 预热失败不影响主流程，下次仍走正常超时/降级逻辑 */
+  });
+}
+
 // ============================================================
 // 策略相关类型
 // ============================================================
@@ -1066,6 +1084,8 @@ function AnalysisModal({
   const handleReanalyze = () => {
     if (isRefreshing || loading) return;
     setActiveTab("ai");
+    // 兜底：用户停留弹窗较久实例可能再次变冷，点生成前再预热一次（主要服务下一次点击）。
+    warmUpActiveModel();
     fetchAnalysis(true);
   };
 
@@ -4241,9 +4261,15 @@ export default function Home() {
     [toggleFavorite]
   );
 
-  const handleAnalyze = useCallback((item: FavoriteItem) => {
-    setAnalyzingItem(item);
-  }, []);
+  const handleAnalyze = useCallback(
+    (item: FavoriteItem) => {
+      setAnalyzingItem(item);
+      // 弹窗打开即预热活跃模型：给免费共享算力实例留出冷启动时间，
+      // 等用户点「生成 AI 分析」时已是热实例，避免首点超时。
+      warmUpActiveModel();
+    },
+    [warmUpActiveModel]
+  );
 
   // 手动添加：实时校验
   useEffect(() => {

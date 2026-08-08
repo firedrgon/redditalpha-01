@@ -120,6 +120,8 @@ export async function PATCH(request: NextRequest) {
 interface PostBody {
   /** 测试单个 provider，否则测试所有已启用的 */
   providerId?: string;
+  /** 仅预热当前活跃模型（无需客户端传 providerId，由服务端解析） */
+  warmActive?: boolean;
 }
 
 /** POST /api/llm-providers：测试 provider 可用性，结果写回本地配置文件 */
@@ -137,6 +139,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       results: [{ id: body.providerId, name: body.providerId, ...result }],
     });
+  }
+
+  // warmActive：仅预热当前活跃模型（无需客户端知道 providerId）。
+  // 免费共享算力模型空闲后首次生成需 30-50s 冷启动，导致「首点分析即超时」；
+  // 前端在弹窗打开时 fire-and-forget 调此，服务端走与「测试」相同的 testProvider
+  // 发一次极小生成把实例预热，等用户点「生成 AI 分析」已是热实例。
+  if (body.warmActive) {
+    const config = await readConfig();
+    const id = config.activeProvider;
+    if (!id) return NextResponse.json({ results: [] });
+    const result = await testProvider(id);
+    return NextResponse.json({ results: [{ id, name: id, ...result }] });
   }
 
   const { results } = await refreshProviderStatuses();
