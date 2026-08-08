@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 interface HotStock {
   id: string;
@@ -102,6 +102,36 @@ function upsidePct(price: number | null, target: number | null): number | null {
   if (price == null || target == null || price <= 0) return null;
   return ((target - price) / price) * 100;
 }
+
+/** 技术信号 bullishness 评分：强烈买入最高、强烈卖出最低 */
+const SIGNAL_SCORE: Record<string, number> = {
+  strong_buy: 2,
+  buy: 1,
+  neutral: 0,
+  sell: -1,
+  strong_sell: -2,
+};
+function signalScore(s: string | null): number {
+  if (!s) return -Infinity;
+  return SIGNAL_SCORE[s] ?? 0;
+}
+
+/** 筹码状态评分：越「密集」越看涨 → 排序越靠前（缺数据者排末位） */
+function chipScore(k: string | null): number {
+  if (!k) return -Infinity;
+  if (k.includes("高度密集") || k.includes("极度密集")) return 3;
+  if (k.includes("密集")) return 2;
+  if (k.includes("分散")) return 0;
+  return 1; // 均衡 / 中性 / 其他
+}
+
+/** A 股热榜排序维度 */
+const HOT_SORTS: { key: "heat" | "signal" | "upside" | "chip"; label: string }[] = [
+  { key: "heat", label: "热度" },
+  { key: "signal", label: "技术信号" },
+  { key: "upside", label: "目标价空间" },
+  { key: "chip", label: "筹码情况" },
+];
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
   return (
@@ -338,6 +368,7 @@ export default function HotStocksPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [sortKey, setSortKey] = useState<"heat" | "signal" | "upside" | "chip">("heat");
 
   // 自包含模式（未传入宿主收藏回调）下的本地收藏集合
   const [localFav, setLocalFav] = useState<Set<string>>(new Set());
@@ -459,6 +490,31 @@ export default function HotStocksPanel({
     [toggleFavorite, localFav]
   );
 
+  const sortedStocks = useMemo(() => {
+    const arr = [...stocks];
+    switch (sortKey) {
+      case "signal":
+        arr.sort(
+          (a, b) => signalScore(b.signalOverall) - signalScore(a.signalOverall)
+        );
+        break;
+      case "upside":
+        arr.sort(
+          (a, b) =>
+            (upsidePct(b.price, b.targetPrice) ?? -Infinity) -
+            (upsidePct(a.price, a.targetPrice) ?? -Infinity)
+        );
+        break;
+      case "chip":
+        arr.sort((a, b) => chipScore(b.chipKeyword) - chipScore(a.chipKeyword));
+        break;
+      case "heat":
+      default:
+        arr.sort((a, b) => (b.heat ?? -Infinity) - (a.heat ?? -Infinity));
+    }
+    return arr;
+  }, [stocks, sortKey]);
+
   return (
     <>
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -538,6 +594,35 @@ export default function HotStocksPanel({
         </div>
       )}
 
+      {stocks.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-zinc-500">排序</span>
+          {HOT_SORTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => setSortKey(s.key)}
+              title={
+                s.key === "upside"
+                  ? "按机构一致目标价的上涨空间降序（缺目标价/现价者排末位）"
+                  : s.key === "chip"
+                    ? "按筹码集中度降序：密集(看涨)在前、分散(看跌)在后"
+                    : s.key === "signal"
+                      ? "按 TradingView 综合技术信号降序：强烈买入在前"
+                      : "按同花顺人气热度降序"
+              }
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                sortKey === s.key
+                  ? "border-orange-500/50 bg-orange-500/15 text-orange-300"
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <LoadingSkeleton />
       ) : stocks.length === 0 ? (
@@ -570,7 +655,7 @@ export default function HotStocksPanel({
               : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
           }
         >
-          {stocks.map((stock) => (
+          {sortedStocks.map((stock) => (
             <HotStockCard
               key={stock.id}
               stock={stock}

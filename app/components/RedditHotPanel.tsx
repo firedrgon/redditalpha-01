@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { toXueqiuWebUrl } from "@/lib/market";
 
 interface RedditStock {
@@ -96,6 +96,33 @@ function formatPrice(p: number | null): string {
   if (p == null) return "-";
   return p.toFixed(2);
 }
+
+/** 技术信号 bullishness 评分：强烈买入最高、强烈卖出最低 */
+const SIGNAL_SCORE: Record<string, number> = {
+  strong_buy: 2,
+  buy: 1,
+  neutral: 0,
+  sell: -1,
+  strong_sell: -2,
+};
+function signalScore(s: string | null): number {
+  if (!s) return -Infinity;
+  return SIGNAL_SCORE[s] ?? 0;
+}
+
+/** 目标价相对现价的上涨空间（%），任一缺失返回 null */
+function upsideOf(stock: RedditStock): number | null {
+  if (stock.targetPrice == null || stock.price == null || stock.price <= 0)
+    return null;
+  return (stock.targetPrice / stock.price - 1) * 100;
+}
+
+/** Reddit 热榜排序维度（筹码为 A 股独有概念，此处不提供） */
+const REDDIT_SORTS: { key: "mentions" | "signal" | "upside"; label: string }[] = [
+  { key: "mentions", label: "提及" },
+  { key: "signal", label: "技术信号" },
+  { key: "upside", label: "目标价空间" },
+];
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
   return (
@@ -325,6 +352,7 @@ export default function RedditHotPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [sortKey, setSortKey] = useState<"mentions" | "signal" | "upside">("mentions");
 
   // 自包含模式下的本地收藏集合
   const [localFav, setLocalFav] = useState<Set<string>>(new Set());
@@ -444,6 +472,27 @@ export default function RedditHotPanel({
     [toggleFavorite, localFav]
   );
 
+  const sortedStocks = useMemo(() => {
+    const arr = [...stocks];
+    switch (sortKey) {
+      case "signal":
+        arr.sort(
+          (a, b) => signalScore(b.signalOverall) - signalScore(a.signalOverall)
+        );
+        break;
+      case "upside":
+        arr.sort(
+          (a, b) =>
+            (upsideOf(b) ?? -Infinity) - (upsideOf(a) ?? -Infinity)
+        );
+        break;
+      case "mentions":
+      default:
+        arr.sort((a, b) => b.mentions - a.mentions);
+    }
+    return arr;
+  }, [stocks, sortKey]);
+
   return (
     <>
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -508,6 +557,33 @@ export default function RedditHotPanel({
         </div>
       )}
 
+      {stocks.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-zinc-500">排序</span>
+          {REDDIT_SORTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => setSortKey(s.key)}
+              title={
+                s.key === "upside"
+                  ? "按分析师共识目标价的上涨空间降序（缺目标价/现价者排末位）"
+                  : s.key === "signal"
+                    ? "按 TradingView 综合技术信号降序：强烈买入在前"
+                    : "按 Reddit 提及数降序"
+              }
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                sortKey === s.key
+                  ? "border-orange-500/50 bg-orange-500/15 text-orange-300"
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <LoadingSkeleton />
       ) : stocks.length === 0 ? (
@@ -524,7 +600,7 @@ export default function RedditHotPanel({
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {stocks.map((stock) => (
+          {sortedStocks.map((stock) => (
             <RedditStockCard
               key={stock.ticker}
               stock={stock}
