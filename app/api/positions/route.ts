@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
 import { getCurrentUser, ANON_USER_ID } from "@/lib/auth";
 import { fetchQuotes } from "@/lib/quote";
+import { normalizeTicker } from "@/lib/market";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,11 @@ export async function GET() {
   let unrealized = 0;
 
   const openView = open.map((o) => {
-    const q = quotes[o.ticker.toUpperCase()];
+    // 优先用原始 ticker 查；查不到则用规范化后的 ticker 兜底
+    // （A 股 DB 中可能存的是 600519 而 fetchQuotes 返回 600519.SH）
+    const rawKey = o.ticker.toUpperCase();
+    const normKey = normalizeTicker(o.ticker).toUpperCase();
+    const q = quotes[rawKey] ?? quotes[normKey] ?? undefined;
     const price = q?.price ?? null;
     const pnl = price != null ? (price - o.entryPrice) * o.shares : null;
     const pnlPct =

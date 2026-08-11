@@ -192,12 +192,14 @@ async function fetchUSQuote(ticker: string): Promise<Quote> {
   return EMPTY(ticker, "US");
 }
 
-/** A 股：东方财富 push2 行情 */
+/** A 股：东方财富 push2 行情（主源），腾讯财经（降级源） */
 async function fetchCNQuote(ticker: string): Promise<Quote> {
   const norm = normalizeCNTicker(ticker);
   const m = norm?.match(/^(\d{6})\.(SH|SZ)$/);
   if (!m) return EMPTY(ticker, "CN");
   const [, code, ex] = m;
+
+  // 1) 东方财富 push2（主源）
   const secid = ex === "SH" ? `1.${code}` : `0.${code}`;
   const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f169,f170`;
   try {
@@ -206,28 +208,70 @@ async function fetchCNQuote(ticker: string): Promise<Quote> {
       signal: AbortSignal.timeout(8000),
       cache: "no-store",
     });
-    if (!res.ok) return EMPTY(ticker, "CN");
-    const json = (await res.json()) as { data?: Record<string, number | string | null> };
-    const d = json?.data;
-    if (!d || d.f43 == null) return EMPTY(ticker, "CN");
-    const price = typeof d.f43 === "number" ? d.f43 / 100 : null;
-    const change =
-      typeof d.f169 === "number" ? d.f169 / 100 : null;
-    // f170 为涨跌幅（百分制的 100 倍，如 84 表示 +0.84%），需 /100
-    const changePercent = typeof d.f170 === "number" ? d.f170 / 100 : null;
-    return {
-      ticker: norm ?? ticker,
-      price,
-      change,
-      changePercent,
-      currency: "CNY",
-      name: typeof d.f58 === "string" ? d.f58 : null,
-      market: "CN",
-      ok: true,
-    };
+    if (res.ok) {
+      const json = (await res.json()) as { data?: Record<string, number | string | null> };
+      const d = json?.data;
+      if (d && d.f43 != null) {
+        const price = typeof d.f43 === "number" ? d.f43 / 100 : null;
+        if (price != null && price > 0) {
+          const change = typeof d.f169 === "number" ? d.f169 / 100 : null;
+          // f170 为涨跌幅（百分制的 100 倍，如 84 表示 +0.84%），需 /100
+          const changePercent = typeof d.f170 === "number" ? d.f170 / 100 : null;
+          return {
+            ticker: norm ?? ticker,
+            price,
+            change,
+            changePercent,
+            currency: "CNY",
+            name: typeof d.f58 === "string" ? d.f58 : null,
+            market: "CN",
+            ok: true,
+          };
+        }
+      }
+    }
   } catch {
-    return EMPTY(ticker, "CN");
+    /* 降级到腾讯 */
   }
+
+  // 2) 腾讯财经（降级源，东财不可达时兜底）
+  try {
+    const sym = `${ex.toLowerCase()}${code}`; // sh600519 / sz000001
+    const res = await fetch(`https://qt.gtimg.cn/q=${sym}`, {
+      headers: { "User-Agent": UA, Referer: "https://finance.qq.com" },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      const txt = new TextDecoder("gbk").decode(buf);
+      const m2 = txt.match(/="([^"]*)"/);
+      if (m2) {
+        const f = m2[1].split("~");
+        const price = Number(f[3]);
+        if (Number.isFinite(price) && price > 0) {
+          const prevClose = Number(f[4]);
+          return {
+            ticker: norm ?? ticker,
+            price,
+            change: Number.isFinite(prevClose) ? price - prevClose : null,
+            changePercent:
+              Number.isFinite(prevClose) && prevClose > 0
+                ? (price / prevClose - 1) * 100
+                : null,
+            currency: "CNY",
+            name: f[1] || null,
+            market: "CN",
+            ok: true,
+          };
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return EMPTY(ticker, "CN");
 }
 
 /** 单 ticker 行情 */
@@ -238,15 +282,25 @@ export async function fetchQuote(ticker: string): Promise<Quote> {
   return fetchUSQuote(ticker);
 }
 
-/** 批量行情，结果按 ticker 大写映射 */
+/** 批量行情，结果按 ticker 大写映射。
+ *  同时用「输入 ticker」和「返回 ticker」作为 key，
+ *  避免 A 股 fetchCNQuote 将 600519 规范化为 600519.SH 后、
+ *  调用方用原始 600519 查不到的问题。 */
 export async function fetchQuotes(
   tickers: string[]
 ): Promise<Record<string, Quote>> {
   const unique = Array.from(new Set(tickers.map((t) => t.trim().toUpperCase())));
   const results = await Promise.all(unique.map((t) => fetchQuote(t)));
   const map: Record<string, Quote> = {};
-  for (const q of results) {
-    map[q.ticker.toUpperCase()] = q;
+  for (let i = 0; i < unique.length; i++) {
+    const q = results[i];
+    const retKey = q.ticker.toUpperCase();
+    map[retKey] = q;
+    // 同时用输入 ticker 作为 key，保证调用方能用传入的 ticker 查到结果
+    const inputKey = unique[i];
+    if (inputKey !== retKey) {
+      map[inputKey] = q;
+    }
   }
   return map;
 }
