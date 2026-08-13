@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 interface PositionRow {
@@ -69,7 +70,12 @@ const pnlClass = (n: number | null | undefined) =>
 const fmtDate = (s: string | null) =>
   s ? new Date(s).toLocaleDateString("zh-CN") : "—";
 
-export default function PositionsPanel() {
+export default function PositionsPanel({
+  onAnalyze,
+}: {
+  /** 打开首页同款的 AI 分析弹窗（按 ticker 触发，无需该标的已收藏） */
+  onAnalyze?: (ticker: string, name?: string | null) => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<PositionRow[]>([]);
   const [closed, setClosed] = useState<PositionRow[]>([]);
@@ -104,6 +110,27 @@ export default function PositionsPanel() {
     const t = setInterval(load, 60_000); // 每分钟刷新现价/未实现盈亏
     return () => clearInterval(t);
   }, [load]);
+
+  /** 行内操作：打开 AI 分析弹窗 / 跳转研报页面 */
+  const renderActions = (ticker: string, name?: string | null) => (
+    <div className="flex items-center justify-end gap-1.5">
+      <button
+        type="button"
+        onClick={() => onAnalyze?.(ticker, name)}
+        className="shrink-0 rounded-md border border-orange-500/40 bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/20"
+        title="打开 AI 分析（指标 + 大模型点评）"
+      >
+        分析
+      </button>
+      <Link
+        href={`/stock-report?ticker=${encodeURIComponent(ticker)}`}
+        className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+        title="打开研报页面"
+      >
+        研报
+      </Link>
+    </div>
+  );
 
   const cards = [
     { label: "总投入", value: fmtMoney(summary.invested), cls: "text-zinc-100" },
@@ -172,7 +199,7 @@ export default function PositionsPanel() {
         </div>
       ) : (
         <div className="mb-8 overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[880px] text-sm">
             <thead className="bg-zinc-900 text-xs text-zinc-500">
               <tr>
                 <th className="px-4 py-2.5 text-left font-medium">标的</th>
@@ -183,6 +210,7 @@ export default function PositionsPanel() {
                 <th className="px-4 py-2.5 text-right font-medium">未实现盈亏</th>
                 <th className="px-4 py-2.5 text-right font-medium">盈亏%</th>
                 <th className="px-4 py-2.5 text-right font-medium">持仓天数</th>
+                <th className="px-4 py-2.5 text-right font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -227,6 +255,9 @@ export default function PositionsPanel() {
                       (Date.now() - new Date(o.entryAt).getTime()) / 86_400_000
                     )}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    {renderActions(o.ticker, o.tickerName)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -244,7 +275,7 @@ export default function PositionsPanel() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="w-full min-w-[820px] text-sm">
+          <table className="w-full min-w-[940px] text-sm">
             <thead className="bg-zinc-900 text-xs text-zinc-500">
               <tr>
                 <th className="px-4 py-2.5 text-left font-medium">标的</th>
@@ -254,6 +285,7 @@ export default function PositionsPanel() {
                 <th className="px-4 py-2.5 text-right font-medium">盈亏金额</th>
                 <th className="px-4 py-2.5 text-right font-medium">持有天数</th>
                 <th className="px-4 py-2.5 text-right font-medium">平仓日期</th>
+                <th className="px-4 py-2.5 text-right font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -292,6 +324,9 @@ export default function PositionsPanel() {
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-400">
                     {fmtDate(c.exitAt)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {renderActions(c.ticker, c.tickerName)}
                   </td>
                 </tr>
               ))}

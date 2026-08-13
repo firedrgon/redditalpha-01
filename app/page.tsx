@@ -4271,6 +4271,19 @@ export default function Home() {
     [warmUpActiveModel]
   );
 
+  /** 持仓表「分析」按钮：按 ticker 打开同款分析弹窗，无需该标的已收藏 */
+  const handleAnalyzeTicker = useCallback(
+    (ticker: string, name?: string | null) => {
+      const upper = ticker.toUpperCase();
+      const fav = favorites.find((f) => f.ticker.toUpperCase() === upper);
+      setAnalyzingItem(
+        fav ?? { ticker, name: name ?? null, addedAt: Date.now() }
+      );
+      warmUpActiveModel();
+    },
+    [favorites, warmUpActiveModel]
+  );
+
   // 手动添加：实时校验
   useEffect(() => {
     const sym = manualTicker.trim();
@@ -4772,7 +4785,7 @@ export default function Home() {
         ) : view === "reddit" ? (
           <RedditHotPanel isFavorite={isFavorite} toggleFavorite={toggleFavorite} />
         ) : view === "positions" ? (
-          <PositionsPanel />
+          <PositionsPanel onAnalyze={handleAnalyzeTicker} />
         ) : view === "etf" ? (
           <EtfTrendPanel tab={etfTab} onTabChange={setEtfTab} />
         ) : (
