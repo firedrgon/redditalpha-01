@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { getEtfTrendData, fetchEtfTrendData, storeEtfTrendData } from "@/lib/etf-trend";
+import { warmEtfEvaluationCache } from "@/lib/etf-evaluate-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** 刷新后需预热估值评估缓存（并发抓东方财富），可能较慢，放宽到 60s */
+export const maxDuration = 60;
 
 /**
  * GET /api/etf-trend
@@ -39,6 +42,9 @@ export async function POST() {
       return NextResponse.json({ error: "抓取同花顺 ETF 主升浪池失败" }, { status: 502 });
     }
     const count = await storeEtfTrendData(result);
+    // 刷新完主升浪池后，立即预热估值+质量评估缓存，使评级在刷新后即时可用
+    // （best-effort：异常不影响主流程；限流时缓存短 TTL 尽快重试）
+    await warmEtfEvaluationCache().catch(() => {});
     return NextResponse.json({
       success: true,
       date: result.date,
