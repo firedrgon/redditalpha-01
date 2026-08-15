@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import type { EtfEvaluation } from "@/lib/etf-evaluate";
 
 interface EtfTrendItem {
   code: string;
@@ -34,7 +35,59 @@ function eastmoneyEtfUrl(board: string | null, code: string): string {
   return `https://quote.eastmoney.com/${prefix}${code}.html`;
 }
 
-function EtfCard({ item }: { item: EtfTrendItem }) {
+/** 评级徽章：A 绿 / B 蓝 / C 琥珀 / D 红 / ? 灰 */
+function GradeBadge({ ev }: { ev: EtfEvaluation }) {
+  const style: Record<string, string> = {
+    A: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
+    B: "border-sky-500/40 bg-sky-500/15 text-sky-300",
+    C: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+    D: "border-red-500/40 bg-red-500/15 text-red-300",
+    "?": "border-zinc-600/40 bg-zinc-700/20 text-zinc-400",
+  };
+  const cls = style[ev.grade] ?? style["?"];
+  const tip = `${ev.summary}\n风险提示：${ev.warnings.length ? ev.warnings.join("；") : "无"}`;
+  return (
+    <span
+      title={tip}
+      className={`inline-flex cursor-help items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold ${cls}`}
+    >
+      评级 {ev.grade}
+      <span className="font-mono">{ev.totalScore != null ? ev.totalScore.toFixed(0) : "—"}</span>
+    </span>
+  );
+}
+
+/** 单项进度条（分数越高越好）：>=70 绿 / >=50 琥珀 / 否则红 */
+function ScoreBar({ label, score }: { label: string; score: number | null }) {
+  const pct = score != null ? score : 0;
+  const color =
+    score == null
+      ? "bg-zinc-700"
+      : score >= 70
+      ? "bg-emerald-500"
+      : score >= 50
+      ? "bg-amber-500"
+      : "bg-red-500";
+  return (
+    <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+      <span className="w-6 shrink-0">{label}</span>
+      <div className="h-1.5 flex-1 overflow-hidden rounded bg-zinc-800">
+        <div className={`h-full rounded ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-6 shrink-0 text-right font-mono text-zinc-400">
+        {score != null ? score.toFixed(0) : "—"}
+      </span>
+    </div>
+  );
+}
+
+function EtfCard({
+  item,
+  evaluation,
+}: {
+  item: EtfTrendItem;
+  evaluation?: EtfEvaluation;
+}) {
   return (
     <div className="group/card relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900/80">
       <div className="flex items-center gap-3">
@@ -76,9 +129,23 @@ function EtfCard({ item }: { item: EtfTrendItem }) {
             <span className="inline-flex items-center rounded border border-orange-500/30 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
               {item.tag}
             </span>
+            {evaluation ? (
+              <GradeBadge ev={evaluation} />
+            ) : (
+              <span className="inline-flex items-center rounded border border-zinc-700/60 bg-zinc-800/30 px-1.5 py-0.5 text-[10px] text-zinc-600">
+                评估中…
+              </span>
+            )}
           </div>
         </div>
       </div>
+
+      {evaluation && (
+        <div className="mt-3 space-y-1">
+          <ScoreBar label="估值" score={evaluation.valuation.score} />
+          <ScoreBar label="质量" score={evaluation.quality.score} />
+        </div>
+      )}
     </div>
   );
 }
@@ -107,6 +174,24 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  /** 综合评估（code → 评估），best-effort，失败不阻塞主列表 */
+  const [evals, setEvals] = useState<Record<string, EtfEvaluation> | null>(null);
+
+  const loadEvals = useCallback(async () => {
+    try {
+      const res = await fetch("/api/etf-trend/evaluate?top=500", { cache: "no-store" });
+      if (!res.ok) return;
+      const json = await res.json();
+      const map: Record<string, EtfEvaluation> = {};
+      for (const it of json.items ?? []) {
+        if (it?.code && it.evaluation) map[it.code] = it.evaluation;
+      }
+      setEvals(map);
+    } catch {
+      /* 评估接口异常时静默降级：卡片仅不显示评级 */
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -128,7 +213,8 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
 
   useEffect(() => {
     load();
-  }, [load]);
+    loadEvals();
+  }, [load, loadEvals]);
 
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -141,6 +227,7 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
         throw new Error(`刷新失败 HTTP ${postRes.status}: ${errText.slice(0, 200)}`);
       }
       await load();
+      await loadEvals();
     } catch (err) {
       console.error("[etf-trend] 刷新失败:", err);
       setError(err instanceof Error ? err.message : String(err));
@@ -150,6 +237,10 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
   };
 
   const list = tab === "pullback" ? data?.pullback ?? [] : data?.newPool ?? [];
+  const evalMap = useMemo(
+    () => evals ?? {},
+    [evals]
+  );
   const fetchedTime = data?.fetchedAt
     ? new Date(data.fetchedAt).toLocaleString("zh-CN", {
         month: "2-digit",
@@ -268,6 +359,23 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
         {TABS.find((t) => t.key === tab)?.desc}
       </p>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+        <span>综合评级：</span>
+        <span className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-0.5 font-bold text-emerald-300">
+          A 优
+        </span>
+        <span className="inline-flex items-center rounded border border-sky-500/40 bg-sky-500/15 px-1.5 py-0.5 font-bold text-sky-300">
+          B 良
+        </span>
+        <span className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 font-bold text-amber-300">
+          C 中
+        </span>
+        <span className="inline-flex items-center rounded border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 font-bold text-red-300">
+          D 弱
+        </span>
+        <span className="text-zinc-600">估值+质量综合（东方财富数据，分位为代理估算）</span>
+      </div>
+
       {error && (
         <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
@@ -289,13 +397,17 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((item) => (
-            <EtfCard key={`${item.category}-${item.code}`} item={item} />
+            <EtfCard
+              key={`${item.category}-${item.code}`}
+              item={item}
+              evaluation={evalMap[item.code]}
+            />
           ))}
         </div>
       )}
 
       <div className="mt-8 border-t border-zinc-800 pt-6 text-center text-xs text-zinc-600">
-        数据来源: 同花顺（10jqka）ETF 主升浪池 · 每日盘前自动抓取 · 仅供参考，不构成投资建议
+        趋势池来源: 同花顺（10jqka）· 估值/质量评级来源: 东方财富（代理分位，仅供参考，不构成投资建议）
       </div>
     </>
   );
