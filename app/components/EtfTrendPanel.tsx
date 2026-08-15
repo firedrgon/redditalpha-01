@@ -84,9 +84,11 @@ function ScoreBar({ label, score }: { label: string; score: number | null }) {
 function EtfCard({
   item,
   evaluation,
+  valuationProxy,
 }: {
   item: EtfTrendItem;
   evaluation?: EtfEvaluation;
+  valuationProxy?: boolean;
 }) {
   return (
     <div className="group/card relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900/80">
@@ -144,6 +146,11 @@ function EtfCard({
         <div className="mt-3 space-y-1">
           <ScoreBar label="估值" score={evaluation.valuation.score} />
           <ScoreBar label="质量" score={evaluation.quality.score} />
+          {valuationProxy && (
+            <p className="pt-0.5 text-[10px] text-amber-400/80">
+              估值分位为估算（该指数无历史数据，仅供参考）
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -176,21 +183,46 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
 
   /** 综合评估（code → 评估），best-effort，失败不阻塞主列表 */
   const [evals, setEvals] = useState<Record<string, EtfEvaluation> | null>(null);
+  /** 通过估值筛选的 code 集合（未筛选时 = 全部） */
+  const [passing, setPassing] = useState<Set<string> | null>(null);
+  /** code → 估值分位是否代理估算（true=无真实历史，谨慎参考） */
+  const [proxyMap, setProxyMap] = useState<Record<string, boolean>>({});
+
+  // —— 估值筛选状态 ——
+  const [vfGrade, setVfGrade] = useState(""); // 估值评级门槛：A/B/C/D/""(不限)
+  const [vfPe, setVfPe] = useState(0); // PE 分位上限(0~100，0=不限)
+  const [vfPb, setVfPb] = useState(0); // PB 分位上限(0~100，0=不限)
+  const filterActive = vfGrade !== "" || vfPe > 0 || vfPb > 0;
 
   const loadEvals = useCallback(async () => {
     try {
-      const res = await fetch("/api/etf-trend/evaluate?top=500", { cache: "no-store" });
+      const params = new URLSearchParams();
+      params.set("top", "500");
+      if (vfGrade) params.set("minValuationGrade", vfGrade);
+      if (vfPe > 0) params.set("maxPePercentile", String(vfPe));
+      if (vfPb > 0) params.set("maxPbPercentile", String(vfPb));
+      const res = await fetch(`/api/etf-trend/evaluate?${params.toString()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const json = await res.json();
       const map: Record<string, EtfEvaluation> = {};
+      const pass = new Set<string>();
+      const proxy: Record<string, boolean> = {};
       for (const it of json.items ?? []) {
-        if (it?.code && it.evaluation) map[it.code] = it.evaluation;
+        if (it?.code && it.evaluation) {
+          map[it.code] = it.evaluation;
+          pass.add(it.code);
+          proxy[it.code] = it.fundData?.valuation?.proxy ?? false;
+        }
       }
       setEvals(map);
+      setPassing(pass);
+      setProxyMap(proxy);
     } catch {
       /* 评估接口异常时静默降级：卡片仅不显示评级 */
     }
-  }, []);
+  }, [vfGrade, vfPe, vfPb]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -213,8 +245,12 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // 估值筛选变化 / 首屏 → 重新拉评估（带筛选参数）
+  useEffect(() => {
     loadEvals();
-  }, [load, loadEvals]);
+  }, [loadEvals]);
 
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -236,11 +272,19 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
     }
   };
 
+  const clearFilters = () => {
+    setVfGrade("");
+    setVfPe(0);
+    setVfPb(0);
+  };
+
   const list = tab === "pullback" ? data?.pullback ?? [] : data?.newPool ?? [];
-  const evalMap = useMemo(
-    () => evals ?? {},
-    [evals]
-  );
+  const evalMap = useMemo(() => evals ?? {}, [evals]);
+  // 应用估值筛选：仅显示通过筛选的 ETF
+  const visibleList = useMemo(() => {
+    if (!passing) return list;
+    return list.filter((it) => passing.has(it.code));
+  }, [list, passing]);
   const fetchedTime = data?.fetchedAt
     ? new Date(data.fetchedAt).toLocaleString("zh-CN", {
         month: "2-digit",
@@ -373,7 +417,73 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
         <span className="inline-flex items-center rounded border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 font-bold text-red-300">
           D 弱
         </span>
-        <span className="text-zinc-600">估值+质量综合（东方财富数据，分位为代理估算）</span>
+        <span className="text-zinc-600">估值+质量综合（东方财富数据）</span>
+      </div>
+
+      {/* 估值筛选 */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-[10px] text-zinc-500">估值分位：</span>
+        {[
+          { label: "不限", v: 0 },
+          { label: "低估≤30%", v: 30 },
+          { label: "合理≤60%", v: 60 },
+          { label: "≤80%", v: 80 },
+        ].map((c) => {
+          const active = vfPe === c.v;
+          return (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setVfPe(c.v)}
+              className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-all ${
+                active
+                  ? "border-orange-500/50 bg-orange-500/15 text-orange-300"
+                  : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+              }`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+
+        <span className="ml-1 text-[10px] text-zinc-500">估值评级：</span>
+        {[
+          { label: "不限", v: "" },
+          { label: "估值A", v: "A" },
+          { label: "估值B+", v: "B" },
+          { label: "估值C+", v: "C" },
+        ].map((c) => {
+          const active = vfGrade === c.v;
+          return (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setVfGrade(c.v)}
+              className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-all ${
+                active
+                  ? "border-orange-500/50 bg-orange-500/15 text-orange-300"
+                  : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+              }`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+
+        {filterActive && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="rounded border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[10px] text-zinc-400 transition-all hover:text-zinc-200"
+          >
+            清除筛选
+          </button>
+        )}
+        {filterActive && (
+          <span className="text-[10px] text-orange-400/80">
+            筛选后 {visibleList.length} / {list.length} 只
+          </span>
+        )}
       </div>
 
       {error && (
@@ -396,18 +506,19 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {list.map((item) => (
+          {visibleList.map((item) => (
             <EtfCard
               key={`${item.category}-${item.code}`}
               item={item}
               evaluation={evalMap[item.code]}
+              valuationProxy={proxyMap[item.code]}
             />
           ))}
         </div>
       )}
 
       <div className="mt-8 border-t border-zinc-800 pt-6 text-center text-xs text-zinc-600">
-        趋势池来源: 同花顺（10jqka）· 估值/质量评级来源: 东方财富（代理分位，仅供参考，不构成投资建议）
+        趋势池来源: 同花顺（10jqka）· 估值/质量评级来源: 东方财富（覆盖指数用每日 PE/PB 历史算真实分位，未覆盖指数标注「估算」，仅供参考，不构成投资建议）
       </div>
     </>
   );

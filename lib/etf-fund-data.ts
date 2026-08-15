@@ -8,8 +8,9 @@
  *
  * 重要：ETF 在 push2 的 f162/f167/f185 常为字符串 "-"（ETF 自身无 PE/PB/成交额），
  * 因此所有数值解析都走 num() 守卫，非数字/非有限值一律置 null，绝不产生 NaN。
- * 估值分位在缺乏真实历史分位数据源时，用「当前 PE/PB ÷ 估值天花板」推算代理分位
- * （proxy=true），保持可用且诚实标注。
+ * 估值分位优先用东方财富估值中心 RPT_VALUEANALYSIS_DET 的「指数每日 PE/PB 历史」
+ * 本地计算真实百分位（proxy=false）；该表未覆盖的指数（如沪深300/创业板）才退化为
+ * 「当前 PE/PB ÷ 估值天花板」代理分位（proxy=true），保持可用且诚实标注。
  *
  * ETF 的东方财富 secid 规则与个股一致：沪市(5/6 开头) 前缀 1.，深市(1 开头) 前缀 0.
  */
@@ -161,7 +162,7 @@ async function fetchEtfMarket(
 }
 
 /** 取指数实时 PE/PB（push2，原始单位 ×100） */
-async function fetchIndexPePb(
+export async function fetchIndexPePb(
   secid: string
 ): Promise<{ pe: number | null; pb: number | null }> {
   const fields = "f162,f167";
@@ -223,10 +224,84 @@ function parseFundHtml(html: string): {
 }
 
 // ============================================================
-// 代理分位：当前 PE/PB ÷ 估值天花板
+// 真实历史分位：抓指数每日 PE/PB 历史，本地算当前值所处百分位
+// （比「当前值 ÷ 硬编码天花板」的代理分位准确得多）
 // ============================================================
 
-function proxyPercentile(pe: number | null, pb: number | null): {
+interface IndexValuationHistory {
+  /** 每日 PE(TTM) 序列（按日期升序，已过滤非有限/非正） */
+  pe: number[];
+  /** 每日 PB(MRQ) 序列（按日期升序） */
+  pb: number[];
+  /** 最新交易日 PE/PB（即「当前值」） */
+  latestPe: number | null;
+  latestPb: number | null;
+  ok: boolean;
+}
+
+/**
+ * 抓指数的每日 PE/PB 历史（东方财富估值中心 RPT_VALUEANALYSIS_DET）。
+ * 用指数 6 位代码（非 push2 secid）查询；一次拉全（≤5000 行）。按日期升序返回，
+ * 末行即最新，latestPe/latestPb 为「当前值」。
+ * 注意：该表并非覆盖所有指数（沪深300/创业板等主流指数常缺失），缺失时 ok=false。
+ */
+export async function fetchIndexValuationHistory(plainCode: string): Promise<IndexValuationHistory> {
+  const filter = `(SECURITY_CODE="${plainCode}")`;
+  const url =
+    "https://datacenter-web.eastmoney.com/api/data/v1/get" +
+    `?reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,TRADE_DATE,PE_TTM,PB_MRQ` +
+    `&filter=${encodeURIComponent(filter)}&pageSize=5000&sortColumns=TRADE_DATE&sortTypes=1`;
+  const json = await fetchJson<{ result?: { data?: Array<Record<string, unknown>> } }>(
+    url,
+    "https://data.eastmoney.com/",
+    15000
+  );
+  const rows = json?.result?.data;
+  if (!rows || rows.length === 0)
+    return { pe: [], pb: [], latestPe: null, latestPb: null, ok: false };
+  const pe: number[] = [];
+  const pb: number[] = [];
+  let latestPe: number | null = null;
+  let latestPb: number | null = null;
+  for (const r of rows) {
+    const p = num(r.PE_TTM);
+    const b = num(r.PB_MRQ);
+    if (p != null && p > 0) {
+      pe.push(p);
+      latestPe = p; // 升序，最后一条有效值即最新
+    }
+    if (b != null && b > 0) {
+      pb.push(b);
+      latestPb = b;
+    }
+  }
+  return { pe, pb, latestPe, latestPb, ok: pe.length > 0 };
+}
+
+/**
+ * 当前值在历史序列中的百分位（0~100，越高越贵）：
+ * 历史上 ≤ 当前值的交易日占比。
+ * 先剔除极端离群点（>5×中位数 或 <中位数/5），避免脏数据（如个别交易日 PE 异常）
+ * 污染分位。分位是「排名」概念，与绝对数值量纲无关，故即使序列整体量纲与
+ * 实时行情略有差异，只要同一序列内自洽，分位依然有效。
+ */
+export function computePercentile(current: number, history: number[]): number | null {
+  if (!history.length || !Number.isFinite(current) || current <= 0) return null;
+  const sorted = [...history].sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)] || 0;
+  const lo = med / 5;
+  const hi = med * 5;
+  const base = history.filter((h) => h >= lo && h <= hi);
+  const use = base.length >= 10 ? base : history;
+  const below = use.filter((h) => h <= current).length;
+  return (below / use.length) * 100;
+}
+
+// ============================================================
+// 代理分位（兜底）：当前 PE/PB ÷ 估值天花板
+// ============================================================
+
+export function proxyPercentile(pe: number | null, pb: number | null): {
   pePct: number | null;
   pbPct: number | null;
 } {
@@ -301,15 +376,35 @@ export async function assembleEtfFundData(
   let peUsed: number | null = etfPe;
   let pbUsed: number | null = etfPb;
 
+  // 分位：优先用「指数每日 PE/PB 历史」算真实百分位；拿不到历史才退代理
+  let pePct: number | null = null;
+  let pbPct: number | null = null;
+  let peFromHistory = false;
+
   if (indexSecid) {
     const idx = await fetchIndexPePb(indexSecid).catch(() => null);
     if (idx?.pe != null) peUsed = idx.pe;
     if (idx?.pb != null) pbUsed = idx.pb;
+
+    const plain = indexSecid.split(".")[1];
+    const hist = await fetchIndexValuationHistory(plain).catch(() => null);
+    if (hist && hist.pe.length > 0) {
+      const curPe = peUsed ?? hist.latestPe ?? hist.pe[hist.pe.length - 1];
+      pePct = computePercentile(curPe, hist.pe);
+      peFromHistory = true;
+    }
+    if (hist && hist.pb.length > 0) {
+      const curPb = pbUsed ?? hist.latestPb ?? hist.pb[hist.pb.length - 1];
+      pbPct = computePercentile(curPb, hist.pb);
+    }
   }
 
-  // 没有真实历史分位 → 用代理分位（当前 PE/PB ÷ 天花板）
-  const { pePct, pbPct } = proxyPercentile(peUsed, pbUsed);
-  const proxy = pePct != null || pbPct != null;
+  // 历史分位缺失的维度 → 代理分位兜底（当前 PE/PB ÷ 天花板）
+  const proxyP = proxyPercentile(peUsed, pbUsed);
+  if (pePct == null) pePct = proxyP.pePct;
+  if (pbPct == null) pbPct = proxyP.pbPct;
+  // 仅当 PE 真实分位可用时，整体视为「真实分位」（PE 是估值主指标）
+  const proxy = !peFromHistory;
 
   return {
     code,
