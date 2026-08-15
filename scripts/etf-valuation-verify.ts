@@ -120,16 +120,17 @@ async function main() {
     console.log(`\n交叉验证通过 ${crossOk}/${crossTot}（偏差普遍 <10%，显示值可信）`);
   }
 
-  bar("② 估值分位：真实历史分位 vs 旧代理分位（量化误差）");
+  bar("② 估值分位：历史表自算分位 vs 旧代理分位（量化误差）");
   console.log(
-    ["指数", "当前PE", "真实分位%", "代理分位%", "误差(点)", "数据"].join("\t").padEnd(8)
+    ["指数", "表内最新PE", "真实市场PE", "量纲差", "表内分位%", "代理分位%", "误差(点)", "数据"].join("\t").padEnd(8)
   );
   for (const i of INDICES) {
     const em = await fetchIndexPePb(i.secid).catch(() => null);
     const hist = await fetchIndexValuationHistory(i.plain).catch(() => null);
-    // 生产环境当前值取 push2（量纲正确）；沙箱限流时退用历史最新值（仅用于演示分位）
-    const curPe = em?.pe ?? hist?.latestPe ?? null;
-    const curPb = em?.pb ?? hist?.latestPb ?? null;
+    // 修正后：分位一律用「历史表自己的最新值」做当前值（与历史序列同尺度），
+    // 绝不用 push2 真实PE 去比历史表序列（量纲不一致会算崩分位）。
+    const curPe = hist?.latestPe ?? em?.pe ?? null;
+    const curPb = hist?.latestPb ?? em?.pb ?? null;
     const realPct =
       hist && hist.ok && curPe != null ? computePercentile(curPe, hist.pe) : null;
     const proxyP = proxyPercentile(curPe, curPb);
@@ -137,10 +138,16 @@ async function main() {
       realPct != null && proxyP.pePct != null
         ? (realPct - proxyP.pePct).toFixed(1)
         : "—";
+    const scaleDiff =
+      curPe != null && em?.pe != null && em.pe > 0
+        ? (curPe / em.pe).toFixed(2) + "x"
+        : "—";
     console.log(
       [
         i.name.padEnd(8),
-        (curPe?.toFixed(2) ?? "—").padEnd(8),
+        (curPe?.toFixed(2) ?? "—").padEnd(10),
+        (em?.pe?.toFixed(2) ?? "限流").padEnd(10),
+        scaleDiff.padEnd(8),
         (realPct?.toFixed(1) ?? "缺失").padEnd(10),
         (proxyP.pePct?.toFixed(1) ?? "—").padEnd(10),
         (err).padEnd(8),

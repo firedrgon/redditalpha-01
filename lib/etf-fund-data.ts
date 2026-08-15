@@ -381,6 +381,7 @@ export async function assembleEtfFundData(
   let pbPct: number | null = null;
   let peFromHistory = false;
 
+  // 取真实市场当前 PE/PB（push2）仅用于「展示当前值」，不用于分位计算。
   if (indexSecid) {
     const idx = await fetchIndexPePb(indexSecid).catch(() => null);
     if (idx?.pe != null) peUsed = idx.pe;
@@ -388,13 +389,16 @@ export async function assembleEtfFundData(
 
     const plain = indexSecid.split(".")[1];
     const hist = await fetchIndexValuationHistory(plain).catch(() => null);
+    // ⚠️ 关键：历史估值表 PE_TTM 的绝对量纲与 push2 真实市场 PE 严重不一致
+    // （实测 0.25x~7.86x，且因指数而异）。分位必须用「历史表自己的最新值」做当前值，
+    // 与历史序列同尺度，才能算对；若用 push2 真实 PE 去比历史表序列，分位会崩。
     if (hist && hist.pe.length > 0) {
-      const curPe = peUsed ?? hist.latestPe ?? hist.pe[hist.pe.length - 1];
+      const curPe = hist.latestPe ?? hist.pe[hist.pe.length - 1];
       pePct = computePercentile(curPe, hist.pe);
       peFromHistory = true;
     }
     if (hist && hist.pb.length > 0) {
-      const curPb = pbUsed ?? hist.latestPb ?? hist.pb[hist.pb.length - 1];
+      const curPb = hist.latestPb ?? hist.pb[hist.pb.length - 1];
       pbPct = computePercentile(curPb, hist.pb);
     }
   }
