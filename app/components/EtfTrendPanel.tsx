@@ -187,10 +187,10 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
   const [passing, setPassing] = useState<Set<string> | null>(null);
   /** code → 估值分位是否代理估算（true=无真实历史，谨慎参考） */
   const [proxyMap, setProxyMap] = useState<Record<string, boolean>>({});
-  /** 筛选元信息：被「分位缺失/代理估算」排除的计数（用于透明提示） */
+  /** 筛选元信息：被「分位超阈值 / 分位数据缺失」排除的计数（用于透明提示） */
   const [evalMeta, setEvalMeta] = useState<{
-    filteredOutUnknown: number;
-    filteredOutEstimated: number;
+    filteredOutByCap: number;
+    missingPercentile: number;
     returned: number;
     total: number;
   } | null>(null);
@@ -227,8 +227,8 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
       setPassing(pass);
       setProxyMap(proxy);
       setEvalMeta({
-        filteredOutUnknown: json.filteredOutUnknown ?? 0,
-        filteredOutEstimated: json.filteredOutEstimated ?? 0,
+        filteredOutByCap: json.filteredOutByCap ?? 0,
+        missingPercentile: json.missingPercentile ?? 0,
         returned: json.returned ?? 0,
         total: json.total ?? 0,
       });
@@ -522,11 +522,10 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
             筛选后 {visibleList.length} / {list.length} 只
           </span>
         )}
-        {filterActive && evalMeta && (evalMeta.filteredOutUnknown > 0 || evalMeta.filteredOutEstimated > 0) && (
+        {filterActive && evalMeta && (evalMeta.filteredOutByCap > 0 || evalMeta.missingPercentile > 0) && (
           <span className="text-[10px] text-amber-400/80">
-            {evalMeta.filteredOutUnknown > 0 && ` ${evalMeta.filteredOutUnknown} 只分位缺失`}
-            {evalMeta.filteredOutEstimated > 0 && ` ${evalMeta.filteredOutEstimated} 只分位为估算`}
-            ，未纳入筛选
+            {evalMeta.filteredOutByCap > 0 && ` ${evalMeta.filteredOutByCap} 只分位超阈值已剔除`}
+            {evalMeta.missingPercentile > 0 && ` ${evalMeta.missingPercentile} 只分位数据缺失未纳入`}
           </span>
         )}
       </div>

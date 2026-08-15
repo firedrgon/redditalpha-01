@@ -57,15 +57,19 @@ function applyFilters(
   }
 
   // PE / PB 分位上限筛选。
-  // 关键修正：分位为 null（数据缺失）或 proxy=true（代理估算，不可信）的 ETF
-  // 一律「不据此筛选」——既不通过也不静默消失，而是计入下方计数返回给前端提示，
-  // 避免之前「点低估≤30% 结果几乎为空」的体验问题。
-  let filteredOutUnknown = 0; // 分位为 null（数据缺失）
-  let filteredOutEstimated = 0; // 分位为代理估算（不可信，不用于筛选）
+  // 行为：cap>0 时开启。
+  //   - 分位为 null（数据真缺失）→ 剔除并计入 missingPercentile（告知用户，不静默吞掉）
+  //   - 分位非 null（无论「真实历史分位」还是「代理分位」）→ 按分位值判断：
+  //       p<=cap 保留，否则剔除（计入 filteredOutByCap）
+  // 关键：代理分位（proxy=true）也要参与筛选，否则主升浪池里最主流的
+  // 沪深300/创业板等 ETF（其真实历史分位在源表缺失、被迫走代理）会被「排除在筛选外」，
+  // 表现为「点合理≤60% 这些 ETF 凭空消失 / 点低估≤30% 列表几乎空」，即筛选不生效。
+  // 代理分位不准的局限由前端「分位为估算」标注提示，不做逻辑层面的强行豁免。
+  let filteredOutByCap = 0; // 分位超上限被剔除
+  let missingPercentile = 0; // 分位数据缺失被剔除
 
   const applyPercentileCap = (
     getPct: (it: (typeof items)[number]) => number | null,
-    isProxy: (it: (typeof items)[number]) => boolean,
     cap: number
   ) => {
     if (cap <= 0) return;
@@ -73,26 +77,21 @@ function applyFilters(
     for (const it of items) {
       const p = getPct(it);
       if (p == null) {
-        filteredOutUnknown++;
-        continue;
-      }
-      if (isProxy(it)) {
-        filteredOutEstimated++;
+        missingPercentile++;
         continue;
       }
       if (p <= cap) kept.push(it);
+      else filteredOutByCap++;
     }
     items = kept;
   };
 
   applyPercentileCap(
     (it) => it.fundData?.valuation.indexPePercentile ?? null,
-    (it) => it.fundData?.valuation.proxy === true,
     f.maxPePercentile
   );
   applyPercentileCap(
     (it) => it.fundData?.valuation.indexPbPercentile ?? null,
-    (it) => it.fundData?.valuation.proxy === true,
     f.maxPbPercentile
   );
 
@@ -101,8 +100,8 @@ function applyFilters(
     ...payload,
     total,
     returned: items.length,
-    filteredOutUnknown,
-    filteredOutEstimated,
+    filteredOutByCap,
+    missingPercentile,
     items,
   };
 }
