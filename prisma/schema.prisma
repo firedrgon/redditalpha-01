@@ -236,6 +236,49 @@ model EtfTrend {
   @@index([date, category])
 }
 
+/// ETF 主升浪「估值 + 质量」评估结果（与 EtfTrend.date 对应，按 date+code 唯一）。
+/// 落库目的：估值原本每次请求实时抓东方财富计算且仅存于 per-instance 内存缓存，
+/// 导致 (1) serverless 多实例各算各的、筛选时灵时不灵；(2) 东方财富限流时大量 ETF
+/// 分位变 null，筛选被静默剔除。落库后：计算一次、跨实例共享、筛选稳定可复现。
+model EtfValuation {
+  id             String   @id @default(cuid())
+  /// 北京时间日期 YYYY-MM-DD，对应 EtfTrend.date
+  date           String
+  /// 6 位交易代码
+  code           String
+  /// 自包含的完整评估结果（EntfTrendItem + evaluation + fundData），无网络时可直接重建
+  itemJson       Json
+  /// 综合评级 A/B/C/D/?
+  grade          String
+  totalScore     Int?
+  /// 估值维度评级与评分
+  valuationGrade String
+  valuationScore Int?
+  /// 质量维度评级与评分
+  qualityGrade   String
+  qualityScore   Int?
+  /// 指数 PE 历史分位 0~100（反范式，便于查询/筛选）
+  pePercentile   Float?
+  /// 指数 PB 历史分位 0~100
+  pbPercentile   Float?
+  /// 是否代理估算（无真实历史分位，proxy=true 的分位不可信、不用于筛选）
+  proxy          Boolean  @default(false)
+  /// 规模（亿元）
+  scaleYi        Float?
+  /// 总费率（%）
+  feeRatePct     Float?
+  /// 年化跟踪误差（%）
+  trackingErrorPct Float?
+  /// 股息率（%）
+  dividendYieldPct Float?
+  /// 评估时间
+  evaluatedAt    DateTime @default(now())
+
+  @@unique([date, code])
+  @@index([date])
+  @@index([date, pePercentile])
+}
+
 /// Reddit 热门股票每日快照（ApeWisdom 数据源，盘前抓取一次，Top 100）。
 /// 按 date+ticker 唯一，存储前清空旧数据，仅保留最新一天。
 model RedditHotStock {

@@ -13,6 +13,7 @@
 
 import { getEtfTrendData, type EtfTrendItem } from "./etf-trend";
 import { enrichEtfTrend, type EnrichedEtfTrendItem } from "./etf-evaluate-runner";
+import { saveEtfValuations, loadEtfValuations } from "./etf-valuation-db";
 
 export interface EvalPayload {
   date: string;
@@ -59,6 +60,10 @@ async function buildPayload(): Promise<EvalPayload> {
   }
 
   const enriched = await enrichEtfTrend(unique, 6);
+
+  // 落库：计算一次、跨实例共享、筛选稳定（best-effort，失败不影响主流程）
+  await saveEtfValuations(result.date, enriched);
+
   const payload: EvalPayload = {
     date: result.date,
     fetchedAt: result.fetchedAt,
@@ -83,6 +88,20 @@ export async function getOrEvaluate(): Promise<EvalPayload> {
   if (!result) throw new Error("暂无 ETF 主升浪数据，请先抓取主升浪池");
   const hit = getCachedEval(result.date);
   if (hit) return hit;
+
+  // 内存未命中：先尝试读 DB（避免冷实例重复抓东方财富 → 限流整批 null），
+  // 没有落库记录才回退到实时计算。
+  const fromDb = await loadEtfValuations(result.date);
+  if (fromDb && fromDb.length > 0) {
+    return {
+      date: result.date,
+      fetchedAt: result.fetchedAt,
+      evaluatedAt: new Date().toISOString(),
+      count: fromDb.length,
+      items: fromDb,
+    };
+  }
+
   return buildPayload();
 }
 

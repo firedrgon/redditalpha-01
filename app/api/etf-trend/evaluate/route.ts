@@ -56,24 +56,55 @@ function applyFilters(
     );
   }
 
-  // PE 分位上限（剔除过贵；分位缺失的 ETF 无法确认便宜，按「不满足」过滤掉）
-  if (f.maxPePercentile > 0) {
-    items = items.filter((it) => {
-      const p = it.fundData?.valuation.indexPePercentile;
-      return p != null && p <= f.maxPePercentile;
-    });
-  }
+  // PE / PB 分位上限筛选。
+  // 关键修正：分位为 null（数据缺失）或 proxy=true（代理估算，不可信）的 ETF
+  // 一律「不据此筛选」——既不通过也不静默消失，而是计入下方计数返回给前端提示，
+  // 避免之前「点低估≤30% 结果几乎为空」的体验问题。
+  let filteredOutUnknown = 0; // 分位为 null（数据缺失）
+  let filteredOutEstimated = 0; // 分位为代理估算（不可信，不用于筛选）
 
-  // PB 分位上限
-  if (f.maxPbPercentile > 0) {
-    items = items.filter((it) => {
-      const p = it.fundData?.valuation.indexPbPercentile;
-      return p != null && p <= f.maxPbPercentile;
-    });
-  }
+  const applyPercentileCap = (
+    getPct: (it: (typeof items)[number]) => number | null,
+    isProxy: (it: (typeof items)[number]) => boolean,
+    cap: number
+  ) => {
+    if (cap <= 0) return;
+    const kept: typeof items = [];
+    for (const it of items) {
+      const p = getPct(it);
+      if (p == null) {
+        filteredOutUnknown++;
+        continue;
+      }
+      if (isProxy(it)) {
+        filteredOutEstimated++;
+        continue;
+      }
+      if (p <= cap) kept.push(it);
+    }
+    items = kept;
+  };
+
+  applyPercentileCap(
+    (it) => it.fundData?.valuation.indexPePercentile ?? null,
+    (it) => it.fundData?.valuation.proxy === true,
+    f.maxPePercentile
+  );
+  applyPercentileCap(
+    (it) => it.fundData?.valuation.indexPbPercentile ?? null,
+    (it) => it.fundData?.valuation.proxy === true,
+    f.maxPbPercentile
+  );
 
   if (f.top < items.length) items = items.slice(0, f.top);
-  return { ...payload, total, returned: items.length, items };
+  return {
+    ...payload,
+    total,
+    returned: items.length,
+    filteredOutUnknown,
+    filteredOutEstimated,
+    items,
+  };
 }
 
 /**

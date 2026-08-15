@@ -187,6 +187,13 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
   const [passing, setPassing] = useState<Set<string> | null>(null);
   /** code → 估值分位是否代理估算（true=无真实历史，谨慎参考） */
   const [proxyMap, setProxyMap] = useState<Record<string, boolean>>({});
+  /** 筛选元信息：被「分位缺失/代理估算」排除的计数（用于透明提示） */
+  const [evalMeta, setEvalMeta] = useState<{
+    filteredOutUnknown: number;
+    filteredOutEstimated: number;
+    returned: number;
+    total: number;
+  } | null>(null);
 
   // —— 估值筛选状态 ——
   const [vfGrade, setVfGrade] = useState(""); // 估值评级门槛：A/B/C/D/""(不限)
@@ -219,6 +226,12 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
       setEvals(map);
       setPassing(pass);
       setProxyMap(proxy);
+      setEvalMeta({
+        filteredOutUnknown: json.filteredOutUnknown ?? 0,
+        filteredOutEstimated: json.filteredOutEstimated ?? 0,
+        returned: json.returned ?? 0,
+        total: json.total ?? 0,
+      });
     } catch {
       /* 评估接口异常时静默降级：卡片仅不显示评级 */
     }
@@ -479,9 +492,41 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
             清除筛选
           </button>
         )}
+        {/* PB 分位筛选（与 PE 对称） */}
+        <span className="ml-2 text-[10px] text-zinc-500">PB 分位：</span>
+        {[
+          { label: "不限", v: 0 },
+          { label: "≤30%", v: 30 },
+          { label: "≤60%", v: 60 },
+          { label: "≤80%", v: 80 },
+        ].map((c) => {
+          const active = vfPb === c.v;
+          return (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setVfPb(c.v)}
+              className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-all ${
+                active
+                  ? "border-orange-500/50 bg-orange-500/15 text-orange-300"
+                  : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+              }`}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+
         {filterActive && (
           <span className="text-[10px] text-orange-400/80">
             筛选后 {visibleList.length} / {list.length} 只
+          </span>
+        )}
+        {filterActive && evalMeta && (evalMeta.filteredOutUnknown > 0 || evalMeta.filteredOutEstimated > 0) && (
+          <span className="text-[10px] text-amber-400/80">
+            {evalMeta.filteredOutUnknown > 0 && ` ${evalMeta.filteredOutUnknown} 只分位缺失`}
+            {evalMeta.filteredOutEstimated > 0 && ` ${evalMeta.filteredOutEstimated} 只分位为估算`}
+            ，未纳入筛选
           </span>
         )}
       </div>
