@@ -19,6 +19,8 @@ interface PositionRow {
   holdDays: number | null;
   pnl: number | null;
   pnlPct: number | null;
+  pinned: boolean;
+  pinnedAt: string | null;
   currentPrice?: number | null;
   unrealizedPnl?: number | null;
   unrealizedPnlPct?: number | null;
@@ -70,6 +72,42 @@ const pnlClass = (n: number | null | undefined) =>
 const fmtDate = (s: string | null) =>
   s ? new Date(s).toLocaleDateString("zh-CN") : "—";
 
+/** 置顶排序：置顶项优先（按 pinnedAt 降序），非置顶项按开/平仓时间降序 */
+function sortPositions(list: PositionRow[]): PositionRow[] {
+  return [...list].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (a.pinned && b.pinned) {
+      const aT = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+      const bT = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+      return bT - aT;
+    }
+    const aT = new Date(a.entryAt ?? a.exitAt ?? 0).getTime();
+    const bT = new Date(b.entryAt ?? b.exitAt ?? 0).getTime();
+    return bT - aT;
+  });
+}
+
+/** 置顶/取消置顶图标（lucide pin） */
+function PinIcon({ pinned }: { pinned: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={pinned ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={pinned ? "text-orange-400" : "text-zinc-500"}
+      aria-hidden="true"
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
 export default function PositionsPanel({
   onAnalyze,
 }: {
@@ -95,8 +133,8 @@ export default function PositionsPanel({
       const res = await fetch("/api/positions");
       if (!res.ok) throw new Error("load failed");
       const d = await res.json();
-      setOpen(d.open ?? []);
-      setClosed(d.closed ?? []);
+      setOpen(sortPositions(d.open ?? []));
+      setClosed(sortPositions(d.closed ?? []));
       setSummary(d.summary ?? summary);
     } catch {
       /* 保留旧数据 */
@@ -105,25 +143,90 @@ export default function PositionsPanel({
     }
   }, [summary]);
 
+  /** 置顶 / 取消置顶：乐观更新 + 本地重排，失败回滚 */
+  const togglePin = useCallback(async (row: PositionRow) => {
+    const next = !row.pinned;
+    const apply = (list: PositionRow[]) =>
+      sortPositions(
+        list.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                pinned: next,
+                pinnedAt: next ? new Date().toISOString() : null,
+              }
+            : r
+        )
+      );
+    setOpen((prev) => apply(prev));
+    setClosed((prev) => apply(prev));
+    try {
+      const res = await fetch("/api/positions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id, pinned: next }),
+      });
+      if (!res.ok) throw new Error("pin failed");
+      const d = await res.json();
+      if (d.position) {
+        const upd = d.position as PositionRow;
+        const merge = (list: PositionRow[]) =>
+          sortPositions(
+            list.map((r) =>
+              r.id === row.id
+                ? {
+                    ...r,
+                    pinned: upd.pinned,
+                    pinnedAt: upd.pinnedAt ?? null,
+                  }
+                : r
+            )
+          );
+        setOpen((prev) => merge(prev));
+        setClosed((prev) => merge(prev));
+      }
+    } catch {
+      // 失败回滚到切换前状态
+      const rollback = (list: PositionRow[]) =>
+        sortPositions(
+          list.map((r) =>
+            r.id === row.id
+              ? { ...r, pinned: row.pinned, pinnedAt: row.pinnedAt }
+              : r
+          )
+        );
+      setOpen((prev) => rollback(prev));
+      setClosed((prev) => rollback(prev));
+    }
+  }, []);
+
   useEffect(() => {
     load();
     const t = setInterval(load, 60_000); // 每分钟刷新现价/未实现盈亏
     return () => clearInterval(t);
   }, [load]);
 
-  /** 行内操作：打开 AI 分析弹窗 / 跳转研报页面 */
-  const renderActions = (ticker: string, name?: string | null) => (
+  /** 行内操作：置顶 / 打开 AI 分析弹窗 / 跳转研报页面 */
+  const renderActions = (row: PositionRow) => (
     <div className="flex items-center justify-end gap-1.5">
       <button
         type="button"
-        onClick={() => onAnalyze?.(ticker, name)}
+        onClick={() => togglePin(row)}
+        title={row.pinned ? "取消置顶" : "置顶"}
+        className="shrink-0 rounded-md border border-zinc-700 px-1.5 py-1 transition-all hover:border-orange-500/50 hover:text-orange-400"
+      >
+        <PinIcon pinned={row.pinned} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onAnalyze?.(row.ticker, row.tickerName)}
         className="shrink-0 rounded-md border border-orange-500/40 bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-400 transition-all hover:bg-orange-500/20"
         title="打开 AI 分析（指标 + 大模型点评）"
       >
         分析
       </button>
       <Link
-        href={`/stock-report?ticker=${encodeURIComponent(ticker)}`}
+        href={`/stock-report?ticker=${encodeURIComponent(row.ticker)}`}
         className="shrink-0 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
         title="打开研报页面"
       >
@@ -220,14 +323,21 @@ export default function PositionsPanel({
                   className="border-t border-zinc-800 transition-colors hover:bg-zinc-800/40"
                 >
                   <td className="px-4 py-3">
-                    <a
-                      href={extUrl(o.ticker)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold text-white hover:text-orange-400"
-                    >
-                      {o.ticker}
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={extUrl(o.ticker)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-white hover:text-orange-400"
+                      >
+                        {o.ticker}
+                      </a>
+                      {o.pinned && (
+                        <span className="shrink-0 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
+                          置顶
+                        </span>
+                      )}
+                    </div>
                     {o.tickerName && (
                       <div className="text-xs text-zinc-500">{o.tickerName}</div>
                     )}
@@ -256,7 +366,7 @@ export default function PositionsPanel({
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {renderActions(o.ticker, o.tickerName)}
+                    {renderActions(o)}
                   </td>
                 </tr>
               ))}
@@ -295,14 +405,21 @@ export default function PositionsPanel({
                   className="border-t border-zinc-800 transition-colors hover:bg-zinc-800/40"
                 >
                   <td className="px-4 py-3">
-                    <a
-                      href={extUrl(c.ticker)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold text-white hover:text-orange-400"
-                    >
-                      {c.ticker}
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={extUrl(c.ticker)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-white hover:text-orange-400"
+                      >
+                        {c.ticker}
+                      </a>
+                      {c.pinned && (
+                        <span className="shrink-0 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
+                          置顶
+                        </span>
+                      )}
+                    </div>
                     {c.tickerName && (
                       <div className="text-xs text-zinc-500">{c.tickerName}</div>
                     )}
@@ -326,7 +443,7 @@ export default function PositionsPanel({
                     {fmtDate(c.exitAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {renderActions(c.ticker, c.tickerName)}
+                    {renderActions(c)}
                   </td>
                 </tr>
               ))}

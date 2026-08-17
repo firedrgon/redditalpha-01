@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getPrisma } from "@/lib/db/prisma";
 import { getCurrentUser, ANON_USER_ID } from "@/lib/auth";
 import { fetchQuotes } from "@/lib/quote";
 import { normalizeTicker } from "@/lib/market";
+import { setPositionPinned } from "@/lib/db/positions";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +30,11 @@ export async function GET() {
   const [open, closed] = await Promise.all([
     prisma.position.findMany({
       where: { status: "OPEN", userId: uid },
-      orderBy: { entryAt: "desc" },
+      orderBy: [{ pinned: "desc" }, { pinnedAt: "desc" }, { entryAt: "desc" }],
     }),
     prisma.position.findMany({
       where: { status: "CLOSED", userId: uid },
-      orderBy: { exitAt: "desc" },
+      orderBy: [{ pinned: "desc" }, { pinnedAt: "desc" }, { exitAt: "desc" }],
       take: 100,
     }),
   ]);
@@ -90,4 +91,42 @@ export async function GET() {
       closedCount: closed.length,
     },
   });
+}
+
+interface PatchBody {
+  /** 持仓 id（同一 ticker 可有多笔重开持仓，故用 id 而非 ticker 定位） */
+  id: string;
+  /** true=置顶，false=取消置顶 */
+  pinned: boolean;
+}
+
+export async function PATCH(request: NextRequest) {
+  const prisma = getPrisma();
+  if (!prisma) {
+    return NextResponse.json({ error: "数据库不可用" }, { status: 503 });
+  }
+
+  const user = await getCurrentUser();
+  const uid = user?.id ?? ANON_USER_ID;
+
+  const body = (await request.json().catch(() => ({}))) as PatchBody;
+  const id = typeof body.id === "string" ? body.id : "";
+  const pinned = body.pinned;
+
+  if (!id) {
+    return NextResponse.json({ error: "缺少 id" }, { status: 400 });
+  }
+  if (typeof pinned !== "boolean") {
+    return NextResponse.json({ error: "缺少 pinned" }, { status: 400 });
+  }
+
+  try {
+    const pos = await setPositionPinned(prisma, id, pinned, uid);
+    return NextResponse.json({ position: pos });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 404 }
+    );
+  }
 }

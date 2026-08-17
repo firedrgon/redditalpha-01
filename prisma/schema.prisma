@@ -389,12 +389,17 @@ model Position {
   /// 平仓时计算：(exitPrice - entryPrice) * shares
   pnl          Float?
   pnlPct       Float?
+  /// 是否置顶（持仓列表自定义排序，置顶项排在最前）
+  pinned       Boolean   @default(false)
+  /// 置顶时间，用于置顶项之间的排序（最近置顶的在最前）
+  pinnedAt     DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
   @@index([ticker])
+  @@index([userId, pinned])
 }
 
 /// ===== 认证 / 通知（NextAuth v5 + Prisma Adapter + 站内通知中心） =====

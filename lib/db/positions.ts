@@ -155,3 +155,25 @@ export async function closePosition(
     },
   });
 }
+
+/**
+ * 设置持仓的置顶状态。
+ * 置顶时记录 pinnedAt（最近置顶的在最前），取消置顶时清空。
+ * 仅能操作属于该 userId 的持仓（匿名用户归属 __anon__）；找不到抛错。
+ */
+export async function setPositionPinned(
+  prisma: PrismaClient,
+  id: string,
+  pinned: boolean,
+  userId: string
+): Promise<import("@prisma/client").Position> {
+  const existing = await prisma.position.findFirst({ where: { id, userId } });
+  if (!existing) throw new Error("持仓不存在");
+  return prisma.position.update({
+    where: { id },
+    data: {
+      pinned,
+      pinnedAt: pinned ? new Date() : null,
+    },
+  });
+}
