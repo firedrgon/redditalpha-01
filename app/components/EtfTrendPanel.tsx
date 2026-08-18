@@ -182,6 +182,27 @@ function EtfCard({
           )}
         </div>
       )}
+
+      {/* 跳转独立评估页：带上 code，落地页自动跑 6 维深度评估 */}
+      <div className="mt-3 flex justify-end border-t border-zinc-800/60 pt-2.5">
+        <Link
+          href={`/etf-evaluate?code=${item.code}`}
+          title={`对 ${item.name}（${item.code}）做 6 维深度评估：好资产 × 好价格 × 好运营 × 好时机 × 好匹配 × 好成本`}
+          className="inline-flex items-center gap-1 rounded-lg border border-orange-500/40 bg-orange-500/10 px-2.5 py-1 text-[11px] font-medium text-orange-400 transition-all hover:bg-orange-500/20 hover:text-orange-300"
+        >
+          深度评估
+          <svg
+            viewBox="0 0 24 24"
+            className="h-3 w-3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </Link>
+      </div>
     </div>
   );
 }

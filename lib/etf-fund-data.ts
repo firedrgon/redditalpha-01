@@ -3,7 +3,8 @@
  *
  * 把「主升浪池里的 ETF」喂进估值+质量评估引擎前，先在这里把原始数据补齐：
  *   - 实时指标（push2，不带 fltt）：规模(f116) / 股息率(f171) / PE/PB(f162/f167，ETF 多为"-")
- *   - 基金概况 HTML（jjgk）：管理费 / 托管费 / 跟踪标的 / 跟踪误差
+ *   - 基金概况 HTML（jbgk_{code}.html，UTF-8）：管理费 / 托管费 / 跟踪标的 / 基金公司 / 基金经理 / 成立日期
+ *     （注意：正确路径是 jbgk 而非 jjgk，后者 404；实际跟踪误差该页取不到，保持 null）
  *   - 跟踪指数 PE/PB（push2，用跟踪标的映射的指数 secid）
  *
  * 重要：ETF 在 push2 的 f162/f167/f185 常为字符串 "-"（ETF 自身无 PE/PB/成交额），
@@ -181,7 +182,7 @@ export async function fetchIndexPePb(
 async function fetchFundHtml(code: string): Promise<string | null> {
   try {
     const res = await fetch(
-      `https://fundf10.eastmoney.com/jjgk_${code}.html`,
+      `https://fundf10.eastmoney.com/jbgk_${code}.html`,
       {
         headers: { "User-Agent": UA, Referer: "https://fundf10.eastmoney.com/" },
         cache: "no-store",
@@ -212,8 +213,14 @@ function parseFundHtml(html: string): {
   fundManager: string | null;
   establishDate: string | null;
 } {
-  // 去标签转纯文本，避免标签结构干扰正则（jjgk 页面标签嵌套不稳定）
-  const text = html.replace(/<[^>]+>/g, " ");
+  // 去标签转纯文本，避免标签结构干扰正则（jbgk 页面标签嵌套不稳定）。
+  // 必须同时解 &nbsp;（页面用它分隔「基金经理：&nbsp;&nbsp;柳军」）并规整空白，
+  // 否则冒号与人名之间残留实体会导致匹配失败。
+  const text = html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ");
   const m = (re: RegExp): number | null => {
     const mm = text.match(re);
     return mm ? num(mm[1]) : null;
@@ -223,18 +230,20 @@ function parseFundHtml(html: string): {
     return mm && mm[1] ? mm[1].trim() : null;
   };
   return {
-    mgmtFeePct: m(/管理费率?[：:>\s]*([\d.]+)\s*%/),
-    custodyFeePct: m(/托管费率?[：:>\s]*([\d.]+)\s*%/),
-    trackIndexName: name(/跟踪标的[：:>\s]*([\u4e00-\u9fa5A-Za-z0-9]+)/),
-    trackErrorPct: m(/跟踪误差[：:>\s]*([\d.]+)\s*%/),
-    // 纯文本顺序通常为 基金管理人→基金经理→成立日期→费率，用前瞻边界避免越界吞噬
+    mgmtFeePct: m(/管理费率?[：:\s]*([\d.]+)\s*%/),
+    custodyFeePct: m(/托管费率?[：:\s]*([\d.]+)\s*%/),
+    trackIndexName: name(/跟踪标的[：:\s]*([\u4e00-\u9fa5A-Za-z0-9]+)/),
+    // 注意：jbgk 页出现的「跟踪误差」只是基金合同里的目标描述（如"力争控制在…"），
+    // 并非实际跟踪误差数值，多数情况取不到 → 保持 null，由评分层按「缺失」处理。
+    trackErrorPct: m(/跟踪误差[：:\s]*([\d.]+)\s*%/),
+    // 必须锚定右边界（基金托管人/基金经理/成立日期/管理费率），
+    // 否则「懒惰量词 + 可空前瞻」会退化成只匹配 1 个字符。
     fundCompany: name(
-      /基金管理人[：:>\s]*([\u4e00-\u9fa5()（）·]+?)(?=基金经理|成立日期|管理费率|托管费率|)/
+      /基金管理人[：:\s]*([\u4e00-\u9fa5A-Za-z0-9()（）·]{2,24}?)\s*(?:基金托管人|基金经理|成立日期|管理费率)/
     ),
-    fundManager: name(
-      /基金经理[：:>\s]*([\u4e00-\u9fa5·,，]+?)(?=成立日期|管理费率|托管费率|现任|)/
-    ),
-    establishDate: name(/成立日期[：:>\s]*(\d{4}-\d{2}-\d{2})/),
+    // 强制要求冒号：页面导航栏也有无冒号的「基金经理」链接，不加冒号会误匹配到「基金研究」。
+    fundManager: name(/基金经理[：:]\s*([\u4e00-\u9fa5·]{2,20})/),
+    establishDate: name(/成立日期[：:\s]*(\d{4}-\d{2}-\d{2})/),
   };
 }
 

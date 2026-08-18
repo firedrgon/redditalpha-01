@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { EtfSkillEvaluation, EtfGoal } from "@/lib/etf-skill-evaluate";
 
 function thsEtfUrl(code: string): string {
@@ -14,6 +15,14 @@ const GOALS: { key: EtfGoal; label: string; desc: string }[] = [
   { key: "stable", label: "稳健", desc: "低波动、控回撤" },
   { key: "balanced", label: "均衡", desc: "宽基+风格分散" },
 ];
+
+const GOAL_KEYS = ["growth", "income", "stable", "balanced"] as const;
+
+/** 把 URL 里的 goal 参数收敛为合法 EtfGoal（非法值 → null，不报错） */
+function parseGoal(raw: string | null): EtfGoal {
+  if (!raw) return null;
+  return (GOAL_KEYS as readonly string[]).includes(raw) ? (raw as EtfGoal) : null;
+}
 
 interface ApiResp {
   code: string;
@@ -73,15 +82,23 @@ function GradeBadge({ grade, score }: { grade: string; score: number | null }) {
   );
 }
 
-export default function EtfEvaluatePage() {
-  const [code, setCode] = useState("");
-  const [goal, setGoal] = useState<EtfGoal>(null);
+function EtfEvaluateInner() {
+  const searchParams = useSearchParams();
+
+  // 从 URL 直接初始化（而非在 effect 里 setState），避免级联渲染
+  const urlCode = (searchParams.get("code") ?? "").trim();
+  const urlGoal = parseGoal(searchParams.get("goal"));
+  const hasUrlCode = /^\d{6}$/.test(urlCode);
+
+  const [code, setCode] = useState(hasUrlCode ? urlCode : "");
+  const [goal, setGoal] = useState<EtfGoal>(urlGoal);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResp | null>(null);
 
-  const run = useCallback(async () => {
-    const c = code.trim();
+  /** 以显式参数执行评估（供手动点击与 URL 自动评估复用） */
+  const runWith = useCallback(async (rawCode: string, g: EtfGoal) => {
+    const c = rawCode.trim();
     if (!/^\d{6}$/.test(c)) {
       setError("请输入 6 位 ETF 代码（如 510300）");
       return;
@@ -89,7 +106,7 @@ export default function EtfEvaluatePage() {
     setLoading(true);
     setError(null);
     try {
-      const url = `/api/etf-evaluate?code=${c}${goal ? `&goal=${goal}` : ""}`;
+      const url = `/api/etf-evaluate?code=${c}${g ? `&goal=${g}` : ""}`;
       const res = await fetch(url, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) {
@@ -104,7 +121,23 @@ export default function EtfEvaluatePage() {
     } finally {
       setLoading(false);
     }
-  }, [code, goal]);
+  }, []);
+
+  const run = useCallback(() => {
+    void runWith(code, goal);
+  }, [runWith, code, goal]);
+
+  /**
+   * 带 ?code= 进入时自动评估一次：/etf-evaluate?code=510300&goal=growth
+   * 主升浪卡片的「深度评估」按钮走这条路径，点进来直接出结果。
+   * ref 保证只跑一次，用户随后手动改代码不会被 URL 覆盖。
+   */
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (autoRan.current || !hasUrlCode) return;
+    autoRan.current = true;
+    void runWith(urlCode, urlGoal);
+  }, [hasUrlCode, urlCode, urlGoal, runWith]);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
@@ -286,7 +319,26 @@ export default function EtfEvaluatePage() {
 
       <p className="mt-8 border-t border-zinc-800 pt-4 text-center text-[11px] text-zinc-600">
         本评估基于公开市场数据（东方财富 / 同花顺主升浪池），仅用于学习研究，不构成投资建议。市场有风险，交易需谨慎。
+        <br />
+        说明：实际年化跟踪误差缺乏免费公开数据源，未纳入「好成本」评分；缺失指标不按满分处理，
+        而是按可得指标重新归一化权重。
       </p>
     </main>
+  );
+}
+
+/** useSearchParams 需在 Suspense 边界内使用（Next.js App Router 静态渲染要求） */
+export default function EtfEvaluatePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-3xl px-4 py-8">
+          <div className="h-8 w-64 animate-pulse rounded bg-zinc-800" />
+          <div className="mt-6 h-28 animate-pulse rounded-xl bg-zinc-900/60" />
+        </main>
+      }
+    >
+      <EtfEvaluateInner />
+    </Suspense>
   );
 }
