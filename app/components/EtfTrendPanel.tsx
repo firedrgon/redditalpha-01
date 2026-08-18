@@ -35,6 +35,11 @@ function eastmoneyEtfUrl(board: string | null, code: string): string {
   return `https://quote.eastmoney.com/${prefix}${code}.html`;
 }
 
+/** 同花顺爱基金网（App 估值/净值页同源）：fund.10jqka.com.cn/{code}/ */
+function thsEtfUrl(code: string): string {
+  return `https://fund.10jqka.com.cn/${code}/`;
+}
+
 /** 评级徽章：A 绿 / B 蓝 / C 琥珀 / D 红 / ? 灰 */
 function GradeBadge({ ev }: { ev: EtfEvaluation }) {
   const style: Record<string, string> = {
@@ -118,6 +123,29 @@ function EtfCard({
               </svg>
             </a>
             <span className="font-mono text-xs text-zinc-500">{item.code}</span>
+            <a
+              href={thsEtfUrl(item.code)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="在同花顺查看该 ETF 估值 / 净值 / 行情（App 估值页同源）"
+              className="inline-flex items-center gap-0.5 rounded border border-zinc-700/50 px-1.5 py-0.5 text-[10px] text-zinc-500 transition-colors hover:border-emerald-500/40 hover:text-emerald-400"
+            >
+              同花顺
+              <svg
+                viewBox="0 0 24 24"
+                className="h-2.5 w-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5v13h13v-8.5M15 3h6v6M21 3l-9 9"
+                />
+              </svg>
+            </a>
             {item.board && (
               <span className="rounded bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
                 {item.board}
@@ -562,7 +590,7 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
       )}
 
       <div className="mt-8 border-t border-zinc-800 pt-6 text-center text-xs text-zinc-600">
-        趋势池来源: 同花顺（10jqka）· 估值/质量评级来源: 东方财富（覆盖指数用每日 PE/PB 历史算真实分位，未覆盖指数标注「估算」，仅供参考，不构成投资建议）
+        趋势池来源: 同花顺（10jqka）· 估值/质量评级来源: 东方财富（覆盖指数用每日 PE/PB 历史算真实分位，未覆盖指数标注「估算」，仅供参考，不构成投资建议）· 卡片「同花顺」链接可对照其 App 估值 / 净值页
       </div>
     </>
   );
