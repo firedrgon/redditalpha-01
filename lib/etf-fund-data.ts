@@ -201,26 +201,58 @@ async function fetchFundHtml(code: string): Promise<string | null> {
   }
 }
 
+export type IndexType = "broad" | "sector" | "strategy" | null;
+
 function parseFundHtml(html: string): {
   mgmtFeePct: number | null;
   custodyFeePct: number | null;
   trackIndexName: string | null;
   trackErrorPct: number | null;
+  fundCompany: string | null;
+  fundManager: string | null;
+  establishDate: string | null;
 } {
+  // 去标签转纯文本，避免标签结构干扰正则（jjgk 页面标签嵌套不稳定）
+  const text = html.replace(/<[^>]+>/g, " ");
   const m = (re: RegExp): number | null => {
-    const mm = html.match(re);
+    const mm = text.match(re);
     return mm ? num(mm[1]) : null;
   };
   const name = (re: RegExp): string | null => {
-    const mm = html.match(re);
+    const mm = text.match(re);
     return mm && mm[1] ? mm[1].trim() : null;
   };
   return {
-    mgmtFeePct: m(/管理费[：:>\s]*([\d.]+)\s*%/),
-    custodyFeePct: m(/托管费[：:>\s]*([\d.]+)\s*%/),
+    mgmtFeePct: m(/管理费率?[：:>\s]*([\d.]+)\s*%/),
+    custodyFeePct: m(/托管费率?[：:>\s]*([\d.]+)\s*%/),
     trackIndexName: name(/跟踪标的[：:>\s]*([\u4e00-\u9fa5A-Za-z0-9]+)/),
     trackErrorPct: m(/跟踪误差[：:>\s]*([\d.]+)\s*%/),
+    // 纯文本顺序通常为 基金管理人→基金经理→成立日期→费率，用前瞻边界避免越界吞噬
+    fundCompany: name(
+      /基金管理人[：:>\s]*([\u4e00-\u9fa5()（）·]+?)(?=基金经理|成立日期|管理费率|托管费率|)/
+    ),
+    fundManager: name(
+      /基金经理[：:>\s]*([\u4e00-\u9fa5·,，]+?)(?=成立日期|管理费率|托管费率|现任|)/
+    ),
+    establishDate: name(/成立日期[：:>\s]*(\d{4}-\d{2}-\d{2})/),
   };
+}
+
+/** 跟踪指数类型分类（好资产维度用）：宽基 / 行业主题 / 策略 */
+export function classifyIndex(name: string | null): IndexType {
+  if (!name) return null;
+  const STRATEGY = [
+    "红利", "高股息", "股息", "低波", "低波动", "价值", "成长",
+    "质量", "动量", "基本面", "等权", "Smart", "ESG",
+  ];
+  const BROAD = [
+    "沪深300", "中证500", "中证1000", "上证50", "上证180", "上证综指",
+    "创业板指", "创业板50", "深证100", "深证成指", "科创50", "科创100",
+    "中证A50", "中证A500", "国证2000", "MSCI", "标普", "纳斯达克", "恒生",
+  ];
+  for (const k of STRATEGY) if (name.includes(k)) return "strategy";
+  for (const k of BROAD) if (name.includes(k)) return "broad";
+  return "sector"; // 其余视为行业/主题
 }
 
 // ============================================================
@@ -321,6 +353,13 @@ export interface EtfFundData {
   name: string | null;
   valuation: EtfValuationInput;
   quality: EtfQualityInput;
+  /** 基金运营信息（好运营维度） */
+  fundCompany: string | null;
+  fundManager: string | null;
+  establishDate: string | null;
+  establishYears: number | null;
+  /** 跟踪指数类型（好资产维度）：宽基 / 行业主题 / 策略 */
+  indexType: IndexType;
   /** 抓取到的原始值（供调试/展示） */
   raw: {
     scaleYi: number | null;
@@ -332,6 +371,10 @@ export interface EtfFundData {
     trackingErrorPct: number | null;
     premiumDiscountPct: number | null;
     trackIndexName: string | null;
+    fundCompany: string | null;
+    fundManager: string | null;
+    establishDate: string | null;
+    indexType: IndexType;
     proxy: boolean;
   };
 }
@@ -370,8 +413,18 @@ export async function assembleEtfFundData(
       : parsed?.mgmtFeePct ?? null;
   const trackingErrorPct = parsed?.trackErrorPct ?? null;
 
+  // 运营信息（好运营维度）
+  const fundCompany = parsed?.fundCompany ?? null;
+  const fundManager = parsed?.fundManager ?? null;
+  const establishDate = parsed?.establishDate ?? null;
+  let establishYears: number | null = null;
+  if (establishDate) {
+    const y = parseInt(establishDate.slice(0, 4), 10);
+    if (Number.isFinite(y)) establishYears = new Date().getFullYear() - y;
+  }
   // 估值：优先指数 PE/PB
   const trackIndexName = parsed?.trackIndexName ?? null;
+  const indexType = classifyIndex(trackIndexName);
   const indexSecid = resolveIndexSecid(trackIndexName);
   let peUsed: number | null = etfPe;
   let pbUsed: number | null = etfPb;
@@ -428,6 +481,11 @@ export async function assembleEtfFundData(
       trackingErrorPct,
       feeRatePct,
     },
+    fundCompany,
+    fundManager,
+    establishDate,
+    establishYears,
+    indexType,
     raw: {
       scaleYi,
       dailyTurnoverWan,
@@ -438,6 +496,10 @@ export async function assembleEtfFundData(
       trackingErrorPct,
       premiumDiscountPct,
       trackIndexName,
+      fundCompany,
+      fundManager,
+      establishDate,
+      indexType,
       proxy,
     },
   };

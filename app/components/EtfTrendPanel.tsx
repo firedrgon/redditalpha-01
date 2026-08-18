@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import type { EtfEvaluation } from "@/lib/etf-evaluate";
 
 interface EtfTrendItem {
@@ -591,6 +592,13 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
 
       <div className="mt-8 border-t border-zinc-800 pt-6 text-center text-xs text-zinc-600">
         趋势池来源: 同花顺（10jqka）· 估值/质量评级来源: 东方财富（覆盖指数用每日 PE/PB 历史算真实分位，未覆盖指数标注「估算」，仅供参考，不构成投资建议）· 卡片「同花顺」链接可对照其 App 估值 / 净值页
+        <br />
+        <Link
+          href="/etf-evaluate"
+          className="mt-1 inline-block text-orange-400/80 transition-colors hover:text-orange-300"
+        >
+          独立 ETF 评估工具（6 维框架） →
+        </Link>
       </div>
     </>
   );

@@ -120,17 +120,17 @@ export function gradeFromScore(score: number): BuyGrade {
 // 工具函数
 // ============================================================
 
-function clamp(v: number, lo = 0, hi = 100): number {
+export function clamp(v: number, lo = 0, hi = 100): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
 /** 百分位 → 估值分：越低（越便宜）分越高 */
-function pePbScoreFromPercentile(pct: number): number {
+export function pePbScoreFromPercentile(pct: number): number {
   return clamp(100 - pct);
 }
 
 /** 规模 → 质量分（亿元） */
-function scaleScore(scaleYi: number): number {
+export function scaleScore(scaleYi: number): number {
   if (scaleYi >= 50) return 100;
   if (scaleYi >= 10) return 90;
   if (scaleYi >= 5) return 80;
@@ -140,7 +140,7 @@ function scaleScore(scaleYi: number): number {
 }
 
 /** 日均成交额 → 质量分（万元） */
-function turnoverScore(wan: number): number {
+export function turnoverScore(wan: number): number {
   if (wan >= 20000) return 100; // >=2 亿
   if (wan >= 5000) return 90; // 5000 万~2 亿
   if (wan >= 1000) return 75; // 1000 万~5000 万
@@ -149,7 +149,7 @@ function turnoverScore(wan: number): number {
 }
 
 /** 折溢价率绝对值 → 质量分（偏离越大越差；折价对买家略有利，仅作温和提示） */
-function premiumDiscountScore(pdPct: number): number {
+export function premiumDiscountScore(pdPct: number): number {
   const abs = Math.abs(pdPct);
   if (abs <= 0.1) return 100;
   if (abs <= 0.3) return 90;
@@ -159,7 +159,7 @@ function premiumDiscountScore(pdPct: number): number {
 }
 
 /** 跟踪误差 → 质量分（%） */
-function trackingErrorScore(pct: number): number {
+export function trackingErrorScore(pct: number): number {
   if (pct <= 0.2) return 100;
   if (pct <= 0.5) return 90;
   if (pct <= 1.0) return 75;
@@ -168,7 +168,7 @@ function trackingErrorScore(pct: number): number {
 }
 
 /** 总费率 → 质量分（%） */
-function feeScore(pct: number): number {
+export function feeScore(pct: number): number {
   if (pct <= 0.15) return 100;
   if (pct <= 0.3) return 90;
   if (pct <= 0.5) return 75;
@@ -177,7 +177,7 @@ function feeScore(pct: number): number {
 }
 
 /** 股息率 → 估值分（%，含对国债的安全垫判断） */
-function dividendScore(div: number, bond: number | null): number {
+export function dividendScore(div: number, bond: number | null): number {
   // 5% 股息率即满分；同时与国债对比给出安全垫
   let s = clamp(div * 20);
   if (bond != null && bond > 0 && div > bond) {
@@ -187,7 +187,7 @@ function dividendScore(div: number, bond: number | null): number {
 }
 
 /** 盈利上修比例 → 估值分（%，-50~50 映射到 0~100） */
-function epsRevisionScore(pct: number): number {
+export function epsRevisionScore(pct: number): number {
   return clamp(50 + pct);
 }
 
