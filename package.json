@@ -7,7 +7,9 @@
     "build": "node scripts/db-setup.js && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node scripts/db-setup.js"
+    "postinstall": "node scripts/db-setup.js",
+    "verify:etf-valuation": "tsx scripts/etf-valuation-verify.ts",
+    "verify:etf-fields": "tsx scripts/etf-skill-verify.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

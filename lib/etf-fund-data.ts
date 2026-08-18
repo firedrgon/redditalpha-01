@@ -154,7 +154,9 @@ async function fetchJson<T>(
 async function fetchEtfMarket(
   secid: string
 ): Promise<Push2Resp["data"] | null> {
-  const fields = "f43,f57,f58,f116,f162,f167,f171,f185,f164";
+  // f48 = 成交额（元），ETF 有效；f185 对 ETF 恒为 "-"，仅作兼容保留。
+  // 交叉验证实测：510300 的 f48=3143413605 元 → 314341 万，与腾讯 gtimg 完全一致。
+  const fields = "f43,f48,f57,f58,f116,f162,f167,f171,f185,f164";
   const json = await fetchJson<Push2Resp>(
     `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=${fields}&invt=2`,
     "https://quote.eastmoney.com/"
@@ -204,6 +206,37 @@ async function fetchFundHtml(code: string): Promise<string | null> {
 
 export type IndexType = "broad" | "sector" | "strategy" | null;
 
+/** 已知紧随「基金经理人」之后出现的字段名，用作右边界锚点防止越界吞噬 */
+const MANAGER_TAIL =
+  "成立来分红|管理费率|托管费率|销售服务费率|成立日期|业绩比较基准|基金托管人|基金管理人|跟踪标的";
+
+/**
+ * 解析基金经理（可能多位）。
+ * jbgk 页原文形如「基金经理人 成曦 、 刘树荣 成立来分红 …」，
+ * 抓取全部并归一化为「成曦、刘树荣」。
+ */
+function parseManagers(text: string): string | null {
+  const tryRe = (re: RegExp): string | null => {
+    const mm = text.match(re);
+    if (!mm || !mm[1]) return null;
+    const v = mm[1]
+      .replace(/\s*、\s*/g, "、")
+      .replace(/\s+/g, "")
+      .replace(/^、|、$/g, "")
+      .trim();
+    return v.length >= 2 ? v : null;
+  };
+  return (
+    tryRe(
+      new RegExp(`基金经理人[：:\\s]*([\\u4e00-\\u9fa5·、\\s]{2,60}?)\\s*(?:${MANAGER_TAIL})`)
+    ) ??
+    tryRe(
+      new RegExp(`基金经理[：:]\\s*([\\u4e00-\\u9fa5·、\\s]{2,60}?)\\s*(?:${MANAGER_TAIL})`)
+    ) ??
+    tryRe(/基金经理[：:]\s*([\u4e00-\u9fa5·、]{2,20})/)
+  );
+}
+
 function parseFundHtml(html: string): {
   mgmtFeePct: number | null;
   custodyFeePct: number | null;
@@ -241,8 +274,11 @@ function parseFundHtml(html: string): {
     fundCompany: name(
       /基金管理人[：:\s]*([\u4e00-\u9fa5A-Za-z0-9()（）·]{2,24}?)\s*(?:基金托管人|基金经理|成立日期|管理费率)/
     ),
-    // 强制要求冒号：页面导航栏也有无冒号的「基金经理」链接，不加冒号会误匹配到「基金研究」。
-    fundManager: name(/基金经理[：:]\s*([\u4e00-\u9fa5·]{2,20})/),
+    // ETF 常由多位经理共同管理，页面原文为「基金经理人 成曦 、 刘树荣」。
+    // 只取第一位会与其他数据源（同花顺常显示另一位）对不上，故抓全部并用「、」连接。
+    // 优先锚定「基金经理人」（jbgk 页实际字段名），失败再退「基金经理:」；
+    // 两者都锚定右边界，避免匹配到导航栏的「基金经理」链接。
+    fundManager: parseManagers(text),
     establishDate: name(/成立日期[：:\s]*(\d{4}-\d{2}-\d{2})/),
   };
 }
@@ -401,7 +437,10 @@ export async function assembleEtfFundData(
   bondYieldPct: number = DEFAULT_BOND_YIELD
 ): Promise<EtfFundData> {
   const scaleYi = toYi(market?.f116);
-  const dailyTurnoverWan = toWan(market?.f185);
+  // 成交额优先 f48（元，ETF 有效）；f185 对 ETF 恒为 "-"，仅作兼容兜底。
+  // 交叉验证发现的真实缺陷：原先只读 f185 → dailyTurnoverWan 恒为 null，
+  // 导致「流动性 ≥1 亿成交额」这条硬门槛长期静默失效。
+  const dailyTurnoverWan = toWan(market?.f48) ?? toWan(market?.f185);
   const etfPe = num(market?.f162) != null ? (num(market?.f162) as number) / 100 : null;
   const etfPb = num(market?.f167) != null ? (num(market?.f167) as number) / 100 : null;
   const dividendYieldPct = toPctRaw(market?.f171);
