@@ -64,7 +64,35 @@ export async function GET() {
     results.push(`❌ FinanceSnapshot 约束失败: ${msg}`);
   }
 
-  // 3. 验证：检查表结构
+  // 3. 确保 EtfEvaluateCache 表存在（ETF 六维评估结果缓存）
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "EtfEvaluateCache" (
+        "id" TEXT NOT NULL,
+        "code" TEXT NOT NULL,
+        "goal" TEXT NOT NULL DEFAULT '',
+        "name" TEXT,
+        "dataJson" TEXT NOT NULL,
+        "grade" TEXT,
+        "totalScore" INTEGER,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL,
+        CONSTRAINT "EtfEvaluateCache_pkey" PRIMARY KEY ("id")
+      )
+    `);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "EtfEvaluateCache_code_goal_key" ON "EtfEvaluateCache"("code","goal")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "EtfEvaluateCache_code_idx" ON "EtfEvaluateCache"("code")`
+    );
+    results.push("✅ EtfEvaluateCache 表已就绪");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    results.push(`❌ EtfEvaluateCache 表创建失败: ${msg}`);
+  }
+
+  // 4. 验证：检查表结构
   try {
     const columns = await prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
       `SELECT column_name FROM information_schema.columns WHERE table_name = 'AnalysisCache' ORDER BY ordinal_position`
