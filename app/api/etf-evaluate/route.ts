@@ -8,9 +8,11 @@ import {
 import {
   evaluateEtfSkill,
   type EtfGoal,
+  type EtfSkillEvaluation,
   type EtfSkillInput,
 } from "@/lib/etf-skill-evaluate";
 import { getEtfTrendData } from "@/lib/etf-trend";
+import { getPrisma } from "@/lib/db/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,23 +29,125 @@ function inferBoard(code: string): EtfBoard {
 const VALID_GOALS = ["growth", "income", "stable", "balanced"] as const;
 type ValidGoal = (typeof VALID_GOALS)[number];
 
+/** 评估流程中可预期的业务错误（带 HTTP 状态码），与未预期的 500 区分 */
+class EvaluationError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** /api/etf-evaluate 的正常响应体（不含缓存标记字段） */
+type EvaluateResult = {
+  code: string;
+  name: string | null;
+  board: EtfBoard;
+  goal: EtfGoal;
+  fund: Record<string, unknown>;
+  nav: unknown;
+  peers: unknown;
+  evaluation: EtfSkillEvaluation;
+};
+
 /**
- * GET /api/etf-evaluate?code=510300&goal=growth
+ * 真正执行一次评估：抓东方财富基金数据 + 净值/同类 + 同花顺主升浪池，再跑六维评分。
+ * 失败以 EvaluationError 抛出（带状态码）；best-effort 的子项（nav/peers/trend）缺失不阻塞。
+ */
+async function computeEtfEvaluation(
+  code: string,
+  board: EtfBoard,
+  goal: EtfGoal
+): Promise<EvaluateResult> {
+  // 抓基金数据（best-effort，内部已对缺失项做中性处理）
+  const fund = await fetchEtfFundData(code, board).catch(() => null);
+  if (!fund) {
+    throw new EvaluationError(502, "基金数据抓取失败，请稍后重试");
+  }
+
+  // 净值历史 + 同类 ETF 对比（best-effort，缺则报告降级，不阻塞评估）
+  const [nav, peers] = await Promise.all([
+    fetchEtfNavHistory(code).catch(() => null),
+    fetchPeerEtfs(fund.raw.trackIndexName, code).catch(() => null),
+  ]);
+
+  // 好时机：查该 ETF 是否处于同花顺主升浪池（DB 读取，轻量）
+  let inUpTrend: boolean | null = null;
+  let category: "pullback" | "newPool" | null = null;
+  try {
+    const trend = await getEtfTrendData();
+    const all = [...(trend?.pullback ?? []), ...(trend?.newPool ?? [])];
+    const hit = all.find((it) => it.code === code);
+    inUpTrend = hit ? true : false;
+    category = hit?.category ?? null;
+  } catch {
+    inUpTrend = null; // 主升浪数据不可用时中性，不阻塞评估
+  }
+
+  const input: EtfSkillInput = {
+    asset: { trackIndexName: fund.raw.trackIndexName, indexType: fund.indexType },
+    valuation: fund.valuation,
+    operation: {
+      fundCompany: fund.fundCompany,
+      fundManager: fund.fundManager,
+      establishYears: fund.establishYears,
+    },
+    timing: { inUpTrend, category },
+    match: { goal },
+    quality: fund.quality,
+  };
+
+  const evaluation = evaluateEtfSkill(input);
+
+  return {
+    code,
+    name: fund.name,
+    board,
+    goal,
+    fund: {
+      fundCompany: fund.fundCompany,
+      fundManager: fund.fundManager,
+      establishDate: fund.establishDate,
+      trackIndexName: fund.raw.trackIndexName,
+      indexType: fund.indexType,
+      proxy: fund.raw.proxy,
+      feeRatePct: fund.raw.feeRatePct,
+      scaleYi: fund.raw.scaleYi,
+      indexPe: fund.raw.indexPe,
+      indexPb: fund.raw.indexPb,
+      indexPePercentile: fund.valuation.indexPePercentile,
+      indexPbPercentile: fund.valuation.indexPbPercentile,
+      dividendYieldPct: fund.valuation.dividendYieldPct,
+      navNow: nav?.navNow ?? null,
+      trackingErrorPct: fund.raw.trackingErrorPct,
+    },
+    nav,
+    peers,
+    evaluation,
+  };
+}
+
+/**
+ * GET /api/etf-evaluate?code=510300&goal=growth[&refresh=1]
  * 独立 ETF 评估业务：对齐「ETF产品智能评估」技能 6 维框架
  *   （好资产 × 好价格 × 好运营 × 好时机 × 好匹配 × 好成本）
  * 数据源：东方财富（估值/质量/经理/公司）+ 同花顺主升浪池（好时机判定）。
- * 参数：
- *   - code  6 位 ETF 代码（必填，如 510300）
- *   - goal  growth|income|stable|balanced（可选，投资目标，用于好匹配维度）
+ *
+ * 缓存策略：
+ *   - 默认优先返回数据库缓存（按 code+goal 唯一），避免每次进入页面都重抓重算。
+ *   - 传 refresh=1 时强制重算并覆盖缓存（前端「重新分析」按钮使用）。
+ *   - 未配置 DATABASE_URL（本地内存模式）时自动跳过缓存，每次实时计算。
  */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const code = (searchParams.get("code") ?? "").trim();
     const goalRaw = (searchParams.get("goal") ?? "").toLowerCase();
+    const refresh = searchParams.get("refresh") === "1" || searchParams.get("refresh") === "true";
     const goal: EtfGoal = (VALID_GOALS as readonly string[]).includes(goalRaw)
       ? (goalRaw as ValidGoal)
       : null;
+    const goalKey = goal ?? "";
 
     if (!/^\d{6}$/.test(code)) {
       return NextResponse.json(
@@ -53,75 +157,62 @@ export async function GET(req: Request) {
     }
     const board = inferBoard(code);
 
-    // 抓基金数据（best-effort，内部已对缺失项做中性处理）
-    const fund = await fetchEtfFundData(code, board).catch(() => null);
-    if (!fund) {
-      return NextResponse.json(
-        { error: "基金数据抓取失败，请稍后重试" },
-        { status: 502 }
-      );
+    const prisma = getPrisma();
+
+    // 1) 非强制刷新：尝试读取缓存
+    if (!refresh && prisma) {
+      const hit = await prisma.etfEvaluateCache
+        .findUnique({ where: { code_goal: { code, goal: goalKey } } })
+        .catch(() => null);
+      if (hit?.dataJson) {
+        try {
+          const parsed = JSON.parse(hit.dataJson);
+          return NextResponse.json({
+            ...parsed,
+            cached: true,
+            cachedAt: hit.updatedAt ? hit.updatedAt.toISOString() : null,
+          });
+        } catch {
+          // JSON 损坏：忽略缓存，走实时计算兜底
+        }
+      }
     }
 
-    // 净值历史 + 同类 ETF 对比（best-effort，缺则报告降级，不阻塞评估）
-    const [nav, peers] = await Promise.all([
-      fetchEtfNavHistory(code).catch(() => null),
-      fetchPeerEtfs(fund.raw.trackIndexName, code).catch(() => null),
-    ]);
-
-    // 好时机：查该 ETF 是否处于同花顺主升浪池（DB 读取，轻量）
-    let inUpTrend: boolean | null = null;
-    let category: "pullback" | "newPool" | null = null;
+    // 2) 实时计算
+    let result: EvaluateResult;
     try {
-      const trend = await getEtfTrendData();
-      const all = [...(trend?.pullback ?? []), ...(trend?.newPool ?? [])];
-      const hit = all.find((it) => it.code === code);
-      inUpTrend = hit ? true : false;
-      category = hit?.category ?? null;
-    } catch {
-      inUpTrend = null; // 主升浪数据不可用时中性，不阻塞评估
+      result = await computeEtfEvaluation(code, board, goal);
+    } catch (err) {
+      if (err instanceof EvaluationError) {
+        return NextResponse.json({ error: err.message }, { status: err.status });
+      }
+      throw err;
     }
 
-    const input: EtfSkillInput = {
-      asset: { trackIndexName: fund.raw.trackIndexName, indexType: fund.indexType },
-      valuation: fund.valuation,
-      operation: {
-        fundCompany: fund.fundCompany,
-        fundManager: fund.fundManager,
-        establishYears: fund.establishYears,
-      },
-      timing: { inUpTrend, category },
-      match: { goal },
-      quality: fund.quality,
-    };
+    // 3) 写回缓存（best-effort，失败不影响本次响应）
+    if (prisma) {
+      await prisma.etfEvaluateCache
+        .upsert({
+          where: { code_goal: { code, goal: goalKey } },
+          create: {
+            code,
+            goal: goalKey,
+            name: result.name,
+            dataJson: JSON.stringify(result),
+            grade: result.evaluation.grade,
+            totalScore: result.evaluation.totalScore,
+          },
+          update: {
+            name: result.name,
+            dataJson: JSON.stringify(result),
+            grade: result.evaluation.grade,
+            totalScore: result.evaluation.totalScore,
+          },
+        })
+        .catch(() => {});
+    }
 
-    const evaluation = evaluateEtfSkill(input);
-
-    return NextResponse.json({
-      code,
-      name: fund.name,
-      board,
-      goal,
-      fund: {
-        fundCompany: fund.fundCompany,
-        fundManager: fund.fundManager,
-        establishDate: fund.establishDate,
-        trackIndexName: fund.raw.trackIndexName,
-        indexType: fund.indexType,
-        proxy: fund.raw.proxy,
-        feeRatePct: fund.raw.feeRatePct,
-        scaleYi: fund.raw.scaleYi,
-        indexPe: fund.raw.indexPe,
-        indexPb: fund.raw.indexPb,
-        indexPePercentile: fund.valuation.indexPePercentile,
-        indexPbPercentile: fund.valuation.indexPbPercentile,
-        dividendYieldPct: fund.valuation.dividendYieldPct,
-        navNow: nav?.navNow ?? null,
-        trackingErrorPct: fund.raw.trackingErrorPct,
-      },
-      nav: nav,
-      peers: peers,
-      evaluation,
-    });
+    return NextResponse.json({ ...result, cached: false, cachedAt: null });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });

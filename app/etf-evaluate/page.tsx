@@ -49,6 +49,10 @@ interface ApiResp {
   nav: EtfNavHistory | null;
   peers: EtfPeer[] | null;
   evaluation: EtfSkillEvaluation;
+  /** true = 来自数据库缓存（未重新计算）；false/undefined = 本次实时计算 */
+  cached?: boolean;
+  /** 缓存命中的分析时间（ISO 字符串），用于展示「已于 X 分析」 */
+  cachedAt?: string | null;
 }
 
 // ============================================================
@@ -62,6 +66,15 @@ const fmtPct = (v: number | null, d = 1): string =>
 
 const retClass = (v: number | null): string =>
   v == null ? "text-zinc-400" : v >= 0 ? "text-emerald-400" : "text-red-400";
+
+/** ISO 时间 → 友好的本地时间文案（用于「已于 X 分析」展示） */
+function formatCachedAt(iso: string | null | undefined): string {
+  if (!iso) return "未知时间";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "未知时间";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 /** 估值分位 → 解读（与技能报告一致的阈值语义） */
 function valVerdict(pct: number | null): { text: string; cls: string } {
@@ -321,7 +334,7 @@ function EtfEvaluateInner() {
     }
   }, [favCode, fav, favBusy, data]);
 
-  const runWith = useCallback(async (rawCode: string, g: EtfGoal) => {
+  const runWith = useCallback(async (rawCode: string, g: EtfGoal, force = false) => {
     const c = rawCode.trim();
     if (!/^\d{6}$/.test(c)) {
       setError("请输入 6 位 ETF 代码（如 510300）");
@@ -330,7 +343,7 @@ function EtfEvaluateInner() {
     setLoading(true);
     setError(null);
     try {
-      const url = `/api/etf-evaluate?code=${c}${g ? `&goal=${g}` : ""}`;
+      const url = `/api/etf-evaluate?code=${c}${g ? `&goal=${g}` : ""}${force ? "&refresh=1" : ""}`;
       const res = await fetch(url, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) {
@@ -349,6 +362,11 @@ function EtfEvaluateInner() {
 
   const run = useCallback(() => {
     void runWith(code, goal);
+  }, [runWith, code, goal]);
+
+  /** 手动重新分析：强制后端忽略缓存、重抓重算 */
+  const refresh = useCallback(() => {
+    void runWith(code, goal, true);
   }, [runWith, code, goal]);
 
   const autoRan = useRef(false);
@@ -484,6 +502,21 @@ function EtfEvaluateInner() {
       {/* 结果区 */}
       {data && (
         <div className="mt-6 space-y-5">
+          {/* 缓存提示：来自历史分析结果，可一键重新分析 */}
+          {data.cached && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[11px] text-zinc-400">
+              <span className="inline-flex items-center gap-1 text-emerald-400/80">
+                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                已缓存
+              </span>
+              <span>
+                该 ETF 已于 {formatCachedAt(data.cachedAt)} 完成分析，以下为缓存结果（点右上「重新分析」可强制刷新）。
+              </span>
+            </div>
+          )}
+
           {/* 综合评级 + 名称 + 标签 */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
             <div className="flex flex-wrap items-center gap-4">
@@ -530,6 +563,28 @@ function EtfEvaluateInner() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.5l2.3 4.66 5.14.75-3.72 3.63.88 5.12-4.6-2.42-4.6 2.42.88-5.12L3.56 8.9l5.14-.75 2.3-4.66z" />
                 </svg>
                 {fav ? "已收藏" : "收藏"}
+              </button>
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={loading}
+                title="忽略缓存，重新抓取并分析"
+                className={`inline-flex items-center gap-1 rounded border px-2.5 py-1.5 text-[11px] font-medium transition-all disabled:opacity-50 ${
+                  loading
+                    ? "border-zinc-700/50 text-zinc-500"
+                    : "border-zinc-700/50 text-zinc-400 hover:border-orange-500/40 hover:text-orange-400"
+                }`}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.5 9a7 7 0 0112-2.5L20 9M18.5 15a7 7 0 01-12 2.5L4 15" />
+                </svg>
+                {loading ? "分析中…" : "重新分析"}
               </button>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-[10px]">

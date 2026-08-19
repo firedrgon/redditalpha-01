@@ -281,6 +281,31 @@ model EtfValuation {
   @@index([date, pePercentile])
 }
 
+/// ETF 单只「六维智能评估」结果缓存（对应 /api/etf-evaluate 响应体）。
+/// 按 (code, goal) 唯一：评估由实时抓东方财富/同花顺 + 纯函数评分组成，较耗时，
+/// 落库后可跨 serverless 实例共享、避免每次进入页面都重抓重算。
+/// 用户进入页面时优先返回缓存；点「重新分析」时以 ?refresh=1 强制重算并覆盖。
+model EtfEvaluateCache {
+  id          String   @id @default(cuid())
+  /// 6 位交易代码
+  code        String
+  /// 投资目标：growth|income|stable|balanced，空串 "" 表示未指定
+  goal        String   @default("")
+  /// ETF 名称（冗余，便于快速展示）
+  name        String?
+  /// 完整评估结果 JSON（与 /api/etf-evaluate 响应体一致，含 fund/nav/peers/evaluation）
+  dataJson    String
+  /// 综合评级 A/B/C/D/?
+  grade       String?
+  /// 综合评分（0~100）
+  totalScore  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([code, goal])
+  @@index([code])
+}
+
 /// Reddit 热门股票每日快照（ApeWisdom 数据源，盘前抓取一次，Top 100）。
 /// 按 date+ticker 唯一，存储前清空旧数据，仅保留最新一天。
 model RedditHotStock {
