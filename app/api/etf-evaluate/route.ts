@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { fetchEtfFundData, type EtfBoard } from "@/lib/etf-fund-data";
+import {
+  fetchEtfFundData,
+  fetchEtfNavHistory,
+  fetchPeerEtfs,
+  type EtfBoard,
+} from "@/lib/etf-fund-data";
 import {
   evaluateEtfSkill,
   type EtfGoal,
@@ -57,6 +62,12 @@ export async function GET(req: Request) {
       );
     }
 
+    // 净值历史 + 同类 ETF 对比（best-effort，缺则报告降级，不阻塞评估）
+    const [nav, peers] = await Promise.all([
+      fetchEtfNavHistory(code).catch(() => null),
+      fetchPeerEtfs(fund.raw.trackIndexName, code).catch(() => null),
+    ]);
+
     // 好时机：查该 ETF 是否处于同花顺主升浪池（DB 读取，轻量）
     let inUpTrend: boolean | null = null;
     let category: "pullback" | "newPool" | null = null;
@@ -97,7 +108,17 @@ export async function GET(req: Request) {
         trackIndexName: fund.raw.trackIndexName,
         indexType: fund.indexType,
         proxy: fund.raw.proxy,
+        feeRatePct: fund.raw.feeRatePct,
+        scaleYi: fund.raw.scaleYi,
+        indexPe: fund.raw.indexPe,
+        indexPb: fund.raw.indexPb,
+        indexPePercentile: fund.valuation.indexPePercentile,
+        indexPbPercentile: fund.valuation.indexPbPercentile,
+        dividendYieldPct: fund.valuation.dividendYieldPct,
+        navNow: nav?.navNow ?? null,
       },
+      nav: nav,
+      peers: peers,
       evaluation,
     });
   } catch (err) {

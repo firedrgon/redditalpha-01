@@ -415,6 +415,9 @@ export interface EtfFundData {
     feeRatePct: number | null;
     trackingErrorPct: number | null;
     premiumDiscountPct: number | null;
+    /** 跟踪指数当前 PE/PB（估值表展示用；ETF 自身无 PE 时即指数值） */
+    indexPe: number | null;
+    indexPb: number | null;
     trackIndexName: string | null;
     fundCompany: string | null;
     fundManager: string | null;
@@ -543,6 +546,8 @@ export async function assembleEtfFundData(
       feeRatePct,
       trackingErrorPct,
       premiumDiscountPct,
+      indexPe: peUsed,
+      indexPb: pbUsed,
       trackIndexName,
       fundCompany,
       fundManager,
@@ -568,4 +573,280 @@ export async function fetchEtfFundData(
     fetchFundHtml(code).catch(() => null),
   ]);
   return assembleEtfFundData(code, board, market, html, bondYieldPct);
+}
+
+// ============================================================
+// 净值历史（东财 pingzhongdata/{code}.js）：走势图 / 回撤图 / 关键指标
+// ============================================================
+
+/** 时间戳(ms) → 北京时间 YYYY-MM-DD（避免 UTC 偏移导致日期错位） */
+function fmtCnDate(ms: number): string {
+  const d = new Date(ms + 8 * 3600 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export interface EtfNavPoint {
+  date: string;
+  nav: number;
+}
+
+export interface EtfNavHistory {
+  /** 日频净值序列（升序） */
+  series: EtfNavPoint[];
+  /** 月度降采样（每月末交易日，升序），用于走势/回撤图 */
+  monthly: EtfNavPoint[];
+  /** 最新单位净值 */
+  navNow: number | null;
+  /** 成立日（首条日期） */
+  establishDate: string | null;
+  /** 今年以来收益 % */
+  ytdPct: number | null;
+  /** 近1年收益 % */
+  y1Pct: number | null;
+  /** 近3年收益 % */
+  y3Pct: number | null;
+  /** 近5年收益 % */
+  y5Pct: number | null;
+  /** 近3月收益 % */
+  m3Pct: number | null;
+  /** 历史最大回撤 %（负数，如 -65.6） */
+  maxDrawdownPct: number | null;
+  /** 近1年年化波动率 % */
+  annualVolPct: number | null;
+  /** 成立以来累计收益 % */
+  sinceInceptionPct: number | null;
+  /** 成立以来年化收益 % */
+  annualizedSinceInceptionPct: number | null;
+}
+
+/**
+ * 抓 ETF 单位净值历史（东财 pingzhongdata/{code}.js），解析 Data_netWorthTrend，
+ * 计算走势/回撤/关键指标。best-effort，任何失败返回 null。
+ * 兼容两种格式：对象数组 [{x,y}] 与旧数组 [[ts,nav,acc,ret]]。
+ */
+export async function fetchEtfNavHistory(
+  code: string
+): Promise<EtfNavHistory | null> {
+  try {
+    const res = await fetch(
+      `https://fund.eastmoney.com/pingzhongdata/${code}.js`,
+      {
+        headers: { "User-Agent": UA, Referer: "https://fundf10.eastmoney.com/" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(15000),
+      }
+    );
+    if (!res.ok) return null;
+    const txt = await res.text();
+    const m = txt.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+    if (!m) return null;
+    let raw: unknown[];
+    try {
+      raw = JSON.parse(m[1]);
+    } catch {
+      return null;
+    }
+    const series: { t: number; date: string; nav: number }[] = [];
+    for (const p of raw) {
+      if (!p || typeof p !== "object") continue;
+      const obj = p as Record<string, unknown>;
+      const arr = Array.isArray(p);
+      const t = (arr ? (obj[0] as number) : (obj.x as number)) ?? null;
+      const nav = (arr ? (obj[1] as number) : (obj.y as number)) ?? null;
+      if (typeof t === "number" && typeof nav === "number" && nav > 0) {
+        series.push({ t, date: fmtCnDate(t), nav });
+      }
+    }
+    if (series.length < 2) return null;
+
+    const navNow = series[series.length - 1].nav;
+    const establishDate = series[0].date;
+    const lastT = series[series.length - 1].t;
+
+    /** 升序序列中第一条 t >= target 的净值（用于"近N年"收益） */
+    const navAt = (daysAgo: number): number | null => {
+      const target = lastT - daysAgo * 86400000;
+      let lo = 0,
+        hi = series.length - 1,
+        ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (series[mid].t >= target) {
+          ans = mid;
+          hi = mid - 1;
+        } else lo = mid + 1;
+      }
+      return ans < 0 ? null : series[ans].nav;
+    };
+    const pct = (a: number | null) =>
+      a != null && a > 0 ? (navNow / a - 1) * 100 : null;
+
+    const y1Pct = pct(navAt(365));
+    const y3Pct = pct(navAt(365 * 3));
+    const y5Pct = pct(navAt(365 * 5));
+    const m3Pct = pct(navAt(90));
+
+    // 今年以来：当年首个交易日
+    const curY = new Date(lastT + 8 * 3600 * 1000).getUTCFullYear();
+    const ytdTarget = Date.UTC(curY, 0, 1);
+    let ytdNav: number | null = null;
+    for (const p of series) {
+      if (p.t >= ytdTarget) {
+        ytdNav = p.nav;
+        break;
+      }
+    }
+    const ytdPct =
+      ytdNav != null && ytdNav > 0 ? (navNow / ytdNav - 1) * 100 : null;
+
+    // 历史最大回撤（峰谷最大跌幅）
+    let runMax = -Infinity,
+      maxDD = 0;
+    for (const p of series) {
+      if (p.nav > runMax) runMax = p.nav;
+      const dd = p.nav / runMax - 1;
+      if (dd < maxDD) maxDD = dd;
+    }
+    const maxDrawdownPct = maxDD * 100;
+
+    // 近1年年化波动（日收益率标准差 × √252）
+    const oneYrAgoIdx = (() => {
+      const target = lastT - 365 * 86400000;
+      let lo = 0,
+        hi = series.length - 1,
+        ans = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (series[mid].t >= target) {
+          ans = mid;
+          hi = mid - 1;
+        } else lo = mid + 1;
+      }
+      return ans;
+    })();
+    let annualVolPct: number | null = null;
+    const win = series.slice(oneYrAgoIdx);
+    if (win.length >= 20) {
+      const rets: number[] = [];
+      for (let i = 1; i < win.length; i++) {
+        const r = win[i].nav / win[i - 1].nav - 1;
+        if (Number.isFinite(r)) rets.push(r);
+      }
+      if (rets.length >= 20) {
+        const mean = rets.reduce((s, v) => s + v, 0) / rets.length;
+        const variance =
+          rets.reduce((s, v) => s + (v - mean) ** 2, 0) / rets.length;
+        annualVolPct = Math.sqrt(variance) * Math.sqrt(252) * 100;
+      }
+    }
+
+    const firstNav = series[0].nav;
+    const sinceInceptionPct =
+      firstNav > 0 ? (navNow / firstNav - 1) * 100 : null;
+    const days = (lastT - series[0].t) / 86400000;
+    const annualizedSinceInceptionPct =
+      firstNav > 0 && days > 30
+        ? ((navNow / firstNav) ** (365 / days) - 1) * 100
+        : null;
+
+    // 月度降采样（每月最后一个交易日）
+    const monMap = new Map<string, { t: number; nav: number }>();
+    for (const p of series) {
+      const k = p.date.slice(0, 7);
+      monMap.set(k, { t: p.t, nav: p.nav });
+    }
+    const monthly = [...monMap.entries()]
+      .sort((a, b) => a[1].t - b[1].t)
+      .map(([k, v]) => ({ date: `${k}-01`, nav: v.nav }));
+
+    return {
+      series: series.map((p) => ({ date: p.date, nav: p.nav })),
+      monthly,
+      navNow,
+      establishDate,
+      ytdPct,
+      y1Pct,
+      y3Pct,
+      y5Pct,
+      m3Pct,
+      maxDrawdownPct,
+      annualVolPct,
+      sinceInceptionPct,
+      annualizedSinceInceptionPct,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// 同类 ETF 规模对比（同跟踪指数）
+// ============================================================
+
+export interface EtfPeer {
+  code: string;
+  name: string;
+  scaleYi: number | null;
+}
+
+/** 从跟踪指数名提取区分度高的 token（去通用前缀/后缀），用于同类匹配 */
+function indexToken(name: string): string {
+  let s = name.trim();
+  for (const p of ["中证", "国证", "上证", "深证"]) {
+    if (s.startsWith(p)) s = s.slice(p.length);
+  }
+  for (const suf of ["指数", "主题", "ETF", "etf", "联接", "LOF", "基金"]) {
+    if (s.endsWith(suf)) s = s.slice(0, s.length - suf.length);
+  }
+  return s.trim();
+}
+
+/**
+ * 抓同跟踪指数的其他 ETF（东财 push2 板块列表），按规模降序返回最多 8 只。
+ * f101/f102 为跟踪标的字段，含 token 即视为同类。best-effort，失败返回 null。
+ * 注：push2 在部分网络环境会被限流，生产(Vercel)环境正常；失败时报告降级处理。
+ */
+export async function fetchPeerEtfs(
+  trackIndexName: string | null,
+  selfCode?: string
+): Promise<EtfPeer[] | null> {
+  if (!trackIndexName) return null;
+  const token = indexToken(trackIndexName);
+  if (token.length < 2) return null;
+  try {
+    const fs = "b:MK0021,b:MK0022,b:MK0023,b:MK0024";
+    const fields = "f12,f14,f20,f101,f102";
+    const url =
+      "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fltt=2&invt=2&fs=" +
+      encodeURIComponent(fs) +
+      "&fields=" +
+      fields;
+    const json = await fetchJson<{ data?: Array<Record<string, unknown>> }>(
+      url,
+      "https://quote.eastmoney.com/",
+      15000
+    );
+    const rows = json?.data;
+    if (!rows || rows.length === 0) return null;
+    const peers: EtfPeer[] = [];
+    for (const r of rows) {
+      const code = r.f12 != null ? String(r.f12) : "";
+      const name = r.f14 != null ? String(r.f14) : "";
+      const track = [r.f101, r.f102]
+        .filter((v) => v != null && v !== "-")
+        .map(String)
+        .join(" ");
+      if (!code || code === selfCode) continue;
+      if (!track.includes(token)) continue;
+      const scaleYi = num(r.f20) != null ? (num(r.f20) as number) / 1e8 : null;
+      peers.push({ code, name, scaleYi });
+    }
+    peers.sort((a, b) => (b.scaleYi ?? -1) - (a.scaleYi ?? -1));
+    return peers.slice(0, 8);
+  } catch {
+    return null;
+  }
 }

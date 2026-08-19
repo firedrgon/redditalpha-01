@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { EtfSkillEvaluation, EtfGoal } from "@/lib/etf-skill-evaluate";
+import type { EtfNavHistory, EtfPeer } from "@/lib/etf-fund-data";
 
 function thsEtfUrl(code: string): string {
   return `https://fund.10jqka.com.cn/${code}/`;
@@ -18,7 +19,6 @@ const GOALS: { key: EtfGoal; label: string; desc: string }[] = [
 
 const GOAL_KEYS = ["growth", "income", "stable", "balanced"] as const;
 
-/** 把 URL 里的 goal 参数收敛为合法 EtfGoal（非法值 → null，不报错） */
 function parseGoal(raw: string | null): EtfGoal {
   if (!raw) return null;
   return (GOAL_KEYS as readonly string[]).includes(raw) ? (raw as EtfGoal) : null;
@@ -34,12 +34,45 @@ interface ApiResp {
     fundManager: string | null;
     establishDate: string | null;
     trackIndexName: string | null;
-    indexType: string | null;
+    indexType: "broad" | "sector" | "strategy" | null;
     proxy: boolean;
+    feeRatePct: number | null;
+    scaleYi: number | null;
+    indexPe: number | null;
+    indexPb: number | null;
+    indexPePercentile: number | null;
+    indexPbPercentile: number | null;
+    dividendYieldPct: number | null;
+    navNow: number | null;
   };
+  nav: EtfNavHistory | null;
+  peers: EtfPeer[] | null;
   evaluation: EtfSkillEvaluation;
 }
 
+// ============================================================
+// 工具
+// ============================================================
+const idxTypeLabel = (t: ApiResp["fund"]["indexType"]): string =>
+  t === "broad" ? "宽基指数" : t === "sector" ? "行业/主题指数" : t === "strategy" ? "策略指数" : "—";
+
+const fmtPct = (v: number | null, d = 1): string =>
+  v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(d)}%`;
+
+const retClass = (v: number | null): string =>
+  v == null ? "text-zinc-400" : v >= 0 ? "text-emerald-400" : "text-red-400";
+
+/** 估值分位 → 解读（与技能报告一致的阈值语义） */
+function valVerdict(pct: number | null): { text: string; cls: string } {
+  if (pct == null) return { text: "—", cls: "text-zinc-500" };
+  if (pct >= 60) return { text: "偏贵", cls: "text-red-400" };
+  if (pct <= 30) return { text: "便宜", cls: "text-emerald-400" };
+  return { text: "合理", cls: "text-sky-400" };
+}
+
+// ============================================================
+// 小组件：评分条 / 评级徽章
+// ============================================================
 function ScoreBar({ label, score }: { label: string; score: number | null }) {
   const pct = score ?? 0;
   const color =
@@ -52,12 +85,12 @@ function ScoreBar({ label, score }: { label: string; score: number | null }) {
       : "bg-red-500";
   return (
     <div className="flex items-center gap-2 text-xs text-zinc-400">
-      <span className="w-14 shrink-0 font-medium text-zinc-300">{label}</span>
+      {label && <span className="w-14 shrink-0 font-medium text-zinc-300">{label}</span>}
       <div className="h-2 flex-1 overflow-hidden rounded bg-zinc-800">
         <div className={`h-full rounded ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className="w-8 shrink-0 text-right font-mono text-zinc-300">
-        {score != null ? score.toFixed(0) : "—"}
+        {score != null ? (score / 10).toFixed(0) : "—"}
       </span>
     </div>
   );
@@ -77,15 +110,148 @@ function GradeBadge({ grade, score }: { grade: string; score: number | null }) {
       className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-sm font-bold ${cls}`}
     >
       评级 {grade}
-      <span className="font-mono">{score != null ? score.toFixed(0) : "—"}</span>
+      <span className="font-mono">{score != null ? (score / 10).toFixed(1) : "—"}</span>
     </span>
   );
 }
 
+// ============================================================
+// 图表（纯 SVG）
+// ============================================================
+function RadarChart({ dims }: { dims: { label: string; score: number | null }[] }) {
+  const size = 300;
+  const cx = size / 2;
+  const cy = size / 2;
+  const maxR = 108;
+  const n = dims.length;
+  const angle = (i: number) => ((-90 + i * (360 / n)) * Math.PI) / 180;
+  const pt = (i: number, r: number): [number, number] => [
+    cx + r * Math.cos(angle(i)),
+    cy + r * Math.sin(angle(i)),
+  ];
+  const grid = [0.25, 0.5, 0.75, 1].map((f) => (
+    <polygon
+      key={f}
+      points={dims.map((_, i) => pt(i, maxR * f).join(",")).join(" ")}
+      fill="none"
+      stroke="#3f3f46"
+      strokeWidth={1}
+    />
+  ));
+  const axes = dims.map((_, i) => {
+    const [x, y] = pt(i, maxR);
+    return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#3f3f46" strokeWidth={1} />;
+  });
+  const dataPts = dims.map((d, i) => pt(i, maxR * ((d.score ?? 0) / 100)));
+  const dataPoly = dataPts.map((p) => p.join(",")).join(" ");
+  const labels = dims.map((d, i) => {
+    const [x, y] = pt(i, maxR + 20);
+    return (
+      <text key={i} x={x} y={y} fontSize={11} fill="#a1a1aa" textAnchor="middle" dominantBaseline="middle">
+        {d.label}
+      </text>
+    );
+  });
+  const scores = dims.map((d, i) => {
+    const [x, y] = pt(i, maxR * ((d.score ?? 0) / 100));
+    return (
+      <text key={i} x={x} y={y - 7} fontSize={10} fill="#fb923c" textAnchor="middle">
+        {d.score != null ? (d.score / 10).toFixed(0) : "—"}
+      </text>
+    );
+  });
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width="100%" style={{ maxWidth: 320 }}>
+      {grid}
+      {axes}
+      <polygon points={dataPoly} fill="rgba(251,146,60,0.22)" stroke="#fb923c" strokeWidth={2} />
+      {dataPts.map((p, i) => (
+        <circle key={i} cx={p[0]} cy={p[1]} r={3} fill="#fb923c" />
+      ))}
+      {labels}
+      {scores}
+    </svg>
+  );
+}
+
+function NavLineChart({ points }: { points: { date: string; nav: number }[] }) {
+  const w = 900;
+  const h = 240;
+  const pad = 30;
+  if (points.length < 2) return <div className="text-xs text-zinc-500">暂无净值数据</div>;
+  const ns = points.map((p) => p.nav);
+  const min = Math.min(...ns);
+  const max = Math.max(...ns);
+  const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (w - 2 * pad));
+  const ys = ns.map((v) => h - pad - ((v - min) / (max - min || 1)) * (h - 2 * pad));
+  const line = points.map((_, i) => `${xs[i]},${ys[i]}`).join(" ");
+  const area = `${pad},${h - pad} ${line} ${w - pad},${h - pad}`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" preserveAspectRatio="none">
+      <polygon points={area} fill="rgba(56,189,248,0.10)" />
+      <polyline points={line} fill="none" stroke="#38bdf8" strokeWidth={2} />
+    </svg>
+  );
+}
+
+function DrawdownChart({ points }: { points: { date: string; nav: number }[] }) {
+  const w = 900;
+  const h = 240;
+  const pad = 30;
+  if (points.length < 2) return <div className="text-xs text-zinc-500">暂无回撤数据</div>;
+  let runMax = -Infinity;
+  const dds: number[] = [];
+  for (const p of points) {
+    if (p.nav > runMax) runMax = p.nav;
+    dds.push(p.nav / runMax - 1);
+  }
+  const minDD = Math.min(...dds) || -0.01;
+  const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (w - 2 * pad));
+  const ys = dds.map((v) => pad + (v / minDD) * (h - 2 * pad));
+  const line = points.map((_, i) => `${xs[i]},${ys[i]}`).join(" ");
+  const area = `${pad},${pad} ${line} ${w - pad},${pad}`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" preserveAspectRatio="none">
+      <polygon points={area} fill="rgba(239,68,68,0.12)" />
+      <polyline points={line} fill="none" stroke="#ef4444" strokeWidth={2} />
+    </svg>
+  );
+}
+
+function PeerBarChart({ peers, selfCode }: { peers: EtfPeer[]; selfCode: string }) {
+  if (!peers.length) return <div className="text-xs text-zinc-500">暂无同类规模数据（数据源不支持或该指数无其他 ETF）</div>;
+  const max = Math.max(...peers.map((p) => p.scaleYi ?? 0), 0.01);
+  return (
+    <div className="space-y-2">
+      {peers.map((p) => {
+        const isSelf = p.code === selfCode;
+        const wPct = ((p.scaleYi ?? 0) / max) * 100;
+        return (
+          <div key={p.code} className="flex items-center gap-2 text-[11px]">
+            <span className={`w-32 shrink-0 truncate ${isSelf ? "text-orange-400 font-medium" : "text-zinc-400"}`}>
+              {p.name || p.code}
+              {isSelf ? "（本基）" : ""}
+            </span>
+            <div className="h-4 flex-1 overflow-hidden rounded bg-zinc-800">
+              <div
+                className={`h-full rounded ${isSelf ? "bg-orange-500" : "bg-zinc-600"}`}
+                style={{ width: `${wPct}%` }}
+              />
+            </div>
+            <span className="w-16 shrink-0 text-right text-zinc-300">{(p.scaleYi ?? 0).toFixed(2)}亿</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// 主组件
+// ============================================================
 function EtfEvaluateInner() {
   const searchParams = useSearchParams();
 
-  // 从 URL 直接初始化（而非在 effect 里 setState），避免级联渲染
   const urlCode = (searchParams.get("code") ?? "").trim();
   const urlGoal = parseGoal(searchParams.get("goal"));
   const hasUrlCode = /^\d{6}$/.test(urlCode);
@@ -96,7 +262,6 @@ function EtfEvaluateInner() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResp | null>(null);
 
-  /** 以显式参数执行评估（供手动点击与 URL 自动评估复用） */
   const runWith = useCallback(async (rawCode: string, g: EtfGoal) => {
     const c = rawCode.trim();
     if (!/^\d{6}$/.test(c)) {
@@ -127,11 +292,6 @@ function EtfEvaluateInner() {
     void runWith(code, goal);
   }, [runWith, code, goal]);
 
-  /**
-   * 带 ?code= 进入时自动评估一次：/etf-evaluate?code=510300&goal=growth
-   * 主升浪卡片的「深度评估」按钮走这条路径，点进来直接出结果。
-   * ref 保证只跑一次，用户随后手动改代码不会被 URL 覆盖。
-   */
   const autoRan = useRef(false);
   useEffect(() => {
     if (autoRan.current || !hasUrlCode) return;
@@ -139,13 +299,35 @@ function EtfEvaluateInner() {
     void runWith(urlCode, urlGoal);
   }, [hasUrlCode, urlCode, urlGoal, runWith]);
 
+  // 关键指标卡（来自净值历史）
+  const nav = data?.nav;
+  const metricCards: { label: string; value: string; cls: string }[] = nav
+    ? [
+        { label: "最新单位净值", value: nav.navNow != null ? nav.navNow.toFixed(4) : "—", cls: "text-zinc-100" },
+        { label: "今年以来", value: fmtPct(nav.ytdPct), cls: retClass(nav.ytdPct) },
+        { label: "近1年", value: fmtPct(nav.y1Pct), cls: retClass(nav.y1Pct) },
+        { label: "近3年", value: fmtPct(nav.y3Pct), cls: retClass(nav.y3Pct) },
+        { label: "近5年", value: fmtPct(nav.y5Pct), cls: retClass(nav.y5Pct) },
+        { label: "近3月", value: fmtPct(nav.m3Pct), cls: retClass(nav.m3Pct) },
+        { label: "历史最大回撤", value: nav.maxDrawdownPct != null ? `${nav.maxDrawdownPct.toFixed(1)}%` : "—", cls: "text-red-400" },
+        { label: "近1年年化波动", value: nav.annualVolPct != null ? `${nav.annualVolPct.toFixed(1)}%` : "—", cls: "text-zinc-100" },
+      ]
+    : [];
+
+  // 估值表行
+  const f = data?.fund;
+  const valRows = f
+    ? [
+        { name: "市盈率 PE-TTM", cur: f.indexPe, pct: f.indexPePercentile, unit: "倍" },
+        { name: "市净率 PB", cur: f.indexPb, pct: f.indexPbPercentile, unit: "倍" },
+        { name: "股息率", cur: f.dividendYieldPct, pct: null, unit: "%" },
+      ]
+    : [];
+
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8">
+    <main className="mx-auto max-w-4xl px-4 py-8">
       <div className="mb-2 flex items-center gap-2">
-        <Link
-          href="/"
-          className="text-xs text-zinc-500 transition-colors hover:text-orange-400"
-        >
+        <Link href="/" className="text-xs text-zinc-500 transition-colors hover:text-orange-400">
           ← 返回首页
         </Link>
       </div>
@@ -156,7 +338,7 @@ function EtfEvaluateInner() {
         <span className="text-zinc-400">
           好资产 × 好价格 × 好运营 × 好时机 × 好匹配 × 好成本
         </span>
-        。输入 ETF 代码与投资目标，获取 6 维分项评估与综合配置建议。
+        。输入 ETF 代码与投资目标，获取六维分项评估、净值走势与综合配置建议。
       </p>
 
       {/* 输入区 */}
@@ -220,119 +402,251 @@ function EtfEvaluateInner() {
       {/* 结果区 */}
       {data && (
         <div className="mt-6 space-y-5">
-          {/* 综合评级卡 */}
-          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <GradeBadge
-              grade={data.evaluation.grade}
-              score={data.evaluation.totalScore}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-lg font-bold text-white">
-                {data.name ?? "未知"}
-                <span className="font-mono text-sm text-zinc-500">{data.code}</span>
+          {/* 综合评级 + 名称 + 标签 */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <GradeBadge grade={data.evaluation.grade} score={data.evaluation.totalScore} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-lg font-bold text-white">
+                  {data.name ?? "未知"}
+                  <span className="font-mono text-sm text-zinc-500">{data.code}</span>
+                </div>
+                <p className="mt-0.5 text-xs text-zinc-400">{data.evaluation.summary}</p>
               </div>
-              <p className="mt-0.5 text-xs text-zinc-400">{data.evaluation.summary}</p>
+              <a
+                href={thsEtfUrl(data.code)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded border border-zinc-700/50 px-2.5 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-emerald-500/40 hover:text-emerald-400"
+              >
+                同花顺估值页
+                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5v13h13v-8.5M15 3h6v6M21 3l-9 9" />
+                </svg>
+              </a>
             </div>
-            <a
-              href={thsEtfUrl(data.code)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded border border-zinc-700/50 px-2.5 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-emerald-500/40 hover:text-emerald-400"
-            >
-              同花顺估值页
-              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5v13h13v-8.5M15 3h6v6M21 3l-9 9" />
-              </svg>
-            </a>
+            <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
+              <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">类型：{idxTypeLabel(data.fund.indexType)}</span>
+              {data.fund.trackIndexName && (
+                <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">跟踪：{data.fund.trackIndexName}</span>
+              )}
+              {data.fund.fundCompany && (
+                <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">公司：{data.fund.fundCompany}</span>
+              )}
+              {data.fund.fundManager && (
+                <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">经理：{data.fund.fundManager}</span>
+              )}
+              {data.fund.establishDate && (
+                <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">成立：{data.fund.establishDate}</span>
+              )}
+              {data.fund.scaleYi != null && (
+                <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">规模：{data.fund.scaleYi.toFixed(2)}亿</span>
+              )}
+              {data.fund.feeRatePct != null && (
+                <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">总费率：{data.fund.feeRatePct.toFixed(2)}%/年</span>
+              )}
+              {data.fund.proxy && (
+                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-400">估值分位为估算（无真实历史数据）</span>
+              )}
+            </div>
           </div>
 
-          {/* 基金信息 */}
-          <div className="flex flex-wrap gap-2 text-[10px]">
-            {data.fund.trackIndexName && (
-              <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">
-                跟踪：{data.fund.trackIndexName}
-              </span>
-            )}
-            {data.fund.fundCompany && (
-              <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">
-                公司：{data.fund.fundCompany}
-              </span>
-            )}
-            {data.fund.fundManager && (
-              <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">
-                经理：{data.fund.fundManager}
-              </span>
-            )}
-            {data.fund.establishDate && (
-              <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">
-                成立：{data.fund.establishDate}
-              </span>
-            )}
-            {data.fund.proxy && (
-              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-400">
-                估值分位为估算（无真实历史数据）
-              </span>
-            )}
-          </div>
+          {/* 关键指标卡 */}
+          {metricCards.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {metricCards.map((m) => (
+                <div key={m.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                  <div className="text-[10px] text-zinc-500">{m.label}</div>
+                  <div className={`mt-1 text-lg font-bold ${m.cls}`}>{m.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
 
-          {/* 6 维进度条 + 明细 */}
-          <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <div className="text-xs font-medium text-zinc-300">六维评估</div>
-            {data.evaluation.dimensions.map((d) => (
-              <div key={d.key} className="space-y-1">
-                <ScoreBar label={d.label} score={d.score} />
-                {d.metrics.map((m) => (
-                  <p key={m.key} className="pl-16 text-[10px] text-zinc-500">
-                    {m.label}：{m.note}
-                  </p>
-                ))}
-                {d.note && d.metrics.length === 0 && (
-                  <p className="pl-16 text-[10px] text-zinc-500">{d.note}</p>
-                )}
+          {/* 六维雷达 + 总分 */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="text-xs font-medium text-zinc-300">六维评分总览</div>
+            <div className="mt-2 flex flex-col items-center gap-4 sm:flex-row sm:items-center">
+              <div className="shrink-0">
+                <RadarChart dims={data.evaluation.dimensions.map((d) => ({ label: d.label, score: d.score }))} />
               </div>
-            ))}
+              <div className="flex-1 text-sm text-zinc-400">
+                <div className="text-3xl font-extrabold text-orange-400">
+                  {data.evaluation.totalScore != null ? (data.evaluation.totalScore / 10).toFixed(1) : "—"}
+                  <span className="text-base text-zinc-500"> / 10（加权）</span>
+                </div>
+                <div className="mt-2 leading-relaxed">
+                  {data.evaluation.dimensions.map((d) => (
+                    <span key={d.key} className="mr-3">
+                      {d.label} <b className="text-zinc-200">{d.score != null ? (d.score / 10).toFixed(0) : "—"}</b>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* 风险预警 */}
+          {/* 净值走势 + 回撤 */}
+          {nav && (
+            <>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <div className="mb-2 text-xs font-medium text-zinc-300">
+                  单位净值走势（月度，自成立）
+                </div>
+                <NavLineChart points={nav.monthly} />
+                <div className="mt-1 text-[10px] text-zinc-500">
+                  {nav.establishDate ? `自 ${nav.establishDate} 成立` : ""}
+                  {nav.sinceInceptionPct != null && ` 累计 ${fmtPct(nav.sinceInceptionPct)}`}
+                  {nav.annualizedSinceInceptionPct != null && `（年化约 ${nav.annualizedSinceInceptionPct.toFixed(1)}%）`}
+                </div>
+              </div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <div className="mb-2 text-xs font-medium text-zinc-300">回撤水下图（月度）</div>
+                <DrawdownChart points={nav.monthly} />
+                <div className="mt-1 text-[10px] text-zinc-500">
+                  {nav.maxDrawdownPct != null && `历史最大回撤 ${nav.maxDrawdownPct.toFixed(1)}%`}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* 指数估值表 */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="mb-2 text-xs font-medium text-zinc-300">
+              好价格 · 指数估值（{data.fund.trackIndexName ?? "跟踪指数"}）
+            </div>
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-zinc-500">
+                  <th className="py-1.5 text-left font-medium">指标</th>
+                  <th className="py-1.5 text-right font-medium">当前值</th>
+                  <th className="py-1.5 text-right font-medium">历史分位</th>
+                  <th className="py-1.5 text-left font-medium">解读</th>
+                </tr>
+              </thead>
+              <tbody>
+                {valRows.map((r) => {
+                  const v = valVerdict(r.pct);
+                  return (
+                    <tr key={r.name} className="border-t border-zinc-800">
+                      <td className="py-1.5 text-zinc-300">{r.name}</td>
+                      <td className="py-1.5 text-right font-mono text-zinc-200">
+                        {r.cur != null ? `${r.cur.toFixed(2)}${r.unit}` : "—"}
+                      </td>
+                      <td className="py-1.5 text-right font-mono text-zinc-400">
+                        {r.pct != null ? `${r.pct.toFixed(0)}%` : "—"}
+                      </td>
+                      <td className={`py-1.5 ${v.cls}`}>
+                        {r.cur != null ? v.text : "暂无数据"}
+                        {r.name === "股息率" && r.cur != null && r.pct == null && r.cur >= 2 ? "（有吸引力）" : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {data.fund.proxy && (
+              <div className="mt-2 text-[10px] text-amber-400/80">
+                估值分位为代理估算（该指数无真实历史分位数据源），仅供参考。
+              </div>
+            )}
+          </div>
+
+          {/* 同类规模对比 */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="mb-2 text-xs font-medium text-zinc-300">
+              好匹配 · 同类产品规模对比（跟踪 {data.fund.trackIndexName ?? "同指数"}）
+            </div>
+            <PeerBarChart peers={data.peers ?? []} selfCode={data.code} />
+            {data.peers == null && (
+              <div className="mt-1 text-[10px] text-zinc-500">同类对比需查询同指数 ETF 列表（数据源偶发限流，暂不可用）。</div>
+            )}
+          </div>
+
+          {/* 六维逐项评估 */}
+          <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="text-xs font-medium text-zinc-300">六维逐项评估</div>
+            {data.evaluation.dimensions.map((d) => {
+              const color =
+                d.score == null
+                  ? "text-zinc-400"
+                  : d.score >= 70
+                  ? "text-emerald-400"
+                  : d.score >= 50
+                  ? "text-amber-400"
+                  : "text-red-400";
+              return (
+                <div key={d.key} className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-200">{d.label}</span>
+                    <span className={`text-sm font-bold ${color}`}>
+                      {d.score != null ? (d.score / 10).toFixed(0) : "—"}
+                    </span>
+                  </div>
+                  <ScoreBar label="" score={d.score} />
+                  {d.metrics.length > 0 ? (
+                    d.metrics.map((m) => (
+                      <p key={m.key} className="pl-1 text-[10px] text-zinc-500">
+                        {m.label}：{m.note}
+                      </p>
+                    ))
+                  ) : d.note ? (
+                    <p className="pl-1 text-[10px] text-zinc-500">{d.note}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 综合结论与行动建议 */}
+          <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-4">
+            <div className="mb-1.5 text-xs font-medium text-orange-300">综合结论与行动建议</div>
+            <p className="text-sm text-zinc-200">{data.evaluation.summary}</p>
+            {data.evaluation.suggestions.length > 0 && (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-zinc-400">
+                {data.evaluation.suggestions.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 风险提示 */}
           {data.evaluation.warnings.length > 0 && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
               <div className="mb-1.5 text-xs font-medium text-amber-300">风险提示</div>
               <ul className="list-disc space-y-1 pl-5 text-[11px] text-amber-200/90">
-                {data.evaluation.warnings.map((w, i) => (
-                  <li key={i}>{w}</li>
-                ))}
+                {data.evaluation.warnings
+                  .filter((w) => !w.includes("数据缺失"))
+                  .map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
               </ul>
+              {data.evaluation.warnings.some((w) => w.includes("数据缺失")) && (
+                <p className="mt-1 text-[10px] text-amber-200/70">
+                  注：{data.evaluation.warnings.find((w) => w.includes("数据缺失"))}
+                </p>
+              )}
             </div>
           )}
-
-          {/* 配置建议 */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <div className="mb-1.5 text-xs font-medium text-zinc-300">配置建议</div>
-            <ul className="list-disc space-y-1 pl-5 text-[11px] text-zinc-400">
-              {data.evaluation.suggestions.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ul>
-          </div>
         </div>
       )}
 
       <p className="mt-8 border-t border-zinc-800 pt-4 text-center text-[11px] text-zinc-600">
         本评估基于公开市场数据（东方财富 / 同花顺主升浪池），仅用于学习研究，不构成投资建议。市场有风险，交易需谨慎。
         <br />
-        说明：实际年化跟踪误差缺乏免费公开数据源，未纳入「好成本」评分；缺失指标不按满分处理，
-        而是按可得指标重新归一化权重。
+        净值/回撤/同类规模来自东方财富公开数据；实际年化跟踪误差缺乏免费公开源，未纳入评分；缺失项按可得指标重新归一化权重。
       </p>
     </main>
   );
 }
 
-/** useSearchParams 需在 Suspense 边界内使用（Next.js App Router 静态渲染要求） */
+/** useSearchParams 需在 Suspense 边界内使用 */
 export default function EtfEvaluatePage() {
   return (
     <Suspense
       fallback={
-        <main className="mx-auto max-w-3xl px-4 py-8">
+        <main className="mx-auto max-w-4xl px-4 py-8">
           <div className="h-8 w-64 animate-pulse rounded bg-zinc-800" />
           <div className="mt-6 h-28 animate-pulse rounded-xl bg-zinc-900/60" />
         </main>
