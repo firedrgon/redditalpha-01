@@ -44,6 +44,7 @@ interface ApiResp {
     indexPbPercentile: number | null;
     dividendYieldPct: number | null;
     navNow: number | null;
+    trackingErrorPct: number | null;
   };
   nav: EtfNavHistory | null;
   peers: EtfPeer[] | null;
@@ -357,18 +358,24 @@ function EtfEvaluateInner() {
     void runWith(urlCode, urlGoal);
   }, [hasUrlCode, urlCode, urlGoal, runWith]);
 
-  // 关键指标卡（来自净值历史）
+  // 关键指标卡（来自净值历史）；顺序与「ETF产品智能评估」技能报告对齐
   const nav = data?.nav;
-  const metricCards: { label: string; value: string; cls: string }[] = nav
+  const trackErr = data?.fund.trackingErrorPct;
+  const metricCards: { label: string; value: string; cls: string; sub?: string }[] = nav
     ? [
         { label: "最新单位净值", value: nav.navNow != null ? nav.navNow.toFixed(4) : "—", cls: "text-zinc-100" },
         { label: "今年以来", value: fmtPct(nav.ytdPct), cls: retClass(nav.ytdPct) },
         { label: "近1年", value: fmtPct(nav.y1Pct), cls: retClass(nav.y1Pct) },
-        { label: "近3年", value: fmtPct(nav.y3Pct), cls: retClass(nav.y3Pct) },
-        { label: "近5年", value: fmtPct(nav.y5Pct), cls: retClass(nav.y5Pct) },
         { label: "近3月", value: fmtPct(nav.m3Pct), cls: retClass(nav.m3Pct) },
-        { label: "历史最大回撤", value: nav.maxDrawdownPct != null ? `${nav.maxDrawdownPct.toFixed(1)}%` : "—", cls: "text-red-400" },
+        { label: "近5年", value: fmtPct(nav.y5Pct), cls: retClass(nav.y5Pct) },
         { label: "近1年年化波动", value: nav.annualVolPct != null ? `${nav.annualVolPct.toFixed(1)}%` : "—", cls: "text-zinc-100" },
+        { label: "历史最大回撤", value: nav.maxDrawdownPct != null ? `${nav.maxDrawdownPct.toFixed(1)}%` : "—", cls: "text-red-400" },
+        {
+          label: "年化跟踪误差",
+          value: trackErr != null ? `${trackErr.toFixed(2)}%` : "—",
+          cls: trackErr != null ? "text-zinc-100" : "text-zinc-600",
+          sub: trackErr != null ? undefined : "免费源暂无",
+        },
       ]
     : [];
 
@@ -379,8 +386,25 @@ function EtfEvaluateInner() {
         { name: "市盈率 PE-TTM", cur: f.indexPe, pct: f.indexPePercentile, unit: "倍" },
         { name: "市净率 PB", cur: f.indexPb, pct: f.indexPbPercentile, unit: "倍" },
         { name: "股息率", cur: f.dividendYieldPct, pct: null, unit: "%" },
+        { name: "PEG（盈利预期）", cur: null, pct: null, unit: "", pegMissing: true },
       ]
     : [];
+
+  // 乘积法（几何均值）综合分：任意短板会拉低整体，故除加权外另算几何均值
+  const scoredDims = data?.evaluation.dimensions.filter((d) => d.score != null) ?? [];
+  const geoMean =
+    scoredDims.length > 0
+      ? (scoredDims.reduce((acc, d) => acc * ((d.score as number) / 100), 1) **
+          (1 / scoredDims.length)) *
+        100
+      : null;
+
+  // 评估日期（用于 header 标注，与技能报告一致）
+  const evalDate = (() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  })();
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
@@ -470,6 +494,9 @@ function EtfEvaluateInner() {
                   <span className="font-mono text-sm text-zinc-500">{data.code}</span>
                 </div>
                 <p className="mt-0.5 text-xs text-zinc-400">{data.evaluation.summary}</p>
+                <p className="mt-0.5 text-[10px] text-zinc-500">
+                  评估日期 {evalDate} ｜ 数据来源：东方财富 / 同花顺（免费公开源）
+                </p>
               </div>
               <a
                 href={thsEtfUrl(data.code)}
@@ -538,6 +565,7 @@ function EtfEvaluateInner() {
                 <div key={m.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                   <div className="text-[10px] text-zinc-500">{m.label}</div>
                   <div className={`mt-1 text-lg font-bold ${m.cls}`}>{m.value}</div>
+                  {m.sub && <div className="mt-0.5 text-[9px] text-zinc-600">{m.sub}</div>}
                 </div>
               ))}
             </div>
@@ -553,8 +581,14 @@ function EtfEvaluateInner() {
               <div className="flex-1 text-sm text-zinc-400">
                 <div className="text-3xl font-extrabold text-orange-400">
                   {data.evaluation.totalScore != null ? (data.evaluation.totalScore / 10).toFixed(1) : "—"}
-                  <span className="text-base text-zinc-500"> / 10（加权）</span>
+                  <span className="text-base text-zinc-500"> / 10（加权均值）</span>
                 </div>
+                {geoMean != null && (
+                  <div className="mt-1 text-xs text-zinc-500">
+                    乘积法（几何均值）综合 ≈ <b className="text-zinc-300">{geoMean.toFixed(1)}</b>/10
+                    （任意短板会拉低整体，故取几何均值）
+                  </div>
+                )}
                 <div className="mt-2 leading-relaxed">
                   {data.evaluation.dimensions.map((d) => (
                     <span key={d.key} className="mr-3">
@@ -578,6 +612,7 @@ function EtfEvaluateInner() {
                   {nav.establishDate ? `自 ${nav.establishDate} 成立` : ""}
                   {nav.sinceInceptionPct != null && ` 累计 ${fmtPct(nav.sinceInceptionPct)}`}
                   {nav.annualizedSinceInceptionPct != null && `（年化约 ${nav.annualizedSinceInceptionPct.toFixed(1)}%）`}
+                  {nav.y3Pct != null && `｜近3年 ${fmtPct(nav.y3Pct)}`}
                 </div>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -611,13 +646,25 @@ function EtfEvaluateInner() {
                     <tr key={r.name} className="border-t border-zinc-800">
                       <td className="py-1.5 text-zinc-300">{r.name}</td>
                       <td className="py-1.5 text-right font-mono text-zinc-200">
-                        {r.cur != null ? `${r.cur.toFixed(2)}${r.unit}` : "—"}
+                        {r.pegMissing ? (
+                          <span className="text-zinc-600">免费源暂无</span>
+                        ) : r.cur != null ? (
+                          `${r.cur.toFixed(2)}${r.unit}`
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td className="py-1.5 text-right font-mono text-zinc-400">
                         {r.pct != null ? `${r.pct.toFixed(0)}%` : "—"}
                       </td>
                       <td className={`py-1.5 ${v.cls}`}>
-                        {r.cur != null ? v.text : "暂无数据"}
+                        {r.pegMissing ? (
+                          <span className="text-zinc-600">需 Wind / 分析师盈利预期</span>
+                        ) : r.cur != null ? (
+                          v.text
+                        ) : (
+                          "暂无数据"
+                        )}
                         {r.name === "股息率" && r.cur != null && r.pct == null && r.cur >= 2 ? "（有吸引力）" : ""}
                       </td>
                     </tr>

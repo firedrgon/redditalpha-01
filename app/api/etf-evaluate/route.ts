@@ -116,6 +116,7 @@ export async function GET(req: Request) {
         indexPbPercentile: fund.valuation.indexPbPercentile,
         dividendYieldPct: fund.valuation.dividendYieldPct,
         navNow: nav?.navNow ?? null,
+        trackingErrorPct: fund.raw.trackingErrorPct,
       },
       nav: nav,
       peers: peers,
