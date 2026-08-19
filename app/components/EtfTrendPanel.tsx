@@ -91,11 +91,16 @@ function EtfCard({
   item,
   evaluation,
   valuationProxy,
+  isFavorite,
+  onToggleFavorite,
 }: {
   item: EtfTrendItem;
   evaluation?: EtfEvaluation;
   valuationProxy?: boolean;
+  isFavorite?: (ticker: string) => boolean;
+  onToggleFavorite?: (ticker: string, name?: string) => void;
 }) {
+  const faved = isFavorite ? isFavorite(item.code) : false;
   return (
     <div className="group/card relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all hover:border-zinc-700 hover:bg-zinc-900/80">
       <div className="flex items-center gap-3">
@@ -169,6 +174,30 @@ function EtfCard({
             )}
           </div>
         </div>
+        {onToggleFavorite && (
+          <button
+            type="button"
+            onClick={() => onToggleFavorite(item.code, item.name)}
+            title={faved ? "取消收藏" : "加入收藏"}
+            aria-label={faved ? "取消收藏" : "加入收藏"}
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-all ${
+              faved
+                ? "border-yellow-500/50 bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25"
+                : "border-zinc-700/60 bg-zinc-900/60 text-zinc-500 hover:border-yellow-500/40 hover:text-yellow-400"
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4"
+              fill={faved ? "currentColor" : "none"}
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.5l2.3 4.66 5.14.75-3.72 3.63.88 5.12-4.6-2.42-4.6 2.42.88-5.12L3.56 8.9l5.14-.75 2.3-4.66z" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {evaluation && (
@@ -223,9 +252,13 @@ function LoadingSkeleton() {
 interface Props {
   tab: EtfTab;
   onTabChange: (t: EtfTab) => void;
+  /** 收藏状态判断（与首页收藏列表共享） */
+  isFavorite?: (ticker: string) => boolean;
+  /** 切换收藏（ticker, name） */
+  onToggleFavorite?: (ticker: string, name?: string) => void;
 }
 
-export default function EtfTrendPanel({ tab, onTabChange }: Props) {
+export default function EtfTrendPanel({ tab, onTabChange, isFavorite, onToggleFavorite }: Props) {
   const [data, setData] = useState<EtfTrendResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -606,6 +639,8 @@ export default function EtfTrendPanel({ tab, onTabChange }: Props) {
               item={item}
               evaluation={evalMap[item.code]}
               valuationProxy={proxyMap[item.code]}
+              isFavorite={isFavorite}
+              onToggleFavorite={onToggleFavorite}
             />
           ))}
         </div>

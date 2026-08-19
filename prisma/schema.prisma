@@ -75,6 +75,8 @@ model Favorite {
   name      String?
   note      String?
   tags      String?  // JSON 字符串：string[]
+  /// 资产类型：ETF / STOCK / null（历史数据或未区分时填 null，按「股票」处理）
+  assetType String?
   pinned    Boolean  @default(false) // 是否置顶
   pinnedAt  DateTime? // 置顶时间，用于置顶项之间的排序
   starred   Boolean  @default(false) // 是否重点关注

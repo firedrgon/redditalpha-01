@@ -121,6 +121,8 @@ interface FavoriteItem {
   addedAt: number;
   pinned?: boolean;
   starred?: boolean;
+  /** 资产类型：ETF / STOCK / null（未区分时按「股票」处理） */
+  assetType?: string | null;
 }
 
 /** 将后端 /api/favorites 返回的原始对象映射为前端 FavoriteItem */
@@ -130,6 +132,7 @@ function mapFavoriteFromApi(f: {
   createdAt: number;
   pinned?: boolean;
   starred?: boolean;
+  assetType?: string | null;
 }): FavoriteItem {
   return {
     ticker: f.ticker,
@@ -137,6 +140,7 @@ function mapFavoriteFromApi(f: {
     addedAt: f.createdAt,
     pinned: !!f.pinned,
     starred: !!f.starred,
+    assetType: f.assetType ?? null,
   };
 }
 
@@ -770,6 +774,7 @@ function FavoriteCard({
   const isPinned = !!item.pinned;
   const isStarred = !!item.starred;
   const isUS = !isCNTicker(item.ticker);
+  const isETF = item.assetType === "ETF";
 
   // A 股「图解」按钮开关：同花顺财务图解入口已无用，默认隐藏；保留代码，以后需恢复时改 true
   const SHOW_CN_VISUAL = false;
@@ -834,7 +839,11 @@ function FavoriteCard({
               <span className="text-lg font-bold text-white tracking-wide">
                 {item.ticker}
               </span>
-              {isCNTicker(item.ticker) && (
+              {isETF ? (
+                <span className="inline-flex items-center rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                  ETF
+                </span>
+              ) : isCNTicker(item.ticker) && (
                 <span className="inline-flex items-center rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
                   A股
                 </span>
@@ -868,7 +877,15 @@ function FavoriteCard({
 
       {/* 下半部分：操作按钮 */}
       <div className="flex flex-wrap gap-1.5">
-        {isCNTicker(item.ticker) ? (
+        {isETF ? (
+          <Link
+            href={`/etf-evaluate?code=${item.ticker}`}
+            className="shrink-0 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-all hover:bg-emerald-500/20"
+            title="6 维深度评估（好资产 × 好价格 × 好运营 × 好时机 × 好匹配 × 好成本）"
+          >
+            深度评估
+          </Link>
+        ) : isCNTicker(item.ticker) ? (
           <>
             <a
               href={thsDiagnosisUrl(item.ticker)}
@@ -3854,6 +3871,8 @@ export default function Home() {
   const [favFilter, setFavFilter] = useState<"all" | "starred" | "pinned">("all");
   // 市场筛选：全部 / 美股 / A股
   const [marketFilter, setMarketFilter] = useState<"all" | "us" | "cn">("all");
+  // 资产类型筛选：全部 / ETF / 股票
+  const [assetFilter, setAssetFilter] = useState<"all" | "etf" | "stock">("all");
   const [signalCount, setSignalCount] = useState(0);
   // ticker -> 最新技术信号快照（来自 /api/technical-snapshots）
   const [signalSnapshots, setSignalSnapshots] = useState<
@@ -4073,21 +4092,21 @@ export default function Home() {
   );
 
   const addFavorite = useCallback(
-    async (ticker: string, name?: string | null) => {
+    async (ticker: string, name?: string | null, assetType?: string | null) => {
       const upper = ticker.trim().toUpperCase();
       if (!upper) return;
       setFavorites((prev) => {
         if (prev.some((f) => f.ticker.toUpperCase() === upper)) return prev;
         return [
           ...prev,
-          { ticker: upper, name: name ?? null, addedAt: Date.now() },
+          { ticker: upper, name: name ?? null, addedAt: Date.now(), assetType: assetType ?? null },
         ];
       });
       try {
         await fetch("/api/favorites", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticker: upper, name: name ?? undefined }),
+          body: JSON.stringify({ ticker: upper, name: name ?? undefined, assetType: assetType ?? undefined }),
         });
       } catch (err) {
         console.error("Failed to add favorite:", err);
@@ -4201,7 +4220,7 @@ export default function Home() {
   );
 
   const toggleFavorite = useCallback(
-    async (ticker: string, name?: string | null) => {
+    async (ticker: string, name?: string | null, assetType?: string | null) => {
       const upper = ticker.trim().toUpperCase();
       if (!upper) return;
       const willAdd = !favorites.some((f) => f.ticker.toUpperCase() === upper);
@@ -4212,7 +4231,7 @@ export default function Home() {
         }
         return [
           ...prev,
-          { ticker: upper, name: name ?? null, addedAt: Date.now() },
+          { ticker: upper, name: name ?? null, addedAt: Date.now(), assetType: assetType ?? null },
         ];
       });
       try {
@@ -4220,7 +4239,7 @@ export default function Home() {
           await fetch("/api/favorites", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ticker: upper, name: name ?? undefined }),
+            body: JSON.stringify({ ticker: upper, name: name ?? undefined, assetType: assetType ?? undefined }),
           });
         } else {
           // 取消收藏 = DELETE。校验响应，失败或 deleted=0 时回拉服务端真实状态，
@@ -4257,6 +4276,14 @@ export default function Home() {
   const handleToggleFromCard = useCallback(
     (t: Ticker) => {
       toggleFavorite(t.ticker, t.name);
+    },
+    [toggleFavorite]
+  );
+
+  /** ETF 主升浪卡片收藏：标记 assetType=ETF，便于收藏列表按类型筛选 */
+  const handleToggleEtfFavorite = useCallback(
+    (code: string, name?: string) => {
+      toggleFavorite(code, name, "ETF");
     },
     [toggleFavorite]
   );
@@ -4334,7 +4361,9 @@ export default function Home() {
   const handleManualAdd = useCallback(() => {
     const sym = manualTicker.trim().toUpperCase();
     if (!sym) return;
-    addFavorite(sym, manualName.trim() || null);
+    // 手动添加时识别 ETF 代码（5xxxxx / 1[5-9]xxxx），标记 assetType 便于筛选
+    const isEtf = /^\d{6}$/.test(sym) && /^(5\d{5}|1[5-9]\d{4})$/.test(sym);
+    addFavorite(sym, manualName.trim() || null, isEtf ? "ETF" : null);
     setManualTicker("");
     setManualName("");
     setValidateError(null);
@@ -4787,7 +4816,12 @@ export default function Home() {
         ) : view === "positions" ? (
           <PositionsPanel onAnalyze={handleAnalyzeTicker} />
         ) : view === "etf" ? (
-          <EtfTrendPanel tab={etfTab} onTabChange={setEtfTab} />
+          <EtfTrendPanel
+            tab={etfTab}
+            onTabChange={setEtfTab}
+            isFavorite={isFavorite}
+            onToggleFavorite={handleToggleEtfFavorite}
+          />
         ) : (
           <>
             <div className="mb-6 flex items-center justify-between">
@@ -4878,6 +4912,36 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* 资产类型筛选：全部 / ETF / 股票 */}
+                {favorites.length > 0 && (
+                  <div className="mb-4 flex gap-1.5">
+                    {(["all", "etf", "stock"] as const).map((a) => {
+                      const aLabels = { all: "全部类型", etf: "ETF", stock: "股票" };
+                      const aCounts = {
+                        all: favorites.length,
+                        etf: favorites.filter((x) => x.assetType === "ETF").length,
+                        stock: favorites.filter((x) => x.assetType !== "ETF").length,
+                      };
+                      return (
+                        <button
+                          key={a}
+                          type="button"
+                          onClick={() => setAssetFilter(a)}
+                          className={`rounded-lg border px-3 py-1 text-xs font-medium transition-all ${
+                            assetFilter === a
+                              ? a === "etf"
+                                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
+                                : "border-orange-500/50 bg-orange-500/15 text-orange-400"
+                              : "border-zinc-700 text-zinc-400 hover:border-orange-500/30 hover:text-zinc-300"
+                          }`}
+                        >
+                          {aLabels[a]} ({aCounts[a]})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* 手动添加收藏（带校验） */}
                 <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
                   <div className="mb-2 flex items-center justify-between">
@@ -4949,6 +5013,11 @@ export default function Home() {
                         marketFilter === "all" ? true :
                         marketFilter === "cn" ? isCNTicker(item.ticker) :
                         marketFilter === "us" ? !isCNTicker(item.ticker) : true
+                      )
+                      .filter((item) =>
+                        assetFilter === "all" ? true :
+                        assetFilter === "etf" ? item.assetType === "ETF" :
+                        assetFilter === "stock" ? item.assetType !== "ETF" : true
                       )
                       .map((item) => (
                         <FavoriteCard

@@ -8,6 +8,8 @@ export interface Favorite {
   name?: string | null;
   note?: string | null;
   tags: string[];
+  /** 资产类型：ETF / STOCK / null（历史数据或未区分时按「股票」处理） */
+  assetType: string | null;
   pinned: boolean;
   pinnedAt: number | null;
   starred: boolean;
@@ -29,6 +31,7 @@ function mapFavorite(r: PrismaFavorite): Favorite {
     name: r.name,
     note: r.note,
     tags: r.tags ? JSON.parse(r.tags) : [],
+    assetType: r.assetType ?? null,
     pinned: r.pinned,
     pinnedAt: r.pinnedAt ? r.pinnedAt.getTime() : null,
     starred: r.starred,
@@ -78,7 +81,7 @@ export async function listFavorites(userId: string): Promise<Favorite[]> {
 
 export async function addFavorite(
   ticker: string,
-  data: { name?: string; note?: string; tags?: string[] },
+  data: { name?: string; note?: string; tags?: string[]; assetType?: string | null },
   userId: string
 ): Promise<Favorite> {
   const upper = ticker.toUpperCase();
@@ -88,13 +91,14 @@ export async function addFavorite(
     const existing = memoryFavorites.get(key);
     const now = Date.now();
     const fav: Favorite = existing
-      ? { ...existing, name: data?.name ?? existing.name, note: data?.note ?? existing.note, tags: data?.tags ?? existing.tags, updatedAt: now }
+      ? { ...existing, name: data?.name ?? existing.name, note: data?.note ?? existing.note, tags: data?.tags ?? existing.tags, assetType: data?.assetType ?? existing.assetType, updatedAt: now }
       : {
           id: `fav-${now}-${Math.random().toString(36).slice(2, 6)}`,
           ticker: upper,
           name: data?.name ?? null,
           note: data?.note ?? null,
           tags: data?.tags ?? [],
+          assetType: data?.assetType ?? null,
           pinned: false,
           pinnedAt: null,
           starred: false,
@@ -112,6 +116,7 @@ export async function addFavorite(
         name: data?.name,
         note: data?.note,
         tags: data?.tags ? JSON.stringify(data.tags) : undefined,
+        assetType: data?.assetType !== undefined ? data.assetType : undefined,
       },
       create: {
         userId,
@@ -119,6 +124,7 @@ export async function addFavorite(
         name: data?.name,
         note: data?.note,
         tags: data?.tags ? JSON.stringify(data.tags) : null,
+        assetType: data?.assetType ?? null,
       },
     });
     return mapFavorite(row);
@@ -127,13 +133,14 @@ export async function addFavorite(
     const existing = memoryFavorites.get(key);
     const now = Date.now();
     const fav: Favorite = existing
-      ? { ...existing, name: data?.name ?? existing.name, note: data?.note ?? existing.note, tags: data?.tags ?? existing.tags, updatedAt: now }
+      ? { ...existing, name: data?.name ?? existing.name, note: data?.note ?? existing.note, tags: data?.tags ?? existing.tags, assetType: data?.assetType ?? existing.assetType, updatedAt: now }
       : {
           id: `fav-${now}-${Math.random().toString(36).slice(2, 6)}`,
           ticker: upper,
           name: data?.name ?? null,
           note: data?.note ?? null,
           tags: data?.tags ?? [],
+          assetType: data?.assetType ?? null,
           pinned: false,
           pinnedAt: null,
           starred: false,
@@ -263,7 +270,7 @@ export async function removeFavorite(
 
 export async function updateFavorite(
   ticker: string,
-  data: { name?: string; note?: string; tags?: string[] },
+  data: { name?: string; note?: string; tags?: string[]; assetType?: string | null },
   userId: string
 ): Promise<Favorite> {
   const upper = ticker.toUpperCase();
@@ -272,7 +279,14 @@ export async function updateFavorite(
     const key = memKey(userId, upper);
     const existing = memoryFavorites.get(key);
     if (!existing) throw new Error("收藏不存在");
-    const updated = { ...existing, ...data, updatedAt: Date.now() };
+    const updated: Favorite = {
+      ...existing,
+      name: data.name !== undefined ? data.name : existing.name,
+      note: data.note !== undefined ? data.note : existing.note,
+      tags: data.tags !== undefined ? data.tags : existing.tags,
+      assetType: data.assetType !== undefined ? data.assetType : existing.assetType,
+      updatedAt: Date.now(),
+    };
     memoryFavorites.set(key, updated);
     return updated;
   }
@@ -284,13 +298,21 @@ export async function updateFavorite(
         name: data.name,
         note: data.note,
         tags: data.tags ? JSON.stringify(data.tags) : undefined,
+        assetType: data.assetType !== undefined ? data.assetType : undefined,
       },
     });
     return mapFavorite(row);
   } catch {
     const existing = memoryFavorites.get(memKey(userId, upper));
     if (!existing) throw new Error("收藏不存在");
-    const updated = { ...existing, ...data, updatedAt: Date.now() };
+    const updated: Favorite = {
+      ...existing,
+      name: data.name !== undefined ? data.name : existing.name,
+      note: data.note !== undefined ? data.note : existing.note,
+      tags: data.tags !== undefined ? data.tags : existing.tags,
+      assetType: data.assetType !== undefined ? data.assetType : existing.assetType,
+      updatedAt: Date.now(),
+    };
     memoryFavorites.set(memKey(userId, upper), updated);
     return updated;
   }

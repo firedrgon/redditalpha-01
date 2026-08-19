@@ -262,6 +262,64 @@ function EtfEvaluateInner() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResp | null>(null);
 
+  // 收藏状态（与首页收藏列表共享同一份数据）
+  const [fav, setFav] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
+  const favCode = (data?.code ?? code).trim();
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      if (!/^\d{6}$/.test(favCode)) {
+        await Promise.resolve();
+        if (!cancelled) setFav(false);
+        return;
+      }
+      try {
+        const r = await fetch(`/api/favorites?ticker=${encodeURIComponent(favCode)}`, {
+          cache: "no-store",
+        });
+        const d = await r.json();
+        if (!cancelled) setFav(!!d?.isFavorite);
+      } catch {
+        if (!cancelled) setFav(false);
+      }
+    };
+    void check();
+    return () => {
+      cancelled = true;
+    };
+  }, [favCode]);
+
+  const toggleFav = useCallback(async () => {
+    if (!/^\d{6}$/.test(favCode) || favBusy) return;
+    setFavBusy(true);
+    try {
+      if (fav) {
+        const res = await fetch(`/api/favorites?ticker=${encodeURIComponent(favCode)}`, {
+          method: "DELETE",
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.deleted !== 0) setFav(false);
+        else if (!res.ok) setFav(false); // 乐观：失败即视为已移除
+      } else {
+        const res = await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: favCode,
+            name: data?.name ?? undefined,
+            assetType: "ETF",
+          }),
+        });
+        if (res.ok) setFav(true);
+      }
+    } catch {
+      /* 网络错误：保持原状 */
+    } finally {
+      setFavBusy(false);
+    }
+  }, [favCode, fav, favBusy, data]);
+
   const runWith = useCallback(async (rawCode: string, g: EtfGoal) => {
     const c = rawCode.trim();
     if (!/^\d{6}$/.test(c)) {
@@ -424,6 +482,28 @@ function EtfEvaluateInner() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5v13h13v-8.5M15 3h6v6M21 3l-9 9" />
                 </svg>
               </a>
+              <button
+                type="button"
+                onClick={toggleFav}
+                disabled={favBusy}
+                title={fav ? "取消收藏" : "加入收藏"}
+                className={`inline-flex items-center gap-1 rounded border px-2.5 py-1.5 text-[11px] font-medium transition-all disabled:opacity-50 ${
+                  fav
+                    ? "border-yellow-500/50 bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25"
+                    : "border-zinc-700/50 text-zinc-400 hover:border-yellow-500/40 hover:text-yellow-400"
+                }`}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-3.5 w-3.5"
+                  fill={fav ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.5l2.3 4.66 5.14.75-3.72 3.63.88 5.12-4.6-2.42-4.6 2.42.88-5.12L3.56 8.9l5.14-.75 2.3-4.66z" />
+                </svg>
+                {fav ? "已收藏" : "收藏"}
+              </button>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
               <span className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-zinc-400">类型：{idxTypeLabel(data.fund.indexType)}</span>
