@@ -174,9 +174,14 @@ export async function fetchIndexPePb(
     "https://quote.eastmoney.com/"
   );
   const d = json?.data;
+  // ⚠️ 关键：指数行情的 f162/f167 常返回 0（表示该字段无数据），0 不是有效 PE/PB。
+  // 若当作有效值，会污染后续「当前 PE ÷ 天花板」代理分位计算（要求 >0），并让
+  // peUsed/pbUsed 变成 0，最终好价格维度三要素全 null 而塌成空。故 0 必须视为缺失。
+  const pe = num(d?.f162);
+  const pb = num(d?.f167);
   return {
-    pe: num(d?.f162) != null ? (num(d?.f162) as number) / 100 : null,
-    pb: num(d?.f167) != null ? (num(d?.f167) as number) / 100 : null,
+    pe: pe != null && pe > 0 ? pe / 100 : null,
+    pb: pb != null && pb > 0 ? pb / 100 : null,
   };
 }
 

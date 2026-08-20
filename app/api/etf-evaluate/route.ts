@@ -167,11 +167,20 @@ export async function GET(req: Request) {
       if (hit?.dataJson) {
         try {
           const parsed = JSON.parse(hit.dataJson);
-          return NextResponse.json({
-            ...parsed,
-            cached: true,
-            cachedAt: hit.updatedAt ? hit.updatedAt.toISOString() : null,
-          });
+          // 缓存自愈：早期版本曾因指数 PE/PB 取数 0 污染，把「好价格」维度算成 null 并缓存。
+          // 若缓存的好价格维度为空（坏快照），不服务缓存、强制重算以自愈。
+          const dims: { key?: string; score?: number | null }[] =
+            parsed?.evaluation?.dimensions ?? [];
+          const priceStale = dims.some(
+            (d) => d.key === "price" && d.score == null
+          );
+          if (!priceStale) {
+            return NextResponse.json({
+              ...parsed,
+              cached: true,
+              cachedAt: hit.updatedAt ? hit.updatedAt.toISOString() : null,
+            });
+          }
         } catch {
           // JSON 损坏：忽略缓存，走实时计算兜底
         }

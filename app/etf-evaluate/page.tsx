@@ -376,6 +376,15 @@ function EtfEvaluateInner() {
     void runWith(urlCode, urlGoal);
   }, [hasUrlCode, urlCode, urlGoal, runWith]);
 
+  // 切换投资目标（好匹配维度）时，若已有评估结果则立即重新请求，
+  // 否则好匹配会停留在「未选目标」的空状态（旧 bug：goal 按钮只 setGoal 不重算）。
+  const lastGoal = useRef(goal);
+  useEffect(() => {
+    const changed = lastGoal.current !== goal;
+    lastGoal.current = goal;
+    if (changed && data) void runWith(code, goal);
+  }, [goal, data, code, runWith]);
+
   // 关键指标卡（来自净值历史）；顺序与「ETF产品智能评估」技能报告对齐
   const nav = data?.nav;
   const trackErr = data?.fund.trackingErrorPct;
@@ -737,7 +746,7 @@ function EtfEvaluateInner() {
           {/* 同类规模对比 */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
             <div className="mb-2 text-xs font-medium text-zinc-300">
-              好匹配 · 同类产品规模对比（跟踪 {data.fund.trackIndexName ?? "同指数"}）
+              好成本 · 同类产品规模对比（跟踪 {data.fund.trackIndexName ?? "同指数"}）
             </div>
             <PeerBarChart peers={data.peers ?? []} selfCode={data.code} />
             {data.peers == null && (
