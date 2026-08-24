@@ -3,8 +3,17 @@ import {
   fetchEtfFundData,
   fetchEtfNavHistory,
   fetchPeerEtfs,
+  fetchEtfProfile,
+  fetchEtfCcmx,
   type EtfBoard,
+  type FundProfile,
+  type EtfHolding,
 } from "@/lib/etf-fund-data";
+import {
+  fetchThsIndexBundle,
+  navDerivatives,
+  type IndexBundle,
+} from "@/lib/etf-index-metrics";
 import {
   evaluateEtfSkill,
   type EtfGoal,
@@ -47,6 +56,31 @@ type EvaluateResult = {
   fund: Record<string, unknown>;
   nav: unknown;
   peers: unknown;
+  /** 基金信息全表（好运营维度） */
+  profile: FundProfile | null;
+  /** 前十大持仓（东财 ccmx） */
+  holdings: EtfHolding[] | null;
+  /** 同花顺指数（行业/标准 proxy）成分股 + 历史 K 线衍生指标 */
+  thsIndex: IndexBundle | null;
+  /** 东财 NAV 衍生指标（与指数 proxy 交叉对照） */
+  navDeriv: {
+    yearlyReturns: { year: string; returnPct: number }[];
+    holdingPeriod: {
+      months: number;
+      profitRatio: number | null;
+      avgReturnPct: number | null;
+      samples: number;
+    }[];
+    sharpe: number | null;
+    winRate: number | null;
+  } | null;
+  /** 好匹配·流动性指标 */
+  liquidity: {
+    dailyTurnoverWan: number | null;
+    turnoverRatePct: number | null;
+    floatScaleYi: number | null;
+    premiumDiscountPct: number | null;
+  } | null;
   evaluation: EtfSkillEvaluation;
 };
 
@@ -65,11 +99,15 @@ async function computeEtfEvaluation(
     throw new EvaluationError(502, "基金数据抓取失败，请稍后重试");
   }
 
-  // 净值历史 + 同类 ETF 对比（best-effort，缺则报告降级，不阻塞评估）
-  const [nav, peers] = await Promise.all([
+  // 净值历史 + 同类 ETF 对比 + 信息全表 + 前十大持仓 + 同花顺指数（best-effort，缺则降级，不阻塞评估）
+  const [nav, peers, profile, holdings, thsIndex] = await Promise.all([
     fetchEtfNavHistory(code).catch(() => null),
     fetchPeerEtfs(fund.raw.trackIndexName, code).catch(() => null),
+    fetchEtfProfile(code).catch(() => null),
+    fetchEtfCcmx(code).catch(() => null),
+    fetchThsIndexBundle(fund.raw.trackIndexName, fund.name).catch(() => null),
   ]);
+  const navDeriv = navDerivatives(nav);
 
   // 好时机：查该 ETF 是否处于同花顺主升浪池（DB 读取，轻量）
   let inUpTrend: boolean | null = null;
@@ -99,6 +137,13 @@ async function computeEtfEvaluation(
 
   const evaluation = evaluateEtfSkill(input);
 
+  // 好匹配·流动性：换手率 = 日成交额(万元) / 流通市值(亿元) → %
+  // 流通市值以 ETF 最新规模近似（ETF 份额全流通）；量比(f170)实测为脏值故不取。
+  const liqTurnover =
+    fund.raw.dailyTurnoverWan != null && fund.raw.scaleYi && fund.raw.scaleYi > 0
+      ? (fund.raw.dailyTurnoverWan * 100) / (fund.raw.scaleYi * 1e4)
+      : null;
+
   return {
     code,
     name: fund.name,
@@ -123,6 +168,16 @@ async function computeEtfEvaluation(
     },
     nav,
     peers,
+    profile,
+    holdings,
+    thsIndex,
+    navDeriv,
+    liquidity: {
+      dailyTurnoverWan: fund.raw.dailyTurnoverWan,
+      turnoverRatePct: liqTurnover,
+      floatScaleYi: fund.raw.scaleYi,
+      premiumDiscountPct: fund.raw.premiumDiscountPct,
+    },
     evaluation,
   };
 }

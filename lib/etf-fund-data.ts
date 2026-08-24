@@ -855,3 +855,155 @@ export async function fetchPeerEtfs(
     return null;
   }
 }
+
+// ============================================================
+// 基金信息全表（好运营维度）：概况页结构化字段
+// ============================================================
+
+export interface FundProfile {
+  fullName: string | null;
+  shortName: string | null;
+  fundType: string | null;
+  fundCompany: string | null;
+  custodian: string | null;
+  manager: string | null;
+  issueDate: string | null;
+  establishDate: string | null;
+  /** 成立规模（亿元） */
+  establishScaleYi: number | null;
+  /** 最新资产规模（亿元） */
+  latestScaleYi: number | null;
+  mgmtFeePct: number | null;
+  custodyFeePct: number | null;
+  trackIndexName: string | null;
+  benchmark: string | null;
+  investTarget: string | null;
+  investStrategy: string | null;
+  investScope: string | null;
+  dividendPolicy: string | null;
+}
+
+/** 中文日期（2026年05月29日）→ ISO（2026-05-29） */
+function cnDateFromChinese(s: string | null): string | null {
+  if (!s) return null;
+  const m = s.match(/(\d{4})年(\d{2})月(\d{2})日/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/**
+ * 解析基金信息全表（jbgk 概况页）。
+ * 字段覆盖：全称/简称/类型/公司/托管人/经理/发行日/成立日/规模/费率/基准/策略/范围/分红。
+ * best-effort：任一项缺失返回 null，页面按可得字段渲染。
+ */
+export function parseFundProfile(html: string): FundProfile {
+  const text = html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ");
+  const pick = (re: RegExp): string | null => {
+    const m = text.match(re);
+    return m && m[1] ? m[1].trim() : null;
+  };
+  const numPct = (re: RegExp): number | null => {
+    const m = text.match(re);
+    return num(m ? m[1] : null);
+  };
+  return {
+    fullName: pick(/基金全称[：:\s]*([\u4e00-\u9fa5A-Za-z0-9（）()·]+?)\s*基金简称/),
+    shortName: pick(/基金简称[：:\s]*([\u4e00-\u9fa5A-Za-z0-9]+?)\s*基金代码/),
+    fundType: pick(/基金类型[：:\s]*([\u4e00-\u9fa5\-]+?)\s*发行日期/),
+    fundCompany: pick(
+      /基金管理人[：:\s]*([\u4e00-\u9fa5A-Za-z0-9（）()·]+?)\s*基金托管人/
+    ),
+    custodian: pick(
+      /基金托管人[：:\s]*([\u4e00-\u9fa5A-Za-z0-9（）()·]+?)\s*基金经理人/
+    ),
+    manager: parseManagers(text),
+    issueDate: cnDateFromChinese(pick(/发行日期[：:\s]*(\d{4}年\d{2}月\d{2}日)/)),
+    establishDate: cnDateFromChinese(
+      pick(/成立日期[/：:][\s\S]*?(\d{4}年\d{2}月\d{2}日)/)
+    ),
+    establishScaleYi: num(
+      pick(/成立日期\/规模\s*\d{4}年\d{2}月\d{2}日\s*\/\s*([\d.]+)/)
+    ),
+    latestScaleYi: num(pick(/资产规模[：:]\s*([\d.]+)亿元/)),
+    mgmtFeePct: numPct(/管理费率?[：:\s]*([\d.]+)\s*%/),
+    custodyFeePct: numPct(/托管费率?[：:\s]*([\d.]+)\s*%/),
+    trackIndexName: pick(/跟踪标的[：:\s]*([\u4e00-\u9fa5A-Za-z0-9]+)/),
+    benchmark: pick(/业绩比较基准[：:\s]*([\u4e00-\u9fa5A-Za-z0-9．.]+?)\s*跟踪标的/),
+    investTarget: pick(/投资目标[：:\s]*([\u4e00-\u9fa5，。、,.\s]{4,80}?)\s*投资理念/),
+    investStrategy: pick(
+      /投资策略[：:\s]*([\u4e00-\u9fa5，。、,.\s]{4,160}?)\s*投资范围/
+    ),
+    investScope: pick(
+      /投资范围[：:\s]*([\u4e00-\u9fa5，。、,.\s]{4,160}?)(?:收益分配|风险|本基金业绩)/
+    ),
+    dividendPolicy: pick(
+      /收益分配[：:\s]*([\u4e00-\u9fa5，。、,.\s]{4,160}?)(?:基金公司|风险|注：)/
+    ),
+  };
+}
+
+/** 抓基金概况页并解析信息全表（best-effort，失败返回 null） */
+export async function fetchEtfProfile(code: string): Promise<FundProfile | null> {
+  const html = await fetchFundHtml(code).catch(() => null);
+  if (!html) return null;
+  return parseFundProfile(html);
+}
+
+// ============================================================
+// 前十大持仓（东财 ccmx）：代码 / 名称 / 占净值比例 / 持仓市值
+// ============================================================
+
+export interface EtfHolding {
+  code: string;
+  name: string;
+  /** 占净值比例 %（来自 ccmx「占净值比例」列） */
+  weightPct: number | null;
+  /** 持仓市值（万元） */
+  holdMvWan: number | null;
+}
+
+/**
+ * 抓 ETF 前十大持仓（东财 FundArchivesDatas jjcc）。
+ * 列序：序号/代码/名称/最新价/涨跌幅/相关/占净值比例/持股数/持仓市值。
+ * 占净值比例与持仓市值在 HTML 中直接渲染（非全 JS 懒加载）：占净值比例带 %，
+ * 其后的两个数值分别为持股数(万股)与持仓市值(万元)。best-effort，失败返回 null。
+ */
+export async function fetchEtfCcmx(code: string): Promise<EtfHolding[] | null> {
+  try {
+    const res = await fetch(
+      `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${code}&topline=10`,
+      {
+        headers: { "User-Agent": UA, Referer: "https://fundf10.eastmoney.com/" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(12000),
+      }
+    );
+    if (!res.ok) return null;
+    const html = await res.text();
+    const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+    const holdings: EtfHolding[] = [];
+    for (const row of rows) {
+      const codeM = row.match(/<a[^>]*>(\d{6})<\/a>/);
+      const nameM = row.match(/class='tol'[^>]*>([^<]+)<\/a>/);
+      if (!codeM || !nameM) continue; // 仅取含股票代码的真实持仓行
+      const pctM = row.match(/([\d.]+)%/);
+      const after = pctM ? row.slice(pctM.index! + pctM[0].length) : row;
+      const nums = [...after.matchAll(/>\s*([\d.]+)\s*</g)].map((m) =>
+        parseFloat(m[1])
+      );
+      holdings.push({
+        code: codeM[1],
+        name: nameM[1].trim(),
+        weightPct: pctM ? num(pctM[1]) : null,
+        holdMvWan: nums.length >= 2 ? num(nums[1]) : nums.length === 1 ? num(nums[0]) : null,
+      });
+      if (holdings.length >= 10) break;
+    }
+    return holdings.length ? holdings : null;
+  } catch {
+    return null;
+  }
+}

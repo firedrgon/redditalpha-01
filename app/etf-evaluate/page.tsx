@@ -48,6 +48,67 @@ interface ApiResp {
   };
   nav: EtfNavHistory | null;
   peers: EtfPeer[] | null;
+  /** 基金信息全表（好运营维度） */
+  profile: {
+    fullName: string | null;
+    shortName: string | null;
+    fundType: string | null;
+    fundCompany: string | null;
+    custodian: string | null;
+    manager: string | null;
+    issueDate: string | null;
+    establishDate: string | null;
+    establishScaleYi: number | null;
+    latestScaleYi: number | null;
+    mgmtFeePct: number | null;
+    custodyFeePct: number | null;
+    trackIndexName: string | null;
+    benchmark: string | null;
+    investTarget: string | null;
+    investStrategy: string | null;
+    investScope: string | null;
+    dividendPolicy: string | null;
+  } | null;
+  /** 前十大持仓（东财 ccmx） */
+  holdings: { code: string; name: string; weightPct: number | null; holdMvWan: number | null }[] | null;
+  /** 同花顺指数（行业/标准 proxy）数据 */
+  thsIndex: {
+    available: boolean;
+    thsCode: string | null;
+    indexName: string | null;
+    isProxy: boolean;
+    constituents: { thscode: string; ticker: string; name: string }[];
+    yearlyReturns: { year: string; returnPct: number }[];
+    holdingPeriod: {
+      months: number;
+      profitRatio: number | null;
+      avgReturnPct: number | null;
+      samples: number;
+    }[];
+    monthlyPerf: { month: string; returnPct: number }[];
+    sharpe: number | null;
+    winRate: number | null;
+    trend: { yoyPct: number | null; recent3mPct: number | null };
+  } | null;
+  /** 东财 NAV 衍生指标（与指数 proxy 交叉对照） */
+  navDeriv: {
+    yearlyReturns: { year: string; returnPct: number }[];
+    holdingPeriod: {
+      months: number;
+      profitRatio: number | null;
+      avgReturnPct: number | null;
+      samples: number;
+    }[];
+    sharpe: number | null;
+    winRate: number | null;
+  } | null;
+  /** 好匹配·流动性指标 */
+  liquidity: {
+    dailyTurnoverWan: number | null;
+    turnoverRatePct: number | null;
+    floatScaleYi: number | null;
+    premiumDiscountPct: number | null;
+  } | null;
   evaluation: EtfSkillEvaluation;
   /** true = 来自数据库缓存（未重新计算）；false/undefined = 本次实时计算 */
   cached?: boolean;
@@ -253,6 +314,205 @@ function PeerBarChart({ peers, selfCode }: { peers: EtfPeer[]; selfCode: string 
               />
             </div>
             <span className="w-16 shrink-0 text-right text-zinc-300">{(p.scaleYi ?? 0).toFixed(2)}亿</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// 新增区块组件：信息表 / 持仓 / 成分股 / 年度收益 / 持有期 / 月度 / 绩效
+// ============================================================
+
+function InfoTable({ rows }: { rows: { label: string; value: string | null }[] }) {
+  const valid = rows.filter((r) => r.value != null && r.value !== "");
+  if (!valid.length) return <div className="text-xs text-zinc-500">暂无信息</div>;
+  return (
+    <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-[11px] sm:grid-cols-2">
+      {valid.map((r) => (
+        <div key={r.label} className="flex gap-2">
+          <span className="w-20 shrink-0 text-zinc-500">{r.label}</span>
+          <span className="flex-1 text-zinc-200">{r.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HoldingsTable({
+  holdings,
+}: {
+  holdings: { code: string; name: string; weightPct: number | null; holdMvWan: number | null }[];
+}) {
+  if (!holdings.length) return <div className="text-xs text-zinc-500">暂无持仓数据</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="text-zinc-500">
+            <th className="py-1.5 text-left font-medium">代码</th>
+            <th className="py-1.5 text-left font-medium">名称</th>
+            <th className="py-1.5 text-right font-medium">占净值</th>
+            <th className="py-1.5 text-right font-medium">市值(万)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {holdings.map((h) => (
+            <tr key={h.code} className="border-t border-zinc-800">
+              <td className="py-1.5 font-mono text-zinc-400">{h.code}</td>
+              <td className="py-1.5 text-zinc-200">{h.name}</td>
+              <td className="py-1.5 text-right font-mono text-zinc-200">
+                {h.weightPct != null ? `${h.weightPct.toFixed(2)}%` : "—"}
+              </td>
+              <td className="py-1.5 text-right font-mono text-zinc-400">
+                {h.holdMvWan != null ? h.holdMvWan.toFixed(1) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ConstituentsChips({ names }: { names: string[] }) {
+  if (!names.length) return <div className="text-xs text-zinc-500">暂无成分股</div>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {names.map((n) => (
+        <span
+          key={n}
+          className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-[10px] text-zinc-300"
+        >
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function YearlyReturnTable({
+  indexRows,
+  etfRows,
+}: {
+  indexRows: { year: string; returnPct: number }[];
+  etfRows: { year: string; returnPct: number }[];
+}) {
+  const map = new Map<string, { index: number | null; etf: number | null }>();
+  for (const r of indexRows)
+    map.set(r.year, { ...(map.get(r.year) ?? { index: null, etf: null }), index: r.returnPct });
+  for (const r of etfRows)
+    map.set(r.year, { ...(map.get(r.year) ?? { index: null, etf: null }), etf: r.returnPct });
+  const years = [...map.keys()].sort();
+  if (!years.length) return <div className="text-xs text-zinc-500">暂无年度收益数据</div>;
+  const cellCls = (v: number | null) =>
+    v == null ? "text-zinc-600" : v >= 0 ? "text-emerald-400" : "text-red-400";
+  return (
+    <table className="w-full text-[11px]">
+      <thead>
+        <tr className="text-zinc-500">
+          <th className="py-1.5 text-left font-medium">年度</th>
+          <th className="py-1.5 text-right font-medium">指数(行业)</th>
+          <th className="py-1.5 text-right font-medium">ETF自身</th>
+        </tr>
+      </thead>
+      <tbody>
+        {years.map((y) => {
+          const v = map.get(y)!;
+          return (
+            <tr key={y} className="border-t border-zinc-800">
+              <td className="py-1.5 text-zinc-300">{y}</td>
+              <td className={`py-1.5 text-right font-mono ${cellCls(v.index)}`}>
+                {v.index != null ? fmtPct(v.index) : "—"}
+              </td>
+              <td className={`py-1.5 text-right font-mono ${cellCls(v.etf)}`}>
+                {v.etf != null ? fmtPct(v.etf) : "—"}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function HoldingPeriodTable({
+  indexRows,
+  etfRows,
+}: {
+  indexRows: { months: number; profitRatio: number | null; avgReturnPct: number | null }[];
+  etfRows: { months: number; profitRatio: number | null; avgReturnPct: number | null }[];
+}) {
+  const map = new Map<
+    number,
+    {
+      index: { profitRatio: number | null; avgReturnPct: number | null } | null;
+      etf: { profitRatio: number | null; avgReturnPct: number | null } | null;
+    }
+  >();
+  for (const r of indexRows)
+    map.set(r.months, {
+      ...(map.get(r.months) ?? { index: null, etf: null }),
+      index: { profitRatio: r.profitRatio, avgReturnPct: r.avgReturnPct },
+    });
+  for (const r of etfRows)
+    map.set(r.months, {
+      ...(map.get(r.months) ?? { index: null, etf: null }),
+      etf: { profitRatio: r.profitRatio, avgReturnPct: r.avgReturnPct },
+    });
+  const months = [...map.keys()].sort((a, b) => a - b);
+  if (!months.length) return <div className="text-xs text-zinc-500">暂无持有期数据</div>;
+  const cell = (p: { profitRatio: number | null; avgReturnPct: number | null } | null) =>
+    p
+      ? `${p.profitRatio != null ? p.profitRatio.toFixed(0) : "—"}% (均${p.avgReturnPct != null ? fmtPct(p.avgReturnPct) : "—"})`
+      : "—";
+  return (
+    <table className="w-full text-[11px]">
+      <thead>
+        <tr className="text-zinc-500">
+          <th className="py-1.5 text-left font-medium">持有期</th>
+          <th className="py-1.5 text-right font-medium">指数盈利概率</th>
+          <th className="py-1.5 text-right font-medium">ETF盈利概率</th>
+        </tr>
+      </thead>
+      <tbody>
+        {months.map((m) => {
+          const v = map.get(m)!;
+          return (
+            <tr key={m} className="border-t border-zinc-800">
+              <td className="py-1.5 text-zinc-300">{m}个月</td>
+              <td className="py-1.5 text-right font-mono text-zinc-200">{cell(v.index)}</td>
+              <td className="py-1.5 text-right font-mono text-zinc-200">{cell(v.etf)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function MonthlyPerfBars({ rows }: { rows: { month: string; returnPct: number }[] }) {
+  if (!rows.length) return <div className="text-xs text-zinc-500">暂无月度数据</div>;
+  const max = Math.max(...rows.map((r) => Math.abs(r.returnPct)), 1);
+  return (
+    <div className="space-y-1">
+      {rows.map((r) => {
+        const w = (Math.abs(r.returnPct) / max) * 100;
+        const up = r.returnPct >= 0;
+        return (
+          <div key={r.month} className="flex items-center gap-2 text-[10px]">
+            <span className="w-12 shrink-0 text-zinc-500">{r.month.slice(2)}</span>
+            <div className="relative h-3 flex-1 overflow-hidden rounded bg-zinc-800">
+              <div
+                className={`absolute top-0 h-full rounded ${up ? "bg-emerald-500/70" : "bg-red-500/70"}`}
+                style={{ width: `${w}%`, left: up ? "50%" : `${50 - w / 2}%` }}
+              />
+              <div className="absolute left-1/2 top-0 h-full w-px bg-zinc-600" />
+            </div>
+            <span className={`w-12 shrink-0 text-right font-mono ${up ? "text-emerald-400" : "text-red-400"}`}>
+              {fmtPct(r.returnPct)}
+            </span>
           </div>
         );
       })}
@@ -622,6 +882,49 @@ function EtfEvaluateInner() {
             </div>
           </div>
 
+          {/* 基金信息全表（好运营） */}
+          {data.profile && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">基金信息全表（好运营）</div>
+              <InfoTable
+                rows={[
+                  { label: "基金全称", value: data.profile.fullName },
+                  { label: "基金简称", value: data.profile.shortName },
+                  { label: "基金类型", value: data.profile.fundType },
+                  { label: "基金管理人", value: data.profile.fundCompany },
+                  { label: "基金托管人", value: data.profile.custodian },
+                  { label: "基金经理", value: data.profile.manager },
+                  { label: "跟踪标的", value: data.profile.trackIndexName },
+                  { label: "业绩基准", value: data.profile.benchmark },
+                  { label: "发行日期", value: data.profile.issueDate },
+                  { label: "成立日期", value: data.profile.establishDate },
+                  { label: "成立规模", value: data.profile.establishScaleYi != null ? `${data.profile.establishScaleYi.toFixed(2)}亿` : null },
+                  { label: "最新规模", value: data.profile.latestScaleYi != null ? `${data.profile.latestScaleYi.toFixed(2)}亿` : null },
+                  { label: "管理费率", value: data.profile.mgmtFeePct != null ? `${data.profile.mgmtFeePct.toFixed(2)}%/年` : null },
+                  { label: "托管费率", value: data.profile.custodyFeePct != null ? `${data.profile.custodyFeePct.toFixed(2)}%/年` : null },
+                ]}
+              />
+              {data.profile.investTarget && (
+                <div className="mt-2 text-[10px] leading-relaxed text-zinc-500">
+                  <span className="text-zinc-400">投资目标：</span>
+                  {data.profile.investTarget}
+                </div>
+              )}
+              {data.profile.investStrategy && (
+                <div className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                  <span className="text-zinc-400">投资策略：</span>
+                  {data.profile.investStrategy}
+                </div>
+              )}
+              {data.profile.dividendPolicy && (
+                <div className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                  <span className="text-zinc-400">分红政策：</span>
+                  {data.profile.dividendPolicy}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 关键指标卡 */}
           {metricCards.length > 0 && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -689,6 +992,26 @@ function EtfEvaluateInner() {
             </>
           )}
 
+          {/* 好资产：前十大持仓（东财）+ 行业成分股（同花顺） */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">好资产 · 前十大持仓（东财）</div>
+              <HoldingsTable holdings={data.holdings ?? []} />
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">
+                好资产 · 行业成分股
+                {data.thsIndex?.indexName
+                  ? `（同花顺 ${data.thsIndex.indexName}${data.thsIndex.isProxy ? " · 行业proxy" : ""}）`
+                  : ""}
+              </div>
+              <ConstituentsChips names={(data.thsIndex?.constituents ?? []).map((c) => c.name)} />
+              {data.thsIndex == null && (
+                <div className="mt-1 text-[10px] text-zinc-500">同花顺未收录该指数成分股（已优雅降级）。</div>
+              )}
+            </div>
+          </div>
+
           {/* 指数估值表 */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
             <div className="mb-2 text-xs font-medium text-zinc-300">
@@ -743,6 +1066,40 @@ function EtfEvaluateInner() {
             )}
           </div>
 
+          {/* 好价格：年度收益（指数 proxy + ETF 自身） */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <div className="mb-2 text-xs font-medium text-zinc-300">
+              好价格 · 年度收益（{data.thsIndex?.indexName ?? "行业指数"} / ETF 自身）
+            </div>
+            <YearlyReturnTable
+              indexRows={data.thsIndex?.yearlyReturns ?? []}
+              etfRows={data.navDeriv?.yearlyReturns ?? []}
+            />
+          </div>
+
+          {/* 好价格/好时机：持有期盈利概率 + 月度表现 */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">好价格 · 持有期盈利概率</div>
+              <HoldingPeriodTable
+                indexRows={data.thsIndex?.holdingPeriod ?? []}
+                etfRows={data.navDeriv?.holdingPeriod ?? []}
+              />
+              <div className="mt-1 text-[10px] text-zinc-500">
+                盈利概率 = 该持有期内收益为正的频率；括号内为平均收益率。
+              </div>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">
+                好时机 · 近 12 月月度表现
+                {data.thsIndex?.trend?.yoyPct != null
+                  ? `（同比 ${fmtPct(data.thsIndex.trend.yoyPct)}）`
+                  : ""}
+              </div>
+              <MonthlyPerfBars rows={data.thsIndex?.monthlyPerf ?? []} />
+            </div>
+          </div>
+
           {/* 同类规模对比 */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
             <div className="mb-2 text-xs font-medium text-zinc-300">
@@ -752,6 +1109,56 @@ function EtfEvaluateInner() {
             {data.peers == null && (
               <div className="mt-1 text-[10px] text-zinc-500">同类对比需查询同指数 ETF 列表（数据源偶发限流，暂不可用）。</div>
             )}
+          </div>
+
+          {/* 绩效 + 好匹配：Sharpe/胜率 + 流动性 */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">绩效 · 风险调整后收益（东财 NAV）</div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                  <div className="text-[10px] text-zinc-500">Sharpe 比率</div>
+                  <div className="mt-0.5 text-base font-bold text-zinc-100">
+                    {data.navDeriv?.sharpe != null ? data.navDeriv.sharpe.toFixed(2) : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                  <div className="text-[10px] text-zinc-500">日胜率</div>
+                  <div className="mt-0.5 text-base font-bold text-zinc-100">
+                    {data.navDeriv?.winRate != null ? `${data.navDeriv.winRate.toFixed(1)}%` : "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="mb-2 text-xs font-medium text-zinc-300">好匹配 · 流动性</div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                  <div className="text-[10px] text-zinc-500">日成交额</div>
+                  <div className="mt-0.5 text-base font-bold text-zinc-100">
+                    {data.liquidity?.dailyTurnoverWan != null ? `${data.liquidity.dailyTurnoverWan.toFixed(0)}万` : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                  <div className="text-[10px] text-zinc-500">换手率</div>
+                  <div className="mt-0.5 text-base font-bold text-zinc-100">
+                    {data.liquidity?.turnoverRatePct != null ? `${data.liquidity.turnoverRatePct.toFixed(2)}%` : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                  <div className="text-[10px] text-zinc-500">流通市值</div>
+                  <div className="mt-0.5 text-base font-bold text-zinc-100">
+                    {data.liquidity?.floatScaleYi != null ? `${data.liquidity.floatScaleYi.toFixed(2)}亿` : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                  <div className="text-[10px] text-zinc-500">IOPV折价</div>
+                  <div className="mt-0.5 text-base font-bold text-zinc-100">
+                    {data.liquidity?.premiumDiscountPct != null ? fmtPct(data.liquidity.premiumDiscountPct) : "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* 六维逐项评估 */}
