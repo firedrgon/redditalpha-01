@@ -529,6 +529,7 @@ export async function assembleEtfFundData(
       bondYieldPct,
       epsRevisionUpPct: null, // 暂无便捷数据源
       proxy,
+      navPriceScore: null, // 由 route 在拿到净值后注入（兜底信号）
     },
     quality: {
       scaleYi,

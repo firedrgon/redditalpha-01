@@ -20,8 +20,9 @@ const GOALS: { key: EtfGoal; label: string; desc: string }[] = [
 const GOAL_KEYS = ["growth", "income", "stable", "balanced"] as const;
 
 function parseGoal(raw: string | null): EtfGoal {
-  if (!raw) return null;
-  return (GOAL_KEYS as readonly string[]).includes(raw) ? (raw as EtfGoal) : null;
+  // 默认 growth：未带 ?goal= 时好匹配维度也会空置（旧 bug），给一个非 null 默认值保底。
+  if (!raw) return "growth";
+  return (GOAL_KEYS as readonly string[]).includes(raw) ? (raw as EtfGoal) : "growth";
 }
 
 interface ApiResp {
@@ -43,6 +44,7 @@ interface ApiResp {
     indexPePercentile: number | null;
     indexPbPercentile: number | null;
     dividendYieldPct: number | null;
+    navPriceScore: number | null;
     navNow: number | null;
     trackingErrorPct: number | null;
   };
@@ -673,6 +675,13 @@ function EtfEvaluateInner() {
         { name: "市盈率 PE-TTM", cur: f.indexPe, pct: f.indexPePercentile, unit: "倍" },
         { name: "市净率 PB", cur: f.indexPb, pct: f.indexPbPercentile, unit: "倍" },
         { name: "股息率", cur: f.dividendYieldPct, pct: null, unit: "%" },
+        {
+          name: "当前价格位置（净值）",
+          cur: f.navPriceScore,
+          pct: null,
+          unit: "分",
+          navScore: true,
+        },
         { name: "PEG（盈利预期）", cur: null, pct: null, unit: "", pegMissing: true },
       ]
     : [];
@@ -1047,6 +1056,8 @@ function EtfEvaluateInner() {
                       <td className={`py-1.5 ${v.cls}`}>
                         {r.pegMissing ? (
                           <span className="text-zinc-600">需 Wind / 分析师盈利预期</span>
+                        ) : r.navScore ? (
+                          <span className="text-zinc-400">越高越便宜（净值兜底）</span>
                         ) : r.cur != null ? (
                           v.text
                         ) : (

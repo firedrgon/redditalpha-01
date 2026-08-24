@@ -264,3 +264,23 @@ export function navDerivatives(nav: EtfNavHistory | null): {
     winRate: winRate(pts),
   };
 }
+
+/**
+ * 由东财 NAV 历史推导「当前价格吸引力」评分（0~100，越高=当前价格越便宜/越有吸引力）。
+ * 仅在指数 PE/PB 分位与股息率都取不到时，作为「好价格」维度的兜底信号，避免维度空置。
+ * 逻辑：当前价距历史峰值越深（回撤越大）→ 越便宜 → 分越高；近1年涨幅过大（>60%）→ 偏贵 → 扣分。
+ */
+export function computeNavPriceScore(nav: EtfNavHistory | null): number | null {
+  if (!nav || !nav.series || nav.series.length < 2) return null;
+  const vals = nav.series.map((p) => p.nav).filter((v) => v > 0);
+  if (vals.length < 2) return null;
+  const peak = Math.max(...vals);
+  const now = vals[vals.length - 1];
+  if (peak <= 0) return null;
+  const ddNow = now / peak - 1; // <=0，越负=回撤越深
+  let s = 55 - ddNow * 0.7; // ddNow 为负 → 实际为加法，回撤越深分越高
+  if (nav.y1Pct != null && nav.y1Pct > 60) {
+    s -= (nav.y1Pct - 60) * 0.5; // 近1年暴拉 → 偏贵扣分
+  }
+  return Math.max(0, Math.min(100, s));
+}

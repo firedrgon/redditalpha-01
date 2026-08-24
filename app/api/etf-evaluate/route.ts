@@ -12,6 +12,7 @@ import {
 import {
   fetchThsIndexBundle,
   navDerivatives,
+  computeNavPriceScore,
   type IndexBundle,
 } from "@/lib/etf-index-metrics";
 import {
@@ -108,6 +109,8 @@ async function computeEtfEvaluation(
     fetchThsIndexBundle(fund.raw.trackIndexName, fund.name).catch(() => null),
   ]);
   const navDeriv = navDerivatives(nav);
+  // 好价格兜底：当指数 PE/PB 分位与股息率都取不到时，用净值历史推导「当前价格吸引力」
+  const navPriceScore = computeNavPriceScore(nav);
 
   // 好时机：查该 ETF 是否处于同花顺主升浪池（DB 读取，轻量）
   let inUpTrend: boolean | null = null;
@@ -124,7 +127,7 @@ async function computeEtfEvaluation(
 
   const input: EtfSkillInput = {
     asset: { trackIndexName: fund.raw.trackIndexName, indexType: fund.indexType },
-    valuation: fund.valuation,
+    valuation: { ...fund.valuation, navPriceScore },
     operation: {
       fundCompany: fund.fundCompany,
       fundManager: fund.fundManager,
@@ -163,6 +166,7 @@ async function computeEtfEvaluation(
       indexPePercentile: fund.valuation.indexPePercentile,
       indexPbPercentile: fund.valuation.indexPbPercentile,
       dividendYieldPct: fund.valuation.dividendYieldPct,
+      navPriceScore,
       navNow: nav?.navNow ?? null,
       trackingErrorPct: fund.raw.trackingErrorPct,
     },

@@ -29,6 +29,12 @@ export interface EtfValuationInput {
   epsRevisionUpPct: number | null;
   /** 若为代理分位（无真实历史分位、用 PE/估值天花板推算），置 true 以提示。 */
   proxy: boolean;
+  /**
+   * 当前价格吸引力（0~100，越高=当前价格越有吸引力/越便宜），由净值历史推导的兜底信号。
+   * 当指数 PE/PB 分位与股息率均不可得时，作为「好价格」维度的主信号，避免维度空置。
+   * 可选：不传（undefined）即视为缺失，不影响其它估值信号。
+   */
+  navPriceScore?: number | null;
 }
 
 /** 质量输入：ETF 自身的工具属性（全部可选，null = 未知） */
@@ -94,6 +100,7 @@ const VALUATION_WEIGHTS: Record<keyof EtfValuationInput, number> = {
   bondYieldPct: 0.0, // 仅作对比基准，不直接计分
   epsRevisionUpPct: 0.2,
   proxy: 0.0,
+  navPriceScore: 0.15, // 净值价格位置兜底（PE/PB/股息率缺失时权重上升）
 };
 
 /** 质量维度内各指标权重 */
@@ -252,6 +259,17 @@ export function scoreValuation(input: EtfValuationInput): DimensionResult {
       note: `分析师 EPS 上修比例 ${input.epsRevisionUpPct >= 0 ? "+" : ""}${input.epsRevisionUpPct.toFixed(
         0
       )}% → ${s >= 60 ? "景气向上" : s >= 40 ? "中性" : "预期下修"}`,
+    });
+  }
+
+  if (input.navPriceScore != null) {
+    const s = clamp(input.navPriceScore);
+    metrics.push({
+      key: "navPrice",
+      label: "当前价格位置（净值）",
+      score: s,
+      weight: VALUATION_WEIGHTS.navPriceScore,
+      note: `基于净值历史的价格吸引力 ${s.toFixed(0)} 分（越高=当前价格越有吸引力；PE/PB 分位与股息率缺失时的兜底信号）`,
     });
   }
 
