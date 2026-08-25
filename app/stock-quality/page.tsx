@@ -13,8 +13,15 @@ export default function StockQualityPage() {
   // 跳转来源页（from 参数），用于「返回」按钮精确回到热榜/收藏列表
   const [from, setFrom] = useState<string | null>(null);
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get("from");
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get("from");
     setFrom(p && p.length > 1 ? p : null);
+    // 从热榜/收藏点击进入时，URL 带 ticker 参数：自动填充并触发评分
+    const t = params.get("ticker");
+    if (t) {
+      setTicker(t);
+      run(t);
+    }
   }, []);
 
   async function run(code: string, refresh = false) {
