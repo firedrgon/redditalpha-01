@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { QualityStatus } from "@/lib/db/company-quality-cache";
 
 /** 评分等级 → 徽章配色（按质地等级语义着色，不套用涨跌红绿惯例） */
@@ -31,7 +32,10 @@ export default function QualityScoreLink({
   ticker: string;
   status?: QualityStatus | null;
 }) {
-  const href = `/stock-quality?ticker=${encodeURIComponent(ticker)}`;
+  const pathname = usePathname();
+  const href = `/stock-quality?ticker=${encodeURIComponent(ticker)}&from=${encodeURIComponent(
+    pathname || "/"
+  )}`;
 
   if (status?.scored) {
     return (

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import CompanyQualityReport from "../components/CompanyQualityReport";
 import type { CompanyQuality } from "@/lib/company-quality";
 
@@ -9,6 +10,12 @@ export default function StockQualityPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CompanyQuality | null>(null);
+  // 跳转来源页（from 参数），用于「返回」按钮精确回到热榜/收藏列表
+  const [from, setFrom] = useState<string | null>(null);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("from");
+    setFrom(p && p.length > 1 ? p : null);
+  }, []);
 
   async function run(code: string, refresh = false) {
     const t = code.trim();
@@ -39,7 +46,13 @@ export default function StockQualityPage() {
 
   return (
     <main className="page-gutter mx-auto max-w-3xl py-8">
-      <h1 className="text-xl font-semibold text-zinc-100">A 股公司质地打分</h1>
+      <Link
+        href={from ?? "/"}
+        className="inline-flex items-center gap-1 text-sm text-zinc-400 transition-colors hover:text-orange-400"
+      >
+        ← 返回
+      </Link>
+      <h1 className="mt-2 text-xl font-semibold text-zinc-100">A 股公司质地打分</h1>
       <p className="mt-1 text-sm text-zinc-400">
         基于同花顺金融数据（fuyao API + 10jqka F10），按「七维质地框架」自动评分，输出格式与「公司质地打分」技能一致。
       </p>
