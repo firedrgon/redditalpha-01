@@ -34,24 +34,34 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
   const dimByKey = Object.fromEntries(data.dimensions.map((d) => [d.key, d])) as Record<string, QualityDimension>;
   const v = data.valuation;
 
+  const valuationRows: { label: string; value: string }[] = [
+    { label: "现价", value: `${fmt(v.price)}${v.changePct != null ? (n => (n >= 0 ? ` +${n.toFixed(2)}%` : ` ${n.toFixed(2)}%`))(v.changePct) : ""}` },
+    { label: "PE(静)", value: fmt(v.peStatic) },
+    { label: "PB", value: fmt(v.pb) },
+    { label: "股息率", value: fmtPct(v.dividendYield) },
+    { label: "总市值", value: fmtYi(v.marketCap) },
+    { label: "PB 历史分位", value: v.pbPercentile == null ? "—" : `${v.pbPercentile}%` },
+  ];
+
   return (
-    <div className="mx-auto max-w-3xl">
-      {/* 头部 */}
+    <div className="w-full space-y-4">
+      {/* 头部卡片 */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
-        <div className="flex items-center gap-2 text-orange-400">
-          <span>🔖</span>
-          <span className="text-sm font-semibold tracking-wide">公司质地打分</span>
-          <span className="text-zinc-500">｜</span>
-          <span className="text-zinc-100">
-            {data.name}
-            <span className="ml-1 text-xs text-zinc-500">{data.ticker}</span>
-          </span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-orange-400">
+            <span>🔖</span>
+            <span className="text-sm font-semibold tracking-wide">公司质地打分</span>
+          </div>
+          <div className="flex items-baseline gap-2 text-right">
+            <span className="text-base font-semibold text-zinc-100">{data.name}</span>
+            <span className="text-xs text-zinc-500">{data.ticker}</span>
+          </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-end gap-4">
-          <div className="flex items-baseline gap-2">
-            <span className="text-5xl font-bold text-zinc-50">{data.totalScore}</span>
-            <span className="text-lg text-zinc-500">/100</span>
+        <div className="mt-4 flex flex-wrap items-end gap-x-4 gap-y-3">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-5xl font-bold leading-none text-zinc-50">{data.totalScore}</span>
+            <span className="text-base text-zinc-500">/ 100</span>
           </div>
           <span
             className={`rounded-full border px-3 py-1 text-sm font-medium ${scoreColor(data.totalScore)}`}
@@ -60,8 +70,8 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
           </span>
         </div>
 
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-zinc-800/40 px-3 py-2 text-sm text-zinc-200">
-          <span>📝</span>
+        <div className="mt-4 flex items-start gap-2 rounded-lg bg-zinc-800/40 px-3 py-2 text-sm text-zinc-200">
+          <span className="mt-0.5 shrink-0">📝</span>
           <span>
             <span className="text-zinc-400">一句话结论：</span>
             {data.oneLiner}
@@ -69,27 +79,22 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
         </div>
       </div>
 
-      {/* 五维卡片 */}
-      <div className="mt-4 space-y-3">
+      {/* 五维卡片：2 列网格 */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {DIMS.map(({ key, emoji }) => {
           const d = dimByKey[key];
           if (!d) return null;
           return (
-            <div key={key} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{emoji}</span>
+            <div key={key} className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 text-lg">{emoji}</span>
                   <span className="font-semibold text-zinc-100">{d.title}</span>
-                  {d.dataLimited && (
-                    <span className="rounded bg-zinc-700/60 px-1.5 py-0.5 text-[10px] text-zinc-300">
-                      数据有限·代理评估
-                    </span>
-                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-500">{d.level}</span>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="text-[11px] text-zinc-500">{d.level}</span>
                   <span
-                    className={`min-w-[3rem] rounded-lg border px-2 py-1 text-center text-sm font-bold ${scoreColor(d.score)}`}
+                    className={`rounded-lg border px-2.5 py-0.5 text-center text-sm font-bold ${scoreColor(d.score)}`}
                   >
                     {d.score}
                   </span>
@@ -98,18 +103,23 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
               <ul className="mt-2 space-y-1 text-sm text-zinc-300">
                 {d.bullets.map((b, i) => (
                   <li key={i} className="flex gap-2">
-                    <span className="text-zinc-600">•</span>
+                    <span className="shrink-0 text-zinc-600">•</span>
                     <span>{b}</span>
                   </li>
                 ))}
               </ul>
+              {d.dataLimited && (
+                <span className="mt-2 self-start rounded bg-zinc-700/60 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                  数据有限·代理评估
+                </span>
+              )}
             </div>
           );
         })}
       </div>
 
       {/* 主要扣分项 */}
-      <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="mb-2 flex items-center gap-2 font-semibold text-zinc-100">
           <span className="text-lg">6️⃣</span>
           <span>主要扣分项</span>
@@ -117,7 +127,7 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
         <ul className="space-y-1 text-sm text-zinc-300">
           {data.deductions.map((d, i) => (
             <li key={i} className="flex gap-2">
-              <span className="text-red-400/70">•</span>
+              <span className="shrink-0 text-red-400/70">•</span>
               <span>{d}</span>
             </li>
           ))}
@@ -125,24 +135,24 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
       </div>
 
       {/* 估值 / 好公司≠好股票 */}
-      <div className="mt-3 rounded-2xl border border-orange-500/30 bg-orange-500/5 p-4">
-        <div className="mb-2 flex items-center gap-2 font-semibold text-orange-300">
+      <div className="rounded-2xl border border-orange-500/30 bg-orange-500/5 p-4">
+        <div className="mb-3 flex items-center gap-2 font-semibold text-orange-300">
           <span>⚠️</span>
           <span>好公司 ≠ 好股票</span>
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-zinc-300 sm:grid-cols-3">
-          <div>现价：<span className="text-zinc-100">{fmt(v.price)}</span>{v.changePct != null && <span dangerouslySetInnerHTML={{ __html: fmtChange(v.changePct) }} />}</div>
-          <div>PE(静)：<span className="text-zinc-100">{fmt(v.peStatic)}</span></div>
-          <div>PB：<span className="text-zinc-100">{fmt(v.pb)}</span></div>
-          <div>股息率：<span className="text-zinc-100">{fmtPct(v.dividendYield)}</span></div>
-          <div>总市值：<span className="text-zinc-100">{fmtYi(v.marketCap)}</span></div>
-          <div>PB 历史分位：<span className="text-zinc-100">{v.pbPercentile == null ? "—" : `${v.pbPercentile}%`}</span></div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+          {valuationRows.map((r) => (
+            <div key={r.label} className="flex items-baseline gap-2">
+              <span className="shrink-0 text-zinc-500">{r.label}</span>
+              <span className="min-w-0 truncate text-zinc-100">{r.value}</span>
+            </div>
+          ))}
         </div>
         <p className="mt-3 text-sm text-orange-200/90">{v.verdict}</p>
       </div>
 
       {/* 脚注 */}
-      <div className="mt-3 text-center text-xs text-zinc-500">
+      <div className="text-center text-xs text-zinc-500">
         数据来源：{data.dataSource} ｜ 抓取时间：{new Date(data.fetchedAt).toLocaleString("zh-CN")}
         {data.warnings.length > 0 && (
           <div className="mt-1 text-amber-500/80">提示：{data.warnings.join("；")}</div>
