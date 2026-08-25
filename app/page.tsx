@@ -9,6 +9,9 @@ import PositionsPanel from "@/app/components/PositionsPanel";
 import EtfTrendPanel, { type EtfTab } from "@/app/components/EtfTrendPanel";
 import AuthMenu from "@/app/components/AuthMenu";
 import QualityScoreLink from "@/app/components/QualityScoreLink";
+import { useQualityStatusMap } from "@/lib/quality-store";
+import { cacheKeyOf } from "@/lib/quality-ticker";
+import type { QualityStatusMap } from "@/lib/quality-store";
 import Link from "next/link";
 
 const SUBREDDITS = [
@@ -757,6 +760,7 @@ function FavoriteCard({
   onRequestRefreshSnapshot,
   quote,
   hasReport,
+  qualityStatus,
 }: {
   item: FavoriteItem;
   onRemove: (ticker: string) => void;
@@ -767,6 +771,7 @@ function FavoriteCard({
   onRequestRefreshSnapshot?: (ticker: string) => void;
   quote?: Quote;
   hasReport?: boolean;
+  qualityStatus?: QualityStatusMap;
 }) {
   // A 股标题跳东方财富个股页，美股跳 Reddit 搜索
   const redditUrl = isCNTicker(item.ticker)
@@ -927,7 +932,7 @@ function FavoriteCard({
               </Link>
             )}
             {/* 公司质地打分入口：已打分显示评分徽章，未打分显示「去打分」 */}
-            <QualityScoreLink ticker={item.ticker} />
+            <QualityScoreLink ticker={item.ticker} status={qualityStatus?.[cacheKeyOf(item.ticker) ?? ""]} />
           </>
         ) : (
           <>
@@ -3855,6 +3860,17 @@ export default function Home() {
 
   // 收藏状态（服务端按登录用户持久化）
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+
+  // 批量查询已打分的 A股（供质地打分入口徽章），缓存命中服务端 CompanyQualityCache
+  const qualityTickers = useMemo(
+    () =>
+      (favorites || [])
+        .filter((f) => f.assetType !== "ETF")
+        .map((f) => cacheKeyOf(f.ticker))
+        .filter((k): k is string => !!k),
+    [favorites]
+  );
+  const qualityMap = useQualityStatusMap(qualityTickers);
   // 美股研报存在性映射：ticker(大写) -> generatedAt；用于收藏列表「研报/生成研报」按钮
   const [reportsExist, setReportsExist] = useState<Record<string, string>>({});
   const [manualTicker, setManualTicker] = useState("");
@@ -5034,6 +5050,7 @@ export default function Home() {
                           onRequestRefreshSnapshot={requestRefreshSnapshot}
                           quote={quotes[item.ticker.toUpperCase()]}
                           hasReport={!!reportsExist[item.ticker.toUpperCase()]}
+                          qualityStatus={qualityMap}
                         />
                       ))}
                   </div>

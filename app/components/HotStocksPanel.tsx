@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useQualityStatusMap } from "@/lib/quality-store";
+import { cacheKeyOf } from "@/lib/quality-ticker";
+import type { QualityStatus } from "@/lib/db/company-quality-cache";
 import QualityScoreLink from "./QualityScoreLink";
 
 interface HotStock {
@@ -157,11 +160,13 @@ function HotStockCard({
   isFavorited,
   favBusy,
   onToggleFavorite,
+  qualityStatus,
 }: {
   stock: HotStock;
   isFavorited: boolean;
   favBusy: boolean;
   onToggleFavorite: () => void;
+  qualityStatus?: QualityStatus;
 }) {
   const tags = stock.conceptTags
     ? stock.conceptTags.split(",").filter(Boolean)
@@ -298,7 +303,7 @@ function HotStockCard({
               </span>
             )}
             {/* 公司质地打分入口：已打分显示评分徽章，未打分显示「去打分」 */}
-            <QualityScoreLink ticker={tickerOf(stock)} />
+            <QualityScoreLink ticker={tickerOf(stock)} status={qualityStatus} />
           </div>
         </div>
 
@@ -376,6 +381,13 @@ export default function HotStocksPanel({
   // 自包含模式（未传入宿主收藏回调）下的本地收藏集合
   const [localFav, setLocalFav] = useState<Set<string>>(new Set());
   const [favBusy, setFavBusy] = useState<Set<string>>(new Set());
+
+  // 批量查询已打分的 A股（供质地打分入口徽章），缓存命中服务端 CompanyQualityCache
+  const qualityTickers = useMemo(
+    () => stocks.map((s) => cacheKeyOf(tickerOf(s))).filter((k): k is string => !!k),
+    [stocks]
+  );
+  const qualityMap = useQualityStatusMap(qualityTickers);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -665,6 +677,12 @@ export default function HotStocksPanel({
               isFavorited={favStateOf(stock)}
               favBusy={favBusy.has(tickerOf(stock).toUpperCase())}
               onToggleFavorite={() => handleToggleFavorite(stock)}
+              qualityStatus={
+                (() => {
+                  const tk = cacheKeyOf(tickerOf(stock));
+                  return tk ? qualityMap[tk] : undefined;
+                })()
+              }
             />
           ))}
         </div>

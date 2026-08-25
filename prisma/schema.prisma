@@ -306,6 +306,22 @@ model EtfEvaluateCache {
   @@index([code])
 }
 
+/// A股「公司质地打分」结果缓存（对应 /api/company-quality 响应体）。
+/// 按 ticker（6 位裸码，已归一化）唯一：评分由实时抓同花顺 + 纯函数评分组成，较耗时，
+/// 落库后跨 serverless 实例共享、列表徽章可直接读、页面优先显示历史 + 支持重新分析。
+model CompanyQualityCache {
+  id         String   @id @default(cuid())
+  ticker     String   @unique
+  name       String?
+  dataJson   String
+  totalScore Int?
+  level      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([ticker])
+}
+
 /// Reddit 热门股票每日快照（ApeWisdom 数据源，盘前抓取一次，Top 100）。
 /// 按 date+ticker 唯一，存储前清空旧数据，仅保留最新一天。
 model RedditHotStock {

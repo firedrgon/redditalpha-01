@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  getQualityScore,
-  QUALITY_SCORES_EVENT,
-  type QualityScoreEntry,
-} from "@/lib/quality-store";
+import type { QualityStatus } from "@/lib/db/company-quality-cache";
 
-/** 评分等级 → 徽章配色（涨红跌绿惯例不适用，这里按质地等级语义着色） */
+/** 评分等级 → 徽章配色（按质地等级语义着色，不套用涨跌红绿惯例） */
 function badgeClass(level: string): string {
   switch (level) {
     case "优质":
@@ -24,32 +19,30 @@ function badgeClass(level: string): string {
 
 /**
  * 在 A股热榜 / 收藏卡片上展示「公司质地打分」入口：
- * - 已打分 → 评分徽章（质地 59·中性），点击查看详情
- * - 未打分 → 「去打分」按钮，点击跳转去打分
- * 自包含：自行从 localStorage 读取 + 监听更新事件，父组件只需传 ticker。
+ * - 已打分（status.scored）→ 评分徽章（质地 59·中性），点击查看详情
+ * - 未打分 / 无状态 → 「去打分」按钮，点击跳转去打分
+ *
+ * 受控组件：status 由父组件批量查询 CompanyQualityCache 后传入（替代旧 localStorage 方案）。
  */
-export default function QualityScoreLink({ ticker }: { ticker: string }) {
-  const [entry, setEntry] = useState<QualityScoreEntry | null>(null);
-
-  useEffect(() => {
-    const sync = () => setEntry(getQualityScore(ticker));
-    sync();
-    window.addEventListener(QUALITY_SCORES_EVENT, sync);
-    return () => window.removeEventListener(QUALITY_SCORES_EVENT, sync);
-  }, [ticker]);
-
+export default function QualityScoreLink({
+  ticker,
+  status,
+}: {
+  ticker: string;
+  status?: QualityStatus | null;
+}) {
   const href = `/stock-quality?ticker=${encodeURIComponent(ticker)}`;
 
-  if (entry) {
+  if (status?.scored) {
     return (
       <Link
         href={href}
         className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-all hover:opacity-80 ${badgeClass(
-          entry.level
+          status.level ?? ""
         )}`}
-        title={`公司质地 ${entry.totalScore} 分（${entry.level}）· 点击查看详情`}
+        title={`公司质地 ${status.totalScore} 分（${status.level}）· 点击查看详情`}
       >
-        质地 {entry.totalScore}·{entry.level}
+        质地 {status.totalScore}·{status.level}
       </Link>
     );
   }

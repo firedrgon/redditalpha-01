@@ -92,6 +92,33 @@ export async function GET() {
     results.push(`❌ EtfEvaluateCache 表创建失败: ${msg}`);
   }
 
+  // 5. 确保 CompanyQualityCache 表存在（A股质地打分结果缓存）
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "CompanyQualityCache" (
+        "id" TEXT NOT NULL,
+        "ticker" TEXT NOT NULL,
+        "name" TEXT,
+        "dataJson" TEXT NOT NULL,
+        "totalScore" INTEGER,
+        "level" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL,
+        CONSTRAINT "CompanyQualityCache_pkey" PRIMARY KEY ("id")
+      )
+    `);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "CompanyQualityCache_ticker_key" ON "CompanyQualityCache"("ticker")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "CompanyQualityCache_ticker_idx" ON "CompanyQualityCache"("ticker")`
+    );
+    results.push("✅ CompanyQualityCache 表已就绪");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    results.push(`❌ CompanyQualityCache 表创建失败: ${msg}`);
+  }
+
   // 4. 验证：检查表结构
   try {
     const columns = await prisma.$queryRawUnsafe<Array<{ column_name: string }>>(

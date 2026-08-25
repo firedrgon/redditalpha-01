@@ -3,7 +3,6 @@
 import { useState } from "react";
 import CompanyQualityReport from "../components/CompanyQualityReport";
 import type { CompanyQuality } from "@/lib/company-quality";
-import { saveQualityScore } from "@/lib/quality-store";
 
 export default function StockQualityPage() {
   const [ticker, setTicker] = useState("002739");
@@ -11,7 +10,7 @@ export default function StockQualityPage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CompanyQuality | null>(null);
 
-  async function run(code: string) {
+  async function run(code: string, refresh = false) {
     const t = code.trim();
     if (!/^\d{6}(\.(SH|SZ|BJ))?$/i.test(t)) {
       setError("请输入 A 股 6 位代码，如 002739 / 600519.SH");
@@ -20,16 +19,15 @@ export default function StockQualityPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/company-quality?ticker=${encodeURIComponent(t)}`);
+      const url = `/api/company-quality?ticker=${encodeURIComponent(t)}${refresh ? "&refresh=1" : ""}`;
+      const res = await fetch(url);
       const json = await res.json();
       if (!res.ok) {
         setError(json?.error || "请求失败");
         setData(null);
       } else {
-        const q = json as CompanyQuality;
-        setData(q);
-        // 记录「已打分」状态，供热榜/收藏列表展示评分徽章
-        saveQualityScore(q.ticker, q.totalScore, q.level);
+        // 评分结果由 API 自动落库（CompanyQualityCache），列表徽章直接读，无需前端写入
+        setData(json as CompanyQuality);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "网络错误");
@@ -80,9 +78,25 @@ export default function StockQualityPage() {
       )}
 
       {data && !loading && (
-        <div className="mt-6">
-          <CompanyQualityReport data={data} />
-        </div>
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+            <span>
+              {(data as any).cached
+                ? `已缓存分析 · ${new Date((data as any).evaluatedAt).toLocaleString("zh-CN")}`
+                : "本次实时计算"}
+            </span>
+            <button
+              onClick={() => run(data.ticker)}
+              className="rounded-md border border-zinc-700 px-2.5 py-1 text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
+              title="忽略缓存，重新抓取同花顺数据并评分"
+            >
+              重新分析
+            </button>
+          </div>
+          <div className="mt-4">
+            <CompanyQualityReport data={data} />
+          </div>
+        </>
       )}
 
       <p className="mt-8 text-center text-xs text-zinc-600">
