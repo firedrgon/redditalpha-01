@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "首页" },
   { href: "/hot", label: "热榜" },
   { href: "/stock-report", label: "研报" },
+  { href: "/stock-quality", label: "质地打分" },
   {
     href: "/?view=etf",
     label: "ETF主升浪",

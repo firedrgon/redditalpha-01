@@ -28,7 +28,10 @@ export const authConfig = {
       if (
         pathname.startsWith("/login") ||
         pathname.startsWith("/api/auth") ||
-        pathname.startsWith("/api/cron")
+        pathname.startsWith("/api/cron") ||
+        // 只读研究工具：A 股公司质地打分（接口 + 页面均公开）
+        pathname.startsWith("/api/company-quality") ||
+        pathname.startsWith("/stock-quality")
       ) {
         return true;
       }
