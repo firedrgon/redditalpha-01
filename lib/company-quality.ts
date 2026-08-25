@@ -9,13 +9,16 @@
  *      历史 K 线    /api/a-share/prices/historical（用于 PB 历史分位）
  *      分红事件    /api/a-share/corporate-actions/adjustment-factors
  *  - 免费 10jqka F10 实时指标（无需鉴权，需 UA+Referer）：index_source 给 PE(静)/PB/股息率/EPS。
+ *  - 东方财富 F10 主营构成（datacenter-web.eastmoney.com，reportName=RPT_F10_FN_MAINOP，无需鉴权）：
+ *      按行业/产品/地区拆分的主营收入与成本，占比与毛利率本地计算。用于「商业模式与壁垒」维度升级为真实数据。
  *
- * 说明：fuyao API 当前集合未含「公司主营构成 / 行业排名市占率 / 股东明细」端点，
- * 因此 商业模式、行业地位 两个维度按财务特征代理评估并明确标注「数据有限」，
- * 符合技能的降级策略。估值（PE/PB/股息率）由免费 index_source 补齐。
+ * 说明：fuyao API 当前集合未含「公司主营构成 / 行业排名市占率 / 股东明细」端点。
+ * 主营构成已通过东方财富 F10 同源免费接口补齐（数据来自交易所披露，与同花顺 F10 同源等价）；
+ * 行业地位、治理维度仍按财务特征代理评估并标注「数据有限」。估值（PE/PB/股息率）由免费 index_source 补齐。
  */
 
 const THS_BASE = "https://fuyao.aicubes.cn";
+const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
@@ -54,6 +57,56 @@ async function fetchThsIndexSource(code6: string): Promise<any | null> {
     });
     if (!res.ok) return null;
     return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** 东方财富 F10 主营构成：按行业/产品/地区拆分的主营收入与成本，占比与毛利率本地计算 */
+async function fetchMainBusiness(thscode: string): Promise<MainBusinessData | null> {
+  const url =
+    `${EM_DATA}?reportName=RPT_F10_FN_MAINOP` +
+    `&columns=SECUCODE,SECURITY_NAME_ABBR,REPORT_DATE,MAINOP_TYPE,ITEM_NAME,MAIN_BUSINESS_INCOME,MAIN_BUSINESS_COST` +
+    `&filter=${encodeURIComponent(`(SECUCODE="${thscode}")`)}` +
+    `&pageSize=200&sortColumns=REPORT_DATE&sortTypes=-1`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA, Referer: "https://emweb.securities.eastmoney.com/" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as any;
+    const rows: any[] = j?.result?.data ?? [];
+    if (!rows.length) return null;
+    // 接口按 REPORT_DATE 降序，取最新一期
+    const latest = String(rows[0].REPORT_DATE);
+    const periodRows = rows.filter((r) => String(r.REPORT_DATE) === latest);
+    const build = (type: string): MainBusinessItem[] => {
+      const items = periodRows.filter((r) => String(r.MAINOP_TYPE) === type);
+      const totalInc = items.reduce((s, r) => s + (num(r.MAIN_BUSINESS_INCOME) ?? 0), 0);
+      return items
+        .map((r) => {
+          const income = num(r.MAIN_BUSINESS_INCOME) ?? 0;
+          const cost = num(r.MAIN_BUSINESS_COST);
+          const ratio = totalInc > 0 ? (income / totalInc) * 100 : null;
+          const grossMargin =
+            income > 0 && cost != null ? ((income - cost) / income) * 100 : null;
+          return {
+            name: String(r.ITEM_NAME ?? ""),
+            income,
+            ratio,
+            grossMargin,
+          };
+        })
+        .sort((a, b) => (b.income ?? 0) - (a.income ?? 0));
+    };
+    return {
+      reportDate: latest,
+      byProduct: build("2"),
+      byIndustry: build("1"),
+      byArea: build("3"),
+    };
   } catch {
     return null;
   }
@@ -116,6 +169,19 @@ export interface CompanyQualityValuation {
   verdict: string;
 }
 
+export interface MainBusinessItem {
+  name: string;
+  income: number; // 元
+  ratio: number | null; // 占同类总收入比 %
+  grossMargin: number | null; // 毛利率 %
+}
+export interface MainBusinessData {
+  reportDate: string; // 最新报告期 YYYY-MM-DD 00:00:00
+  byProduct: MainBusinessItem[];
+  byIndustry: MainBusinessItem[];
+  byArea: MainBusinessItem[];
+}
+
 export interface CompanyQuality {
   ticker: string;
   name: string;
@@ -126,6 +192,7 @@ export interface CompanyQuality {
   deductions: string[];
   valuation: CompanyQualityValuation;
   warnings: string[];
+  mainBusiness: MainBusinessData | null;
   dataSource: string;
   fetchedAt: string;
 }
@@ -180,6 +247,8 @@ interface RawQualityData {
   marketCap: number | null;
   pbPercentile: number | null;
   warnings: string[];
+  // 东方财富 F10 主营构成
+  mainBusiness: MainBusinessData | null;
 }
 
 /* ----------------------------- 数据抓取 ----------------------------- */
@@ -255,7 +324,7 @@ async function fetchRaw(thscode: string): Promise<RawQualityData> {
   const threeYearsAgo = new Date();
   threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3);
 
-  const [snap, income, balance, cash, idxSrc, corp] = await Promise.allSettled([
+  const [snap, income, balance, cash, idxSrc, corp, mainBiz] = await Promise.allSettled([
     thsGet<{ data: { item: SnapItem[] } }>(`/api/a-share/prices/snapshot`, {
       thscodes: thscode,
     }),
@@ -279,6 +348,7 @@ async function fetchRaw(thscode: string): Promise<RawQualityData> {
       `/api/a-share/corporate-actions/adjustment-factors`,
       { thscode, from: ymd(threeYearsAgo), to: ymd(new Date()) }
     ),
+    fetchMainBusiness(thscode),
   ]);
 
   // 行情快照
@@ -417,6 +487,7 @@ async function fetchRaw(thscode: string): Promise<RawQualityData> {
     marketCap,
     pbPercentile,
     warnings,
+    mainBusiness: mainBiz.status === "fulfilled" ? mainBiz.value ?? null : null,
   };
 }
 
@@ -455,6 +526,10 @@ function wan(n: number | null): string {
 function yi(n: number | null): string {
   if (n == null) return "—";
   return `${(n / 1e8).toFixed(2)} 亿元`;
+}
+/** 直接格式化 0-100 量纲的百分数（主营占比/毛利率已为百分比） */
+function pf(n: number | null): string {
+  return n == null ? "—" : `${n.toFixed(1)}%`;
 }
 
 function scoreFinancial(d: RawQualityData): QualityDimension {
@@ -540,20 +615,51 @@ function scoreGrowth(d: RawQualityData): QualityDimension {
   return { key: "growth", title: "成长质量", score: clamp(s), level: levelOf(clamp(s)), bullets };
 }
 
-/** 数据有限维度：按财务特征代理评分并明确标注 */
+/** 商业模式与壁垒：优先用东方财富 F10 真实主营构成，缺失时回退财务特征代理 */
 function scoreBusinessModel(d: RawQualityData): QualityDimension {
-  let s = 58;
+  let s = 56;
   const bullets: string[] = [];
-  bullets.push("详细主营构成/商业模式数据需同花顺 F10 主营构成接口（当前 API 集未直接提供），本维度按财务特征代理评估，仅供参考。");
-  if (d.grossMargin != null) {
-    if (d.grossMargin >= 40) { s += 12; bullets.push(`毛利率 ${d.grossMargin.toFixed(1)}%，具备一定产品定价权/壁垒`); }
-    else if (d.grossMargin >= 25) { s += 4; bullets.push(`毛利率 ${d.grossMargin.toFixed(1)}%（中等）`); }
-    else { s -= 6; bullets.push(`毛利率 ${d.grossMargin.toFixed(1)}% 偏低，生意偏同质化/重资产`); }
+  const mb = d.mainBusiness;
+  const hasReal =
+    mb && (mb.byProduct.length > 0 || mb.byIndustry.length > 0 || mb.byArea.length > 0);
+
+  if (!hasReal) {
+    // 真实数据缺失 → 回退代理，明确标注
+    bullets.push("东方财富 F10 主营构成未取到，本维度按财务特征代理评估，仅供参考。");
+    if (d.grossMargin != null) {
+      if (d.grossMargin >= 40) { s += 12; bullets.push(`毛利率 ${d.grossMargin.toFixed(1)}%，具备一定产品定价权/壁垒`); }
+      else if (d.grossMargin >= 25) { s += 4; bullets.push(`毛利率 ${d.grossMargin.toFixed(1)}%（中等）`); }
+      else { s -= 6; bullets.push(`毛利率 ${d.grossMargin.toFixed(1)}% 偏低，生意偏同质化/重资产`); }
+    }
+    if (d.netMargin != null && d.netMargin > 0) s += 5;
+    if (d.debtRatio != null && d.debtRatio > 70) s -= 8;
+    if (d.revenue != null) bullets.push(`年营收规模 ${yi(d.revenue)}，业务体量${d.revenue > 1e10 ? "大" : d.revenue > 1e9 ? "中等" : "偏小"}`);
+    return { key: "business", title: "商业模式与壁垒", score: clamp(s), level: levelOf(clamp(s)), bullets, dataLimited: true };
   }
-  if (d.netMargin != null && d.netMargin > 0) s += 5;
-  if (d.debtRatio != null && d.debtRatio > 70) s -= 8;
+
+  bullets.push(`主营构成（${mb!.reportDate.slice(0, 10)} 报告期，来源：东方财富 F10）`);
+  const top = mb!.byProduct[0] ?? mb!.byIndustry[0] ?? mb!.byArea[0];
+  if (top) {
+    bullets.push(`第一大业务「${top.name}」收入 ${yi(top.income)}，占主营 ${pf(top.ratio)}，毛利率 ${pf(top.grossMargin)}`);
+    // 业务集中度
+    if (top.ratio != null) {
+      if (top.ratio >= 60) { s += 8; bullets.push("业务高度聚焦，主业清晰但需关注单一业务集中度风险"); }
+      else if (top.ratio >= 35) { s += 6; }
+      else { s += 4; bullets.push("业务较多元，单一行业风险分散"); }
+    }
+    // 核心业务毛利率壁垒
+    if (top.grossMargin != null) {
+      if (top.grossMargin >= 50) { s += 12; bullets.push("核心业务毛利率高，具备定价权/壁垒"); }
+      else if (top.grossMargin >= 30) { s += 6; }
+      else if (top.grossMargin >= 15) { s += 0; bullets.push("核心业务毛利率中等，偏制造/贸易属性"); }
+      else { s -= 6; bullets.push("核心业务毛利率偏低，生意偏同质化/重资产"); }
+    }
+  }
   if (d.revenue != null) bullets.push(`年营收规模 ${yi(d.revenue)}，业务体量${d.revenue > 1e10 ? "大" : d.revenue > 1e9 ? "中等" : "偏小"}`);
-  return { key: "business", title: "商业模式与壁垒", score: clamp(s), level: levelOf(clamp(s)), bullets, dataLimited: true };
+  const lines = mb!.byProduct.length + mb!.byIndustry.length + mb!.byArea.length;
+  if (mb!.byProduct.length > 1) bullets.push(`产品维度共披露 ${mb!.byProduct.length} 条业务线（详见下方主营构成表）`);
+  else if (lines > 2) bullets.push("主营构成已按行业/地区拆分披露（详见下方主营构成表）");
+  return { key: "business", title: "商业模式与壁垒", score: clamp(s), level: levelOf(clamp(s)), bullets };
 }
 
 function scoreIndustry(d: RawQualityData): QualityDimension {
@@ -689,7 +795,8 @@ export async function fetchCompanyQuality(input: string): Promise<CompanyQuality
     deductions,
     valuation,
     warnings: raw.warnings,
-    dataSource: "同花顺 fuyao API + 10jqka F10",
+    mainBusiness: raw.mainBusiness,
+    dataSource: "同花顺 fuyao API + 10jqka F10 + 东方财富 F10 主营构成",
     fetchedAt: new Date().toISOString(),
   };
 }

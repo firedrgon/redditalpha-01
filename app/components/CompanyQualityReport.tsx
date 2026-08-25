@@ -1,4 +1,4 @@
-import type { CompanyQuality, QualityDimension } from "@/lib/company-quality";
+import type { CompanyQuality, QualityDimension, MainBusinessItem } from "@/lib/company-quality";
 
 function scoreColor(score: number): string {
   if (score >= 85) return "text-emerald-400 bg-emerald-500/10 border-emerald-500/30";
@@ -28,6 +28,43 @@ function fmtChange(n: number | null): string {
   if (n == null) return "";
   const c = n >= 0 ? "text-emerald-400" : "text-red-400";
   return ` <span class="${c}">${n >= 0 ? "+" : ""}${n.toFixed(2)}%</span>`;
+}
+
+function MainBizTable({ title, items }: { title: string; items: MainBusinessItem[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="mb-1 text-xs font-medium text-zinc-400">{title}</div>
+      <div className="overflow-hidden rounded-lg border border-zinc-800">
+        <table className="w-full text-sm">
+          <thead className="bg-zinc-800/40 text-[11px] text-zinc-500">
+            <tr>
+              <th className="px-3 py-1.5 text-left font-normal">名称</th>
+              <th className="px-3 py-1.5 text-right font-normal">收入</th>
+              <th className="px-3 py-1.5 text-right font-normal">占比</th>
+              <th className="px-3 py-1.5 text-right font-normal">毛利率</th>
+            </tr>
+          </thead>
+          <tbody className="text-zinc-300">
+            {items.map((it, i) => (
+              <tr key={i} className="border-t border-zinc-800">
+                <td className="max-w-[180px] truncate px-3 py-1.5" title={it.name}>
+                  {it.name}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{fmtYi(it.income)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {it.ratio == null ? "—" : `${it.ratio.toFixed(1)}%`}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {it.grossMargin == null ? "—" : `${it.grossMargin.toFixed(1)}%`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 export default function CompanyQualityReport({ data }: { data: CompanyQuality }) {
@@ -117,6 +154,25 @@ export default function CompanyQualityReport({ data }: { data: CompanyQuality })
           );
         })}
       </div>
+
+      {/* 主营构成（东方财富 F10） */}
+      {data.mainBusiness &&
+        (data.mainBusiness.byProduct.length > 0 ||
+          data.mainBusiness.byIndustry.length > 0 ||
+          data.mainBusiness.byArea.length > 0) && (
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="mb-3 flex items-center gap-2 font-semibold text-zinc-100">
+              <span className="text-lg">🏭</span>
+              <span>主营构成</span>
+              <span className="text-xs font-normal text-zinc-500">
+                东方财富 F10 · {data.mainBusiness.reportDate.slice(0, 10)}
+              </span>
+            </div>
+            <MainBizTable title="按产品" items={data.mainBusiness.byProduct} />
+            <MainBizTable title="按行业" items={data.mainBusiness.byIndustry} />
+            <MainBizTable title="按地区" items={data.mainBusiness.byArea} />
+          </div>
+        )}
 
       {/* 主要扣分项 */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
