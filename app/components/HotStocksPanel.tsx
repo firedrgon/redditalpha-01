@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import QualityScoreLink from "./QualityScoreLink";
 
 interface HotStock {
   id: string;
@@ -296,6 +297,8 @@ function HotStockCard({
                 )}
               </span>
             )}
+            {/* 公司质地打分入口：已打分显示评分徽章，未打分显示「去打分」 */}
+            <QualityScoreLink ticker={tickerOf(stock)} />
           </div>
         </div>
 

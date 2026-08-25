@@ -8,6 +8,7 @@ import RedditHotPanel from "@/app/components/RedditHotPanel";
 import PositionsPanel from "@/app/components/PositionsPanel";
 import EtfTrendPanel, { type EtfTab } from "@/app/components/EtfTrendPanel";
 import AuthMenu from "@/app/components/AuthMenu";
+import QualityScoreLink from "@/app/components/QualityScoreLink";
 import Link from "next/link";
 
 const SUBREDDITS = [
@@ -925,6 +926,8 @@ function FavoriteCard({
                 生成研报
               </Link>
             )}
+            {/* 公司质地打分入口：已打分显示评分徽章，未打分显示「去打分」 */}
+            <QualityScoreLink ticker={item.ticker} />
           </>
         ) : (
           <>

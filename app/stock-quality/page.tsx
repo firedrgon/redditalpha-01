@@ -3,6 +3,7 @@
 import { useState } from "react";
 import CompanyQualityReport from "../components/CompanyQualityReport";
 import type { CompanyQuality } from "@/lib/company-quality";
+import { saveQualityScore } from "@/lib/quality-store";
 
 export default function StockQualityPage() {
   const [ticker, setTicker] = useState("002739");
@@ -25,7 +26,10 @@ export default function StockQualityPage() {
         setError(json?.error || "请求失败");
         setData(null);
       } else {
-        setData(json as CompanyQuality);
+        const q = json as CompanyQuality;
+        setData(q);
+        // 记录「已打分」状态，供热榜/收藏列表展示评分徽章
+        saveQualityScore(q.ticker, q.totalScore, q.level);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "网络错误");
