@@ -41,10 +41,12 @@ export default function QualityScoreLink({
     return (
       <Link
         href={href}
+        target="_blank"
+        rel="noopener noreferrer"
         className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-all hover:opacity-80 ${badgeClass(
           status.level ?? ""
         )}`}
-        title={`公司质地 ${status.totalScore} 分（${status.level}）· 点击查看详情`}
+        title={`公司质地 ${status.totalScore} 分（${status.level}）· 新标签页打开`}
       >
         质地 {status.totalScore}·{status.level}
       </Link>
@@ -54,8 +56,10 @@ export default function QualityScoreLink({
   return (
     <Link
       href={href}
+      target="_blank"
+      rel="noopener noreferrer"
       className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-500/50 hover:text-orange-400"
-      title="对公司做质地打分"
+      title="对公司做质地打分（新标签页打开）"
     >
       去打分
     </Link>
