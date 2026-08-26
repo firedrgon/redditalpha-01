@@ -3851,7 +3851,7 @@ export default function Home() {
   const subMenuRef = useRef<HTMLDivElement>(null);
   const [etfMenuOpen, setEtfMenuOpen] = useState(false);
   const etfMenuRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "reddit" | "positions" | "etf">("subreddit");
+  const [view, setView] = useState<"subreddit" | "favorites" | "hot" | "reddit" | "positions" | "etf">("favorites");
   const [etfTab, setEtfTab] = useState<EtfTab>("pullback");
   const [data, setData] = useState<Record<string, SubredditData>>({});
   const [loading, setLoading] = useState(true);
@@ -3936,14 +3936,24 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // 支持从其它页面（SiteHeader 的 ETF 链接）深链进入：/?view=etf&tab=...
+  // 深链进入：/?view=xxx 切换首页内视图；未指定 view 时默认落到收藏页（favorites）
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    if (p.get("view") === "etf") {
+    const v = p.get("view");
+    if (v === "etf") {
       setView("etf");
       const t = p.get("tab");
       setEtfTab(t === "newPool" ? "newPool" : "pullback");
+    } else if (
+      v === "subreddit" ||
+      v === "favorites" ||
+      v === "hot" ||
+      v === "reddit" ||
+      v === "positions"
+    ) {
+      setView(v);
     }
+    // 无 view 参数：保持 useState 默认值（favorites）
   }, []);
 
   // 初始化：从后端 API 读取收藏（公开数据，所有访客共享）
